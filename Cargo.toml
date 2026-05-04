@@ -1,0 +1,29 @@
+[package]
+name = "guix-p2p-substitute"
+version = "0.1.0"
+edition = "2024"
+description = "P2P binary substitute distribution for GNU Guix"
+
+[dependencies]
+libp2p = { version = "0.56", features = ["full", "kad", "quic", "tcp", "dns", "request-response", "mdns", "identify", "macros", "autonat", "relay"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+ed25519-dalek = "2"
+sha2 = "0.10"
+reqwest = { version = "0.12", features = ["rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+bitvec = "1"
+anyhow = "1"
+base64 = "0.22"
+hex = "0.4"
+serde_bytes = "0.11"
+futures = "0.3"
+libc = "0.2"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
