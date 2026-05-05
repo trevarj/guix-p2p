@@ -64,7 +64,9 @@ async fn block_handshake_and_transfer() {
         for bd in data {
             let expected = &block_hashes[bd.index as usize];
             let actual = Sha256::digest(&bd.data);
-            if actual.as_slice() == expected.as_slice() { got_block = true; }
+            if actual.as_slice() == expected.as_slice() {
+                got_block = true;
+            }
         }
     }
     assert!(got_block, "received block should pass hash verification");
@@ -75,9 +77,11 @@ async fn full_nar_download() {
     init();
     let (nar_data, nar_hash) = make_nar(0xcc, 200_000);
     let nar_size = nar_data.len() as u64;
-    let block_info =
-        guix_p2p_substitute::swarm::block::BlockInfo::from_file_size(nar_size, guix_p2p_e2e::BLOCK_SIZE)
-            .with_hashes(&nar_data);
+    let block_info = guix_p2p_substitute::swarm::block::BlockInfo::from_file_size(
+        nar_size,
+        guix_p2p_e2e::BLOCK_SIZE,
+    )
+    .with_hashes(&nar_data);
     let seeder = TestNode::seeder(&nar_hash, nar_data.clone()).await.unwrap();
     let seeder_pid = seeder.pid();
     let mut downloader = TestNode::node(seeder.addr()).await.unwrap();
@@ -85,7 +89,8 @@ async fn full_nar_download() {
 
     let nar_hash_bytes = hex::decode(&nar_hash).unwrap();
     downloader.send_req(seeder_pid, BlockRequest::Handshake { nar_hash: nar_hash_bytes });
-    let resp = downloader.wait_block_resp(seeder_pid, Duration::from_secs(20)).await.expect("handshake");
+    let resp =
+        downloader.wait_block_resp(seeder_pid, Duration::from_secs(20)).await.expect("handshake");
     match resp {
         BlockResponse::HandshakeReply { blocks_available, .. } => {
             assert_eq!(blocks_available.len(), block_info.block_count as usize);
@@ -93,10 +98,14 @@ async fn full_nar_download() {
         other => panic!("unexpected: {:?}", other),
     }
 
-    let total = block_info.block_count as u32;
+    let total = block_info.block_count;
     downloader.send_req(seeder_pid, BlockRequest::GetBlocks { indices: (0u32..total).collect() });
-    let resp = downloader.wait_block_resp(seeder_pid, Duration::from_secs(20)).await.expect("block data");
-    let received = match resp { BlockResponse::Blocks { data } => data, other => panic!("{:?}", other) };
+    let resp =
+        downloader.wait_block_resp(seeder_pid, Duration::from_secs(20)).await.expect("block data");
+    let received = match resp {
+        BlockResponse::Blocks { data } => data,
+        other => panic!("{:?}", other),
+    };
 
     let count = block_info.block_count as usize;
     assert_eq!(received.len(), count, "should receive all {count} blocks");

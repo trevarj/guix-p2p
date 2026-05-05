@@ -13,7 +13,7 @@ use anyhow::Context;
 use futures::StreamExt;
 use guix_p2p_substitute::{
     behaviour::{GuixP2PBehaviour, GuixP2PEvent, create_swarm_behaviour},
-    channel::{SwarmCommand, SwarmNotification},
+    channel::SwarmCommand,
     connection::{ConnectionConfig, ConnectionManager},
     dashboard::{self, BuildRegistry, DashboardEvent, ObservedBuild},
     dht::{self, ProviderCache},
@@ -30,7 +30,7 @@ use libp2p::{
     swarm::SwarmEvent,
 };
 use sha2::Digest;
-use tokio::sync::{oneshot, mpsc::unbounded_channel};
+use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 const DASHBOARD_PORT: u16 = 3031;
@@ -86,8 +86,7 @@ async fn main() -> anyhow::Result<()> {
     let sblocks = blocks.clone();
     tokio::spawn(async { run_seeder(sswarm, sblocks, saddr_tx).await });
 
-    let seeder_addr =
-        saddr_rx.await.context("seeder did not report listen address")?;
+    let seeder_addr = saddr_rx.await.context("seeder did not report listen address")?;
     tracing::info!("seeder  pid={}  addr={}", spid, seeder_addr);
 
     // ── Step 2: downloader / dashboard node ─────────────────────────
@@ -98,9 +97,7 @@ async fn main() -> anyhow::Result<()> {
 
     let provider_cache = dht::create_provider_cache();
     let rep = Arc::new(std::sync::Mutex::new(ReputationTracker::new(5)));
-    let conn = Arc::new(std::sync::Mutex::new(ConnectionManager::new(
-        ConnectionConfig::default(),
-    )));
+    let conn = Arc::new(std::sync::Mutex::new(ConnectionManager::new(ConnectionConfig::default())));
     let build_reg: BuildRegistry = Arc::new(std::sync::Mutex::new(HashMap::new()));
     let (event_tx, _) = tokio::sync::broadcast::channel::<DashboardEvent>(256);
     let (daddr_tx, daddr_rx) = oneshot::channel::<Multiaddr>();
@@ -114,15 +111,11 @@ async fn main() -> anyhow::Result<()> {
     let c_evt = event_tx.clone();
 
     tokio::spawn(async move {
-        run_downloader(
-            dswarm, c_cache, c_rep, c_conn, c_evt, daddr_tx,
-            seeder_addr, cmd_stream,
-        )
-        .await;
+        run_downloader(dswarm, c_cache, c_rep, c_conn, c_evt, daddr_tx, seeder_addr, cmd_stream)
+            .await;
     });
 
-    let dash_addr =
-        daddr_rx.await.context("download node did not report listen address")?;
+    let dash_addr = daddr_rx.await.context("download node did not report listen address")?;
     tracing::info!("dash    pid={}  addr={}", dpid, dash_addr);
 
     // Populate build registry
@@ -130,10 +123,7 @@ async fn main() -> anyhow::Result<()> {
         nar_hash.clone(),
         ObservedBuild {
             nar_hash: nar_hash.clone(),
-            store_path: Some(format!(
-                "/gnu/store/{}--demo-pkg-1.0",
-                &nar_hash[..32]
-            )),
+            store_path: Some(format!("/gnu/store/{}--demo-pkg-1.0", &nar_hash[..32])),
             nar_size: Some(nar_size),
             references: vec!["/gnu/store/abc-ref-lib".into()],
             deriver: Some("/gnu/store/abc-demo.drv".into()),
@@ -159,10 +149,7 @@ async fn main() -> anyhow::Result<()> {
         dashboard::serve(dash_state, DASHBOARD_PORT, "127.0.0.1").await;
     });
 
-    tracing::info!(
-        "dashboard on http://127.0.0.1:{}",
-        DASHBOARD_PORT,
-    );
+    tracing::info!("dashboard on http://127.0.0.1:{}", DASHBOARD_PORT,);
 
     // ── Step 4: wait for connection then exchange blocks ────────────
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -183,9 +170,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("→ requesting {block_count} blocks");
     let _ = cmd_tx.send(SwarmCommand::SendBlockRequest {
         peer: spid,
-        request: BlockRequest::GetBlocks {
-            indices: (0u32..block_count).collect(),
-        },
+        request: BlockRequest::GetBlocks { indices: (0u32..block_count).collect() },
     });
 
     tracing::info!("open http://127.0.0.1:{} ← live events", DASHBOARD_PORT);
@@ -219,12 +204,12 @@ async fn run_seeder(
         match swarm.select_next_some().await {
             SwarmEvent::NewListenAddr { address, .. } => {
                 if let Some(atx) = addr_opt.take() {
-                    let full = address.clone().with(
-                        libp2p::multiaddr::Protocol::P2p(*swarm.local_peer_id()),
-                    );
+                    let full = address
+                        .clone()
+                        .with(libp2p::multiaddr::Protocol::P2p(*swarm.local_peer_id()));
                     let _ = atx.send(full);
                 }
-            }
+            },
             SwarmEvent::Behaviour(GuixP2PEvent::BlockExchange(
                 request_response::Event::Message {
                     message: request_response::Message::Request { request, channel, .. },
@@ -233,8 +218,8 @@ async fn run_seeder(
             )) => {
                 let resp = serve_blocks(&blocks, &request);
                 let _ = swarm.behaviour_mut().block_exchange.send_response(channel, resp);
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 }
@@ -323,11 +308,7 @@ async fn run_downloader(
     }
 }
 
-fn handle_block_response(
-    peer: &PeerId,
-    resp: &BlockResponse,
-    evt: &dashboard::EventBus,
-) {
+fn handle_block_response(peer: &PeerId, resp: &BlockResponse, evt: &dashboard::EventBus) {
     match resp {
         BlockResponse::HandshakeReply { blocks_available, .. } => {
             tracing::info!(
@@ -335,7 +316,7 @@ fn handle_block_response(
                 peer,
                 blocks_available.len(),
             );
-        }
+        },
         BlockResponse::Blocks { data } => {
             let cnt = data.len();
             let total: usize = data.iter().map(|b| b.data.len()).sum();
@@ -351,10 +332,10 @@ fn handle_block_response(
                     blocks: 1,
                 });
             }
-        }
+        },
         BlockResponse::Error { message } => {
             tracing::warn!("block error from {}: {}", peer, message);
-        }
+        },
     }
 }
 
@@ -379,9 +360,9 @@ fn serve_blocks(blocks: &BlockMap, req: &BlockRequest) -> BlockResponse {
                     block_hashes: vec![],
                 }
             }
-        }
+        },
         BlockRequest::GetBlocks { indices } => {
-            for data in blocks.lock().unwrap().values() {
+            if let Some(data) = blocks.lock().unwrap().values().next() {
                 let blks: Vec<BlockData> = indices
                     .iter()
                     .filter_map(|&i| {
@@ -392,9 +373,10 @@ fn serve_blocks(blocks: &BlockMap, req: &BlockRequest) -> BlockResponse {
                         })
                     })
                     .collect();
-                return BlockResponse::Blocks { data: blks };
+                BlockResponse::Blocks { data: blks }
+            } else {
+                BlockResponse::Error { message: "no blocks seeded".into() }
             }
-            BlockResponse::Error { message: "no blocks seeded".into() }
-        }
+        },
     }
 }

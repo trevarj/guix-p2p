@@ -1203,6 +1203,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "guix-p2p-e2e"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "futures",
+ "guix-p2p-substitute",
+ "hex",
+ "libp2p",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "guix-p2p-substitute"
 version = "0.1.0"
 dependencies = [

@@ -46,8 +46,12 @@ impl Drop for TestNode {
 }
 
 impl TestNode {
-    pub fn pid(&self) -> PeerId { self.peer_id }
-    pub fn addr(&self) -> Multiaddr { self.listen_addr.clone() }
+    pub fn pid(&self) -> PeerId {
+        self.peer_id
+    }
+    pub fn addr(&self) -> Multiaddr {
+        self.listen_addr.clone()
+    }
 
     pub fn send_req(&self, peer: PeerId, req: BlockRequest) {
         let _ = self.cmd_tx.send(SwarmCommand::SendBlockRequest { peer, request: req });
@@ -89,7 +93,9 @@ impl TestNode {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
             let rem = deadline.saturating_duration_since(tokio::time::Instant::now());
-            if rem.is_zero() { return None; }
+            if rem.is_zero() {
+                return None;
+            }
             match self.recv(Duration::from_secs(2)).await {
                 Some(SwarmNotification::BlockResponse { peer: p, response }) if p == peer => {
                     return Some(response);
@@ -141,16 +147,7 @@ async fn start(
     let bootstrap = bootstrap.to_vec();
 
     let task = tokio::spawn(async move {
-        run_loop(
-            swarm,
-            blocks_clone,
-            cmd_stream,
-            notify_tx,
-            shutdown_rx,
-            addr_tx,
-            bootstrap,
-        )
-        .await;
+        run_loop(swarm, blocks_clone, cmd_stream, notify_tx, shutdown_rx, addr_tx, bootstrap).await;
     });
 
     // Also need oneshot, so we poll the receiver after the spawn
@@ -282,9 +279,9 @@ fn serve(blocks: &BlockMap, req: &BlockRequest) -> BlockResponse {
                     block_hashes: vec![],
                 }
             }
-        }
+        },
         BlockRequest::GetBlocks { indices } => {
-            for data in blocks.lock().unwrap().values() {
+            if let Some(data) = blocks.lock().unwrap().values().next() {
                 let blks: Vec<BlockData> = indices
                     .iter()
                     .filter_map(|&i| {
@@ -295,9 +292,10 @@ fn serve(blocks: &BlockMap, req: &BlockRequest) -> BlockResponse {
                         })
                     })
                     .collect();
-                return BlockResponse::Blocks { data: blks };
+                BlockResponse::Blocks { data: blks }
+            } else {
+                BlockResponse::Error { message: "no blocks seeded".into() }
             }
-            BlockResponse::Error { message: "no blocks seeded".into() }
-        }
+        },
     }
 }
