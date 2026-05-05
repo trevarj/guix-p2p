@@ -18,6 +18,11 @@ pub struct Config {
     pub health_check_interval_secs: u64,
     pub reputation_ban_threshold: u32,
     pub reputation_prune_age_days: u64,
+    pub dashboard_enabled: bool,
+    pub dashboard_port: u16,
+    pub dashboard_bind: String,
+    pub tor_socks: Option<String>,
+    pub tor_only: bool,
 }
 
 impl Config {
@@ -49,6 +54,11 @@ impl Config {
             health_check_interval_secs: 60,
             reputation_ban_threshold: 5,
             reputation_prune_age_days: 30,
+            dashboard_enabled: false,
+            dashboard_port: 3030,
+            dashboard_bind: "127.0.0.1".into(),
+            tor_socks: None,
+            tor_only: false,
         }
     }
 }
@@ -82,5 +92,7 @@ mod tests {
         assert_eq!(config.substitute_urls.len(), 2);
         assert_eq!(config.min_providers, 3);
         assert_eq!(config.stall_timeout_secs, 30);
+        assert_eq!(config.dashboard_port, 3030);
+        assert!(!config.dashboard_enabled);
     }
 }

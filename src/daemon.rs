@@ -14,6 +14,7 @@ use crate::{
     channel::{SwarmCommand, SwarmNotification},
     config::Config,
     connection::ConnectionManager,
+    dashboard::{self, BuildRegistry, DashboardEvent, ObservedBuild},
     dht::ProviderCache,
     narinfo::NarinfoCache,
     reputation::ReputationTracker,
@@ -108,6 +109,7 @@ pub async fn run_query_mode(
     notify_rx: tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
     narinfo_cache: &Mutex<NarinfoCache>,
     config: &Config,
+    client: &reqwest::Client,
 ) -> anyhow::Result<()> {
     let _ = (cmd_tx, notify_rx);
     let mut reply = ReplyWriter::new();
@@ -127,7 +129,7 @@ pub async fn run_query_mode(
                 handle_have(cache, query_tx, &mut reply, &paths).await;
             },
             DaemonCommand::Info(path) => {
-                handle_info(config, narinfo_cache, &mut reply, &path).await;
+                handle_info(config, narinfo_cache, &mut reply, &path, client).await;
             },
             DaemonCommand::Substitute { .. } => {},
         }
@@ -171,6 +173,7 @@ async fn handle_info(
     cache: &Mutex<NarinfoCache>,
     reply: &mut ReplyWriter,
     path: &str,
+    client: &reqwest::Client,
 ) {
     let hash_part = match extract_hash_part(path) {
         Ok(h) => h,
@@ -182,7 +185,7 @@ async fn handle_info(
         },
     };
 
-    match crate::http_client::fetch_narinfo(config, &hash_part, cache).await {
+    match crate::http_client::fetch_narinfo(config, &hash_part, cache, client).await {
         Ok(info) => {
             let _ = reply.write_line(&info.store_path);
             let _ = reply.write_line(info.deriver.as_deref().unwrap_or(""));
@@ -203,6 +206,7 @@ async fn handle_info(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_substitute_mode(
     cache: &ProviderCache,
     cmd_tx: &UnboundedSender<SwarmCommand>,
@@ -211,6 +215,7 @@ pub async fn run_substitute_mode(
     config: &Config,
     _query_tx: &UnboundedSender<String>,
     reputation: &Arc<Mutex<ReputationTracker>>,
+    client: &reqwest::Client,
 ) -> anyhow::Result<()> {
     let mut reply = ReplyWriter::new();
 
@@ -225,6 +230,9 @@ pub async fn run_substitute_mode(
         };
 
         if let DaemonCommand::Substitute { path, dest } = cmd {
+            let dummy_registry: BuildRegistry =
+                Arc::new(Mutex::new(std::collections::HashMap::new()));
+            let (dummy_tx, _) = tokio::sync::broadcast::channel(1);
             try_swarm_substitute(
                 config,
                 cache,
@@ -235,6 +243,9 @@ pub async fn run_substitute_mode(
                 &mut notify_rx,
                 narinfo_cache,
                 reputation,
+                &dummy_registry,
+                &dummy_tx,
+                client,
             )
             .await;
         }
@@ -255,6 +266,9 @@ async fn try_swarm_substitute(
     notify_rx: &mut tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
     narinfo_cache: &Mutex<NarinfoCache>,
     reputation: &Arc<Mutex<ReputationTracker>>,
+    build_registry: &BuildRegistry,
+    event_tx: &dashboard::EventBus,
+    client: &reqwest::Client,
 ) {
     let hash_part = match extract_hash_part(path) {
         Ok(h) => h,
@@ -265,19 +279,50 @@ async fn try_swarm_substitute(
         },
     };
 
-    let narinfo = match crate::http_client::fetch_narinfo(config, &hash_part, narinfo_cache).await {
-        Ok(info) => info,
-        Err(e) => {
-            tracing::warn!("Cannot fetch narinfo for {}: {}", hash_part, e);
-            let _ = reply.write_line(&format!("not-found {}", path));
-            return;
-        },
-    };
+    let narinfo =
+        match crate::http_client::fetch_narinfo(config, &hash_part, narinfo_cache, client).await {
+            Ok(info) => info,
+            Err(e) => {
+                tracing::warn!("Cannot fetch narinfo for {}: {}", hash_part, e);
+                let _ = reply.write_line(&format!("not-found {}", path));
+                return;
+            },
+        };
 
     let store_path = narinfo.store_path.clone();
     let nar_size = narinfo.nar_size;
     let nar_hash = narinfo.nar_hash.clone();
     let nar_hash_bytes = extract_nar_hash_bytes(&nar_hash);
+
+    // Populate build registry from observed narinfo
+    {
+        let mut reg = build_registry.lock().unwrap();
+        reg.entry(hash_part.clone())
+            .and_modify(|b: &mut ObservedBuild| {
+                b.store_path = Some(narinfo.store_path.clone());
+                b.nar_size = Some(narinfo.nar_size);
+                b.references = narinfo.references.clone();
+                b.deriver = narinfo.deriver.clone();
+                b.narinfo_raw = Some(narinfo.signed_portion.clone());
+            })
+            .or_insert_with(|| ObservedBuild {
+                nar_hash: nar_hash.clone(),
+                store_path: Some(narinfo.store_path.clone()),
+                nar_size: Some(narinfo.nar_size),
+                references: narinfo.references.clone(),
+                deriver: narinfo.deriver.clone(),
+                narinfo_raw: Some(narinfo.signed_portion.clone()),
+                providers: vec![],
+                downloaded_at: None,
+                download_size: None,
+            });
+    }
+
+    let _ = event_tx.send(DashboardEvent::BuildDiscovered {
+        nar_hash: nar_hash.clone(),
+        store_path: Some(store_path.clone()),
+        nar_size: Some(nar_size),
+    });
 
     tracing::info!(
         hash = %nar_hash,
@@ -326,6 +371,14 @@ async fn try_swarm_substitute(
         download_block_info.set_hashes(first.block_hashes.clone());
     }
 
+    let _ = event_tx.send(DashboardEvent::DownloadStarted {
+        nar_hash: nar_hash.clone(),
+        store_path: store_path.clone(),
+        nar_size,
+    });
+
+    let download_start = std::time::Instant::now();
+
     match download_blocks_from_peers(
         cmd_tx,
         notify_rx,
@@ -342,10 +395,39 @@ async fn try_swarm_substitute(
             if let Err(e) = tokio::fs::write(&dest_path, &nar_data).await {
                 tracing::error!("Failed to write nar to {}: {}", dest_path.display(), e);
                 let _ = reply.write_line(&format!("not-found {}", path));
+
+                let _ = event_tx.send(DashboardEvent::DownloadFailed {
+                    nar_hash: nar_hash.clone(),
+                    store_path: store_path.clone(),
+                    reason: format!("write error: {}", e),
+                });
                 return;
             }
 
             let size = nar_data.len() as u64;
+            let elapsed_ms = download_start.elapsed().as_millis() as u64;
+
+            // Mark build as downloaded in registry
+            {
+                let mut reg = build_registry.lock().unwrap();
+                if let Some(b) = reg.get_mut(hash_part.as_str()) {
+                    b.downloaded_at = Some(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    );
+                    b.download_size = Some(size);
+                }
+            }
+
+            let _ = event_tx.send(DashboardEvent::DownloadSucceeded {
+                nar_hash: nar_hash.clone(),
+                store_path: store_path.clone(),
+                size,
+                elapsed_ms,
+            });
+
             println!(
                 "{}",
                 format_trace_succeeded(&store_path, &format!("p2p://{}", hash_part), size)
@@ -356,6 +438,13 @@ async fn try_swarm_substitute(
         },
         Err(e) => {
             tracing::error!("Swarm download failed for {}: {}", store_path, e);
+
+            let _ = event_tx.send(DashboardEvent::DownloadFailed {
+                nar_hash: nar_hash.clone(),
+                store_path: store_path.clone(),
+                reason: e.to_string(),
+            });
+
             let _ = reply.write_line(&format!("not-found {}", path));
         },
     }
@@ -594,8 +683,30 @@ pub async fn run_daemon_mode(
     config: &Config,
     reputation: &Arc<Mutex<ReputationTracker>>,
     conn_mgr: &Arc<Mutex<ConnectionManager>>,
+    build_registry: &BuildRegistry,
+    event_tx: &dashboard::EventBus,
+    client: &reqwest::Client,
 ) -> anyhow::Result<()> {
     use tokio::time::Duration;
+
+    if config.dashboard_enabled {
+        let state = dashboard::DashboardState {
+            provider_cache: cache.clone(),
+            reputation: reputation.clone(),
+            conn_mgr: conn_mgr.clone(),
+            build_registry: build_registry.clone(),
+            started: std::time::Instant::now(),
+            peer_id: String::new(),
+            event_bus: event_tx.clone(),
+        };
+        let port = config.dashboard_port;
+        let bind = config.dashboard_bind.clone();
+        let bind_clone = bind.clone();
+        tokio::spawn(async move {
+            dashboard::serve(state, port, &bind_clone).await;
+        });
+        tracing::info!("Dashboard enabled on http://{}:{}", bind, port);
+    }
 
     let republish_interval = Duration::from_secs(22 * 3600);
     let mut republish_tick = tokio::time::interval(republish_interval);
@@ -632,6 +743,9 @@ pub async fn run_daemon_mode(
                         &mut notify_rx,
                         narinfo_cache,
                         reputation,
+                        build_registry,
+                        event_tx,
+                        client,
                     )
                     .await;
                 }

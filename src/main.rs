@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Context;
 use clap::Parser;
@@ -7,7 +7,7 @@ use guix_p2p_substitute::{
     channel::{SwarmCommand, SwarmNotification},
     config,
     connection::{ConnectionConfig, ConnectionManager},
-    daemon, dht, identity, narinfo,
+    daemon, dashboard, dht, identity, narinfo,
     reputation::ReputationTracker,
     swarm::codec::{BlockRequest, BlockResponse},
 };
@@ -43,6 +43,26 @@ struct Cli {
     /// Comma-separated substitute URLs for HTTP fallback
     #[arg(long, global = true)]
     substitute_urls: Option<String>,
+
+    /// Enable web dashboard in daemon mode
+    #[arg(long)]
+    dashboard: bool,
+
+    /// Port for web dashboard
+    #[arg(long, default_value = "3030")]
+    dashboard_port: u16,
+
+    /// Bind address for web dashboard
+    #[arg(long, default_value = "127.0.0.1")]
+    dashboard_bind: String,
+
+    /// SOCKS5 proxy address for Tor (e.g. 127.0.0.1:9050)
+    #[arg(long, global = true)]
+    tor_socks: Option<String>,
+
+    /// Route all traffic through Tor only (no direct connections)
+    #[arg(long, global = true)]
+    tor_only: bool,
 }
 
 #[tokio::main]
@@ -55,12 +75,24 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    let config = config::Config::load(
+    let mut config = config::Config::load(
         cli.bootstrap_peers,
         cli.listen_addr,
         cli.cache_dir,
         cli.substitute_urls,
     );
+
+    let dashboard_enabled = cli.dashboard;
+    if dashboard_enabled {
+        config.dashboard_enabled = true;
+        config.dashboard_port = cli.dashboard_port;
+        config.dashboard_bind = cli.dashboard_bind;
+    }
+
+    if let Some(ref proxy) = cli.tor_socks {
+        config.tor_socks = Some(proxy.clone());
+        config.tor_only = cli.tor_only;
+    }
 
     tracing::info!("Starting guix-p2p-substitute");
     tracing::info!("Cache directory: {}", config.cache_dir.display());
@@ -82,6 +114,9 @@ async fn main() -> anyhow::Result<()> {
     let provider_cache = dht::create_provider_cache();
     let narinfo_cache = std::sync::Mutex::new(narinfo::NarinfoCache::new(60));
 
+    let http_client = guix_p2p_substitute::http_client::create_http_client(&config)
+        .context("failed to create HTTP client")?;
+
     let conn_config = ConnectionConfig {
         connect_timeout: std::time::Duration::from_secs(config.request_timeout_secs),
         max_retries: config.connection_retries,
@@ -96,6 +131,9 @@ async fn main() -> anyhow::Result<()> {
     ));
     let conn_mgr = Arc::new(std::sync::Mutex::new(ConnectionManager::new(conn_config)));
 
+    let (event_tx, _) = tokio::sync::broadcast::channel::<dashboard::DashboardEvent>(256);
+    let build_registry: dashboard::BuildRegistry = Arc::new(std::sync::Mutex::new(HashMap::new()));
+
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel::<SwarmCommand>();
     let (notify_tx, notify_rx) = tokio::sync::mpsc::unbounded_channel::<SwarmNotification>();
     let (query_tx, query_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -105,6 +143,7 @@ async fn main() -> anyhow::Result<()> {
     let cmd_rx_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(cmd_rx);
     let rep_for_swarm = reputation.clone();
     let conn_for_swarm = conn_mgr.clone();
+    let evt_for_swarm = event_tx.clone();
 
     tokio::spawn(async move {
         run_swarm_task(
@@ -115,6 +154,7 @@ async fn main() -> anyhow::Result<()> {
             query_rx,
             rep_for_swarm,
             conn_for_swarm,
+            evt_for_swarm,
         )
         .await;
     });
@@ -129,6 +169,7 @@ async fn main() -> anyhow::Result<()> {
             notify_rx,
             &narinfo_cache,
             &config,
+            &http_client,
         )
         .await?
     } else if cli.substitute {
@@ -140,6 +181,7 @@ async fn main() -> anyhow::Result<()> {
             &config,
             &query_tx,
             &reputation,
+            &http_client,
         )
         .await?
     } else if cli.daemon {
@@ -151,6 +193,9 @@ async fn main() -> anyhow::Result<()> {
             &config,
             &reputation,
             &conn_mgr,
+            &build_registry,
+            &event_tx,
+            &http_client,
         )
         .await?
     } else {
@@ -163,6 +208,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_swarm_task(
     mut swarm: libp2p::Swarm<GuixP2PBehaviour>,
     cache: dht::ProviderCache,
@@ -171,6 +217,7 @@ async fn run_swarm_task(
     mut query_rx: tokio::sync::mpsc::UnboundedReceiver<String>,
     reputation: Arc<std::sync::Mutex<ReputationTracker>>,
     conn_mgr: Arc<std::sync::Mutex<ConnectionManager>>,
+    event_tx: dashboard::EventBus,
 ) {
     use std::time::Duration;
 
@@ -196,12 +243,31 @@ async fn run_swarm_task(
                     SwarmEvent::Behaviour(GuixP2PEvent::BlockExchange(e)) => {
                         handle_block_exchange(&notify_tx, e, &reputation, &conn_mgr, &mut swarm);
                     },
+                    SwarmEvent::ConnectionEstablished {
+                        peer_id,
+                        endpoint: libp2p::core::ConnectedPoint::Dialer { address, .. },
+                        ..
+                    } => {
+                        conn_mgr.lock().unwrap().on_connected(peer_id);
+                        let _ = event_tx.send(dashboard::DashboardEvent::PeerConnected {
+                            peer_id: peer_id.to_string(),
+                            addresses: vec![address.to_string()],
+                        });
+                        tracing::debug!("Connection established with {}", peer_id);
+                    },
                     SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                         conn_mgr.lock().unwrap().on_connected(peer_id);
+                        let _ = event_tx.send(dashboard::DashboardEvent::PeerConnected {
+                            peer_id: peer_id.to_string(),
+                            addresses: vec![],
+                        });
                         tracing::debug!("Connection established with {}", peer_id);
                     },
                     SwarmEvent::ConnectionClosed { peer_id, .. } => {
                         conn_mgr.lock().unwrap().on_disconnected(peer_id);
+                        let _ = event_tx.send(dashboard::DashboardEvent::PeerDisconnected {
+                            peer_id: peer_id.to_string(),
+                        });
                         tracing::debug!("Connection closed with {}", peer_id);
                     },
                     other => handle_swarm_event(other, &conn_mgr),
@@ -312,12 +378,6 @@ fn handle_swarm_event(
     match event {
         SwarmEvent::NewListenAddr { address, .. } => {
             tracing::info!("Swarm listening on {}", address);
-        },
-        SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-            tracing::debug!("Connection established with {}", peer_id);
-        },
-        SwarmEvent::ConnectionClosed { peer_id, .. } => {
-            tracing::debug!("Connection closed with {}", peer_id);
         },
         SwarmEvent::Behaviour(GuixP2PEvent::Mdns(e)) => match e {
             libp2p::mdns::Event::Discovered(list) => {

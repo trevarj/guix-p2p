@@ -4,6 +4,7 @@ pub mod channel;
 pub mod config;
 pub mod connection;
 pub mod daemon;
+pub mod dashboard;
 pub mod dht;
 pub mod http_client;
 pub mod identity;

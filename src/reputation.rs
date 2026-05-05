@@ -67,6 +67,15 @@ impl ReputationTracker {
         self.peers.get(peer).map(|s| s.score(now)).unwrap_or(0.5)
     }
 
+    pub fn peers(&self) -> Vec<(PeerId, f64)> {
+        let now = Instant::now();
+        self.peers.iter().map(|(peer, score)| (*peer, score.score(now))).collect()
+    }
+
+    pub fn peer_entries(&self) -> Vec<(PeerId, PeerScore)> {
+        self.peers.iter().map(|(k, v)| (*k, v.clone())).collect()
+    }
+
     pub fn sort_by_score(&self, peers: &mut [PeerId]) {
         let now = Instant::now();
         peers.sort_by(|a, b| {

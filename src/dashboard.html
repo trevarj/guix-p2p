@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="86400">
+<title>guix-p2p dashboard</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0a;--fg:#f5d000;--acc:#d4a800;--dim:#554400;
+  --bg2:#111;--bg3:#1a1a1a;--err:#cc3333;--ok:#33cc33;
+  --font:'Cascadia Code','JetBrains Mono','Fira Code','IBM Plex Mono',monospace
+}
+.theme-green{--fg:#00cc00;--acc:#009900;--dim:#003300;--ok:#00ff00}
+.theme-amber{--fg:#ffb000;--acc:#cc8800;--dim:#553300;--ok:#ffcc00}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--fg);font-family:var(--font);font-size:13px;
+  line-height:1.4;display:flex;flex-direction:column;overflow:hidden;
+  position:relative
+}
+body::before{
+  content:'';position:fixed;inset:0;
+  background:repeating-linear-gradient(rgba(0,0,0,.03) 0px,transparent 2px);
+  pointer-events:none;z-index:999
+}
+header{
+  background:var(--bg2);border-bottom:1px solid var(--dim);
+  padding:8px 16px;display:flex;justify-content:space-between;align-items:center;
+  flex-shrink:0;gap:12px
+}
+header .id{font-size:11px;opacity:.6}
+header .stats{display:flex;gap:20px;font-size:12px}
+header .stats span{color:var(--acc);font-weight:bold}
+header button{
+  background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
+  padding:3px 10px;font-family:var(--font);font-size:11px;cursor:pointer
+}
+header button:hover{border-color:var(--acc)}
+main{
+  display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr auto;
+  flex:1;overflow:hidden;gap:0
+}
+.panel{
+  border:1px solid var(--dim);overflow-y:auto;padding:8px;position:relative
+}
+.panel h2{
+  font-size:11px;text-transform:uppercase;letter-spacing:2px;
+  color:var(--acc);margin-bottom:6px;position:sticky;top:0;
+  background:var(--bg);padding:4px 0;z-index:1
+}
+.events{grid-column:1/-1;max-height:180px;border-top:1px solid var(--dim)}
+.events .entry{font-size:11px;padding:1px 0;border-bottom:1px solid var(--dim)}
+.events .entry.added{animation:slidein .3s ease}
+.events .entry .ts{color:var(--dim);margin-right:8px}
+.events .entry.peer-conn .sym{color:var(--ok)}
+.events .entry.peer-disc .sym{color:var(--dim)}
+.events .entry.providers .sym{color:var(--acc)}
+.events .entry.dl-start .sym{color:var(--fg)}
+.events .entry.dl-ok .sym{color:var(--ok)}
+.events .entry.dl-fail .sym{color:var(--err)}
+
+@keyframes slidein{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+
+.peer-row,.build-row{
+  display:flex;align-items:center;gap:6px;padding:3px 0;
+  border-bottom:1px solid var(--dim);font-size:12px
+}
+.peer-row .flag,.build-row .flag{font-size:14px;min-width:24px}
+.peer-row .peer-id{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.peer-row .bar,.build-row .bar{flex:1;height:6px;background:var(--bg3)}
+.peer-row .bar-inner,.build-row .bar-inner{height:100%;background:var(--acc)}
+.peer-row .meta{min-width:90px;text-align:right;font-size:11px;opacity:.8}
+.build-row{cursor:pointer}
+.build-row:hover{background:var(--bg2)}
+.build-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
+.build-row .providers{min-width:60px;text-align:right;color:var(--acc)}
+
+/* detail panel overlay */
+.overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;
+  display:flex;justify-content:flex-end
+}
+.overlay.hidden{display:none}
+.detail{
+  width:520px;max-width:100%;height:100%;background:var(--bg2);
+  border-left:1px solid var(--acc);overflow-y:auto;padding:16px;
+  animation:slideleft .25s ease
+}
+@keyframes slideleft{from{transform:translateX(100%)}to{transform:translateX(0)}}
+.detail .close{
+  position:absolute;top:8px;right:12px;background:none;color:var(--fg);
+  border:none;font-size:18px;cursor:pointer;font-family:var(--font)
+}
+.detail h2{color:var(--acc);font-size:14px;margin-bottom:12px}
+.detail .field{margin-bottom:6px;font-size:12px}
+.detail .field label{color:var(--dim);display:inline-block;min-width:100px}
+.detail .field .val{color:var(--fg)}
+.detail h3{color:var(--acc);font-size:12px;margin:16px 0 8px;text-transform:uppercase;letter-spacing:1px}
+.detail .narinfo-toggle{
+  color:var(--acc);cursor:pointer;font-size:12px;margin-top:12px;user-select:none
+}
+.detail .narinfo-raw{
+  display:none;background:var(--bg3);padding:10px;margin-top:8px;
+  font-size:11px;white-space:pre-wrap;overflow-x:auto;max-height:300px;overflow-y:auto
+}
+.detail .narinfo-raw.open{display:block}
+
+.empty{text-align:center;padding:20px;color:var(--dim);font-size:12px;font-style:italic}
+</style>
+</head>
+<body class="theme-yellow">
+<header>
+  <div>
+    <strong>guix-p2p</strong>
+    <br><span class="id" id="peer-id">--</span>
+  </div>
+  <div class="stats">
+    <div>CONN <span id="connected">0</span></div>
+    <div>PEERS <span id="total-peers">0</span></div>
+    <div>DHT <span id="dht-entries">0</span></div>
+    <div>UPTIME <span id="uptime">00:00:00</span></div>
+  </div>
+  <div>
+    <button onclick="cycleTheme()">theme</button>
+  </div>
+</header>
+<main>
+  <div class="panel peers-panel">
+    <h2>peers</h2>
+    <div id="peers-list"><div class="empty">no peers yet</div></div>
+  </div>
+  <div class="panel builds-panel">
+    <h2>builds</h2>
+    <div id="builds-list"><div class="empty">no builds observed</div></div>
+  </div>
+  <div class="panel events">
+    <h2>events</h2>
+    <div id="events-list"></div>
+  </div>
+</main>
+<div class="overlay hidden" id="overlay">
+  <div class="detail">
+    <button class="close" onclick="closeDetail()">x</button>
+    <div id="detail-content"></div>
+  </div>
+</div>
+<script>
+var THEMES=['theme-yellow','theme-green','theme-amber'];
+var THEME_IDX=THEMES.indexOf('theme-yellow');
+var STARTED=Date.now();
+var EVENT_IDX=0;
+var PEERS={};
+var BUILDS={};
+var WS=null;
+var WS_RETRY=1000;
+
+function fmtTime(s){
+  var h=Math.floor(s/3600),m=Math.floor(s%3600/60),se=s%60;
+  return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(se).padStart(2,'0')
+}
+
+function fmtSize(b){
+  if(!b)return '?';
+  if(b<1024)return b+' B';
+  if(b<1048576)return (b/1024).toFixed(1)+' KB';
+  if(b<1073741824)return (b/1048576).toFixed(1)+' MB';
+  return (b/1073741824).toFixed(2)+' GB'
+}
+
+function fmtBytes(b){
+  if(b==null||b===0)return '0 B';
+  return fmtSize(b)
+}
+
+function fmtScore(s){return (s||0).toFixed(2)}
+
+function cycleTheme(){
+  THEME_IDX=(THEME_IDX+1)%THEMES.length;
+  THEMES.forEach(function(t){document.body.classList.remove(t)});
+  document.body.classList.add(THEMES[THEME_IDX]);
+  localStorage.setItem('guix-p2p-theme',THEMES[THEME_IDX]);
+}
+
+function addEvent(cls,sym,msg){
+  var el=document.getElementById('events-list');
+  var d=document.createElement('div');
+  d.className='entry '+cls+' added';
+  var now=new Date();
+  var ts=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
+  d.innerHTML='<span class="ts">'+ts+'</span><span class="sym">'+sym+'</span> '+msg;
+  el.appendChild(d);
+  EVENT_IDX++;
+  while(el.children.length>200)el.removeChild(el.firstChild);
+  el.scrollTop=el.scrollHeight;
+}
+
+function peerIdShort(pid){return pid.slice(0,12)+'...'}
+
+function flagEmoji(code){
+  if(!code||code.length!==2)return'[??] ';
+  try{
+    var a=code.charCodeAt(0),b=code.charCodeAt(1);
+    return String.fromCodePoint(127462+a-65)+String.fromCodePoint(127462+b-65)+' '
+  }catch(e){return'[??] '}
+}
+
+function renderPeers(){
+  var el=document.getElementById('peers-list');
+  var keys=Object.keys(PEERS);
+  if(!keys.length){el.innerHTML='<div class="empty">no peers yet</div>';return}
+  var h='';
+  keys.sort(function(a,b){return(PEERS[b].score||0)-(PEERS[a].score||0)});
+  keys.forEach(function(k){
+    var p=PEERS[k];
+    var sc=p.score||0;
+    var w=Math.round(sc*100);
+    var flag=p.country?flagEmoji(p.country):'[??] ';
+    var ip=p.ip||'?';
+    h+='<div class="peer-row">'
+      +'<span class="flag">'+flag+'</span>'
+      +'<span class="peer-id" title="'+k+'">'+peerIdShort(k)+'</span>'
+      +'<span class="bar"><span class="bar-inner" style="width:'+w+'%"></span></span>'
+      +'<span class="meta">'+ip+' ('+fmtScore(sc)+')</span>'
+      +'</div>';
+  });
+  el.innerHTML=h;
+}
+
+function renderBuilds(){
+  var el=document.getElementById('builds-list');
+  var keys=Object.keys(BUILDS);
+  if(!keys.length){el.innerHTML='<div class="empty">no builds observed</div>';return}
+  var arr=keys.map(function(k){return BUILDS[k]});
+  arr.sort(function(a,b){return(b.providers||0)-(a.providers||0)});
+  var h='';
+  arr.forEach(function(b){
+    var sz=b.nar_size?fmtSize(b.nar_size):'?';
+    var name=b.store_path?b.store_path.split('-').slice(1).join('-'):b.nar_hash.slice(0,16);
+    h+='<div class="build-row" data-hash="'+b.nar_hash+'" onclick="openDetail(\''+b.nar_hash+'\')">'
+      +'<span class="path">'+name+'</span>'
+      +'<span class="providers">'+(b.providers||0)+' peers</span>'
+      +'<span style="font-size:11px;opacity:.6">'+sz+'</span>'
+      +'</div>';
+  });
+  el.innerHTML=h;
+}
+
+function openDetail(hash){
+  fetch('/api/build/'+hash).then(function(r){
+    if(!r.ok)throw r;
+    return r.json()
+  }).then(function(b){
+    var c=document.getElementById('detail-content');
+    var sz=b.nar_size?fmtSize(b.nar_size):'?';
+    var dl=b.downloaded_at?'downloaded '+new Date(b.downloaded_at*1000).toISOString().slice(0,16):'not cached';
+    var refs=(b.references||[]).map(function(r){return'<div>'+r+'</div>'}).join('');
+    var provs='';
+    (b.providers||[]).forEach(function(p){
+      provs+='<div class="peer-row"><span style="font-size:11px">'+peerIdShort(p)+'</span></div>';
+    });
+
+    var rawNarinfo=b.narinfo_raw||'';
+    var rawBlock=rawNarinfo?'<div class="narinfo-toggle" onclick="toggleNarinfo(this)">\u25b6 narinfo (raw signed text)</div>'
+      +'<div class="narinfo-raw">'+rawNarinfo.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>':'';
+
+    c.innerHTML='<h2>'+b.nar_hash.slice(0,24)+'...</h2>'
+      +'<div class="field"><label>store</label><span class="val">'+(b.store_path||'?')+'</span></div>'
+      +'<div class="field"><label>size</label><span class="val">'+sz+'</span></div>'
+      +'<div class="field"><label>deriver</label><span class="val">'+(b.deriver||'?')+'</span></div>'
+      +'<div class="field"><label>status</label><span class="val">'+dl+'</span></div>'
+      +'<h3>references ('+(b.references||[]).length+')</h3>'
+      +'<div style="margin-left:8px;font-size:11px">'+(refs||'<span style="color:var(--dim)">none</span>')+'</div>'
+      +'<h3>providers ('+(b.providers||[]).length+')</h3>'
+      +'<div style="margin-left:8px">'+(provs||'<span style="color:var(--dim)">none known</span>')+'</div>'
+      +rawBlock;
+    var ov=document.getElementById('overlay');
+    ov.classList.remove('hidden');
+  }).catch(function(){
+    addEvent('dl-fail','x','Failed to load build detail')
+  });
+}
+
+function closeDetail(){
+  document.getElementById('overlay').classList.add('hidden')
+}
+
+function toggleNarinfo(el){
+  var raw=el.nextElementSibling;
+  if(raw.classList.contains('open')){
+    raw.classList.remove('open');
+    el.textContent='\u25b6 narinfo (raw signed text)'
+  }else{
+    raw.classList.add('open');
+    el.textContent='\u25bc narinfo (raw signed text)'
+  }
+}
+
+function connectWS(){
+  var proto=location.protocol==='https:'?'wss':'ws';
+  WS=new WebSocket(proto+'://'+location.host+'/ws');
+  WS.onopen=function(){WS_RETRY=1000};
+  WS.onmessage=function(msg){
+    try{
+      var e=JSON.parse(msg.data);
+      handleEvent(e)
+    }catch(ex){}
+  };
+  WS.onclose=function(){
+    WS=null;
+    setTimeout(connectWS,WS_RETRY);
+    WS_RETRY=Math.min(WS_RETRY*2,16000)
+  };
+  WS.onerror=function(){WS&&WS.close()}
+}
+
+function handleEvent(e){
+  switch(e.type){
+    case 'PeerConnected':
+      PEERS[e.peer_id]=PEERS[e.peer_id]||{score:0.5,completed:0,failed:0,bytes_served:0,connected:false,addresses:e.addresses||[],country:null,ip:null};
+      PEERS[e.peer_id].connected=true;
+      PEERS[e.peer_id].addresses=e.addresses||[];
+      (e.addresses||[]).forEach(function(a){
+        var ip=extractIP(a);
+        if(ip){PEERS[e.peer_id].ip=ip;PEERS[e.peer_id].country=ipCountry(ip)}
+      });
+      addEvent('peer-conn','o','Peer '+peerIdShort(e.peer_id)+' connected');
+      renderPeers();
+      break;
+
+    case 'PeerDisconnected':
+      if(PEERS[e.peer_id])PEERS[e.peer_id].connected=false;
+      addEvent('peer-disc','-','Peer '+peerIdShort(e.peer_id)+' disconnected');
+      renderPeers();
+      break;
+
+    case 'ProvidersFound':
+      var b=BUILDS[e.nar_hash];
+      if(!b){b={nar_hash:e.nar_hash,store_path:null,nar_size:null,providers:e.provider_count};BUILDS[e.nar_hash]=b}
+      b.providers=Math.max(b.providers||0,e.provider_count);
+      addEvent('providers','#','Providers found: '+e.nar_hash.slice(0,16)+'... ('+e.provider_count+')');
+      renderBuilds();
+      break;
+
+    case 'BuildDiscovered':
+      var b=BUILDS[e.nar_hash];
+      if(!b){b={nar_hash:e.nar_hash,store_path:e.store_path,nar_size:e.nar_size,providers:0};BUILDS[e.nar_hash]=b}
+      if(e.store_path)b.store_path=e.store_path;
+      if(e.nar_size)b.nar_size=e.nar_size;
+      addEvent('providers','+','Build observed: '+(e.store_path||e.nar_hash.slice(0,16)+'...'));
+      renderBuilds();
+      break;
+
+    case 'DownloadStarted':
+      addEvent('dl-start','v','Download started: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.nar_size)+')');
+      break;
+
+    case 'DownloadSucceeded':
+      addEvent('dl-ok','^','Download succeeded: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.size)+', '+(e.elapsed_ms/1000).toFixed(1)+'s)');
+      break;
+
+    case 'DownloadFailed':
+      addEvent('dl-fail','x','Download failed: '+(e.store_path||e.nar_hash)+' ('+e.reason+')');
+      break;
+  }
+}
+
+function extractIP(addr){
+  var m=addr.match(/\/ip4\/([^/]+)/);
+  if(m)return m[1];
+  m=addr.match(/\/ip6\/([^/]+)/);
+  return m?m[1]:null
+}
+
+function ipCountry(ip){
+  var o=parseInt(ip.split('.')[0]);
+  if(!o)return null;
+  if(o>=1&&o<=4||o===8||o>=13&&o<=14||o>=20&&o<=24||o===27||o>=40&&o<=41||o===44||o===45||o===46||o===47||o>=49&&o<=52||o===54||o===58||o>=60&&o<=69||o===71||o===72||o===73||o===74||o===75||o===76||o>=96&&o<=109||o>=128&&o<=186||o>=192&&o<=199||o===204||o===205||o===206||o===207||o===208||o===209||o===214||o===215||o===216)return'US';
+  if(o==5||o===46||o===62||o===77||o===78||o===79||o===80||o===81||o===82||o===83||o===84||o===85||o===86||o===87||o===88||o===89||o===90||o===91||o===92||o===93||o===94||o===95||o===176||o===178||o===212||o===213||o===217)return'EU';
+  if(o>=151&&o<=152||o===177||o===179||o===181||o===184||o===187||o===188||o===189||o===190||o===191||o===200||o===201)return'SA';
+  if(o>=102&&o<=103||o===105||o===154||o===196||o===197)return'AF';
+  if(o>=110&&o<=126||o===150||o===153||o===163||o===175||o===180||o===182||o===183||o===202||o===203||o===210||o===211||o===218||o===219||o===220||o===221||o===222||o===223)return'AS';
+  return null
+}
+
+(function(){
+  var saved=localStorage.getItem('guix-p2p-theme');
+  if(saved&&THEMES.indexOf(saved)>=0){THEME_IDX=THEMES.indexOf(saved)}
+  THEMES.forEach(function(t){document.body.classList.remove(t)});
+  document.body.classList.add(THEMES[THEME_IDX]);
+
+  function tickUptime(){
+    var s=Math.floor((Date.now()-STARTED)/1000);
+    document.getElementById('uptime').textContent=fmtTime(s)
+  }
+  setInterval(tickUptime,1000);
+  tickUptime();
+
+  function refreshStatus(){
+    fetch('/api/status').then(function(r){return r.json()}).then(function(s){
+      document.getElementById('peer-id').textContent=s.peer_id;
+      document.getElementById('connected').textContent=s.connected_peers;
+      document.getElementById('dht-entries').textContent=s.dht_entries
+    }).catch(function(){})
+  }
+  setInterval(refreshStatus,5000);
+  refreshStatus();
+
+  function loadPeers(){
+    fetch('/api/peers').then(function(r){return r.json()}).then(function(ps){
+      ps.forEach(function(p){
+        if(!PEERS[p.peer_id]){
+          PEERS[p.peer_id]={peer_id:p.peer_id,score:p.score||0.5,completed:p.completed||0,failed:p.failed||0,bytes_served:p.bytes_served||0,connected:p.connected||false,addresses:p.addresses||[],country:p.country||null,ip:p.ip||null}
+        }
+        PEERS[p.peer_id].score=p.score||PEERS[p.peer_id].score;
+        PEERS[p.peer_id].connected=p.connected||PEERS[p.peer_id].connected
+      });
+      document.getElementById('total-peers').textContent=Object.keys(PEERS).length;
+      renderPeers()
+    }).catch(function(){})
+  }
+
+  function loadBuilds(){
+    fetch('/api/builds').then(function(r){return r.json()}).then(function(bs){
+      bs.forEach(function(b){
+        if(!BUILDS[b.nar_hash]){
+          BUILDS[b.nar_hash]={nar_hash:b.nar_hash,store_path:b.store_path,nar_size:b.nar_size,providers:b.provider_count}
+        }
+        BUILDS[b.nar_hash].providers=b.provider_count||BUILDS[b.nar_hash].providers
+      });
+      renderBuilds()
+    }).catch(function(){})
+  }
+
+  loadPeers();
+  loadBuilds();
+  connectWS();
+})();
+</script>
+</body>
+</html>
