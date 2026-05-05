@@ -1207,6 +1207,7 @@ name = "guix-p2p-e2e"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "futures",
  "guix-p2p-substitute",
  "hex",

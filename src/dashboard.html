@@ -356,6 +356,10 @@ function handleEvent(e){
       addEvent('dl-start','v','Download started: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.nar_size)+')');
       break;
 
+    case 'BlockReceived':
+      addEvent('dl-start','=','Block received from '+peerIdShort(e.peer_id));
+      break;
+
     case 'DownloadSucceeded':
       addEvent('dl-ok','^','Download succeeded: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.size)+', '+(e.elapsed_ms/1000).toFixed(1)+'s)');
       break;
