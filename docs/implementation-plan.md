@@ -198,6 +198,29 @@
 
 ---
 
+## Phase 7: Unix Socket Bridge + Daemon Refactor
+
+### Goals
+- Persistent daemon always running as a shepherd service, warm libp2p swarm, seeding to peers
+- Substitute invocations are thin socket relays with <1ms startup, no cold starts
+- Single binary (`guix-p2p`) in two modes: daemon and relay
+
+### Tasks
+
+- [ ] Rename binary `guix-p2p-substitute` → `guix-p2p`
+- [ ] Add `socket_path` to Config
+- [ ] Add `--socket` CLI flag
+- [ ] Create relay module (`src/relay.rs`) — Unix socket stdin→daemon→fd4 bridge
+- [ ] Route `--query --socket` / `--substitute --socket` to relay
+- [ ] Refactor daemon mode to accept Unix socket connections
+- [ ] Update wrapper script with socket path
+- [ ] Update architectural docs
+
+### Deliverables
+- Daemon + relay architecture with warm swarm for all substitute operations
+
+---
+
 ## Phase 6: Ship (Week 10)
 
 ### Goals
