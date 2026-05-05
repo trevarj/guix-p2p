@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::{collections::HashMap, path::PathBuf, time::Instant};
 
 use libp2p::PeerId;

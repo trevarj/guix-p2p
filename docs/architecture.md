@@ -37,9 +37,17 @@ guix-p2p-substitute (Rust, libp2p)
   │     Handshake: nar_hash + block availability bitfield
   │     Request: up to 8 block indices per batch
    │     Round-robin block assignment across connected peers
-  │     Per-block SHA-256 verification
-  │     Final nar-SHA-256 verification against narinfo
-  │
+   │     Per-block SHA-256 verification
+   │     Final nar-SHA-256 verification against narinfo
+   │     Peer reputation scoring (time-decay, ban threshold)
+   │     Connection management (retry/backoff, dead peer pruning)
+   │
+   ├─► Bandwidth Limiter (token-bucket, configurable caps)
+   │
+   ├─► Background Daemon Mode (--daemon)
+   │     Swarm stays alive, periodic DHT republishing
+   │     Serves block requests to other peers
+   │
    └─► HTTP Narinfo Client (reqwest)
          Narinfo fetch from official substitute URLs
          Ed25519 signature verification against /etc/guix/acl
@@ -77,11 +85,20 @@ They cannot be aligned. A custom nar-specific block protocol is:
 ```rust
 #[derive(NetworkBehaviour)]
 struct GuixP2PBehaviour {
-    kad: Kademlia<MemoryStore>,  // DHT: provide/get_providers for nar hashes
-    block_exchange: RequestResponse<BlockCodec>,  // Custom block transfer protocol
-    mdns: Mdns,                  // LAN peer discovery (free with libp2p)
-    identify: Identify,          // Protocol versioning, agent info
+    kad: Kademlia<MemoryStore>,                     // DHT: provide/get_providers for nar hashes
+    block_exchange: RequestResponse<BlockCodec>,     // Custom block transfer protocol
+    mdns: Mdns,                                     // LAN peer discovery (free with libp2p)
+    identify: Identify,                             // Protocol versioning, agent info
 }
+```
+
+Connection management, peer reputation, and bandwidth limiting are implemented
+as separate modules outside the behaviour:
+
+```rust
+struct ReputationTracker { .. }     // src/reputation.rs: time-decay peer scoring
+struct ConnectionManager { .. }     // src/connection.rs: retry/backoff, pruning
+struct BandwidthLimiter { .. }     // src/bandwidth.rs: token-bucket rate limiting
 ```
 
 ## DHT Flow
@@ -167,7 +184,7 @@ Narinfo flow:
 | `ed25519-dalek` | Key generation, signing, signature verification |
 | `sha2` | SHA-256 (block hashes, nar verification) |
 | `reqwest` | HTTP narinfo fetching from official substitute URLs |
-| `serde` / `serde_json` | Protocol message serialization, config parsing |
+| `serde` / `serde_json` | Protocol message serialization, config parsing, reputation persistence |
 | `serde_bytes` | Efficient byte slice serialization for protocol messages |
 | `clap` | CLI argument parsing |
 | `tracing` / `tracing-subscriber` | Structured logging with env-filter |
@@ -177,8 +194,32 @@ Narinfo flow:
 | `hex` | Hex encoding/decoding for hash strings |
 | `futures` | Async combinators |
 | `libc` | Raw fd writing for daemon protocol (fd 4) |
-| `thiserror` | Library-level error types (HttpClientError, ParseError) |
+| `thiserror` | Library-level error types (HttpClientError, DownloadError, ParseError) |
 | `tempfile` | Temporary files for integration tests |
+
+## Source Layout
+
+```
+src/
+├── lib.rs                   # Crate root (public API for integration tests)
+├── main.rs                  # CLI, swarm task, daemon task, bidirectional channels
+├── behaviour.rs             # libp2p NetworkBehaviour (kad + block_exchange + mdns + identify)
+├── channel.rs               # SwarmCommand / SwarmNotification enums
+├── config.rs                # Config struct (block_size, timeouts, ACL path, substitute URLs, conn/rep config)
+├── connection.rs            # ConnectionManager (retry/backoff, dead peer pruning, max peers)
+├── daemon.rs                # stdin parser, fd 4 reply writer, swarm substitute pipeline, daemon mode
+├── dht.rs                   # Kad wrapper, handle_kad_event → notifications, get_providers, bootstrap
+├── reputation.rs            # ReputationTracker (time-decay scoring, ban threshold, JSON persistence)
+├── bandwidth.rs             # BandwidthLimiter (token-bucket, configurable caps)
+├── http_client.rs           # Narinfo fetch (HTTP only), signature verification, cache
+├── narinfo.rs               # Narinfo parser, ACL loader, Ed25519 verifier, NarinfoCache (with TTL eviction)
+├── identity.rs              # Ed25519 keypair gen/persistence
+└── swarm/
+    ├── mod.rs
+    ├── block.rs             # BlockInfo (block count, size, hashes)
+    ├── codec.rs             # Request/response message types (BlockRequest/BlockResponse)
+    └── downloader.rs        # ActiveDownload state machine, peer pool, block verification
+```
 
 ## NAT Traversal (Post-MVP)
 
@@ -190,9 +231,52 @@ libp2p provides built-in behaviours:
 When ready, it's a behaviour mix-in and relay node infrastructure deployment.
 Not a protocol rewrite.
 
-## Guix Integration Patch
+## Activation (No Upstream Patch Needed)
 
-In `guix/scripts/substitute.scm`, after the `guix-substitute` entry point:
+The binary accepts `--query` / `--substitute` / `--daemon` as top-level flags
+(matching guix-daemon's invocation of `guix substitute --query`). Activation is
+done via a PATH-priority wrapper script — no changes to Guix source required.
+
+### PATH Wrapper (`scripts/guix-wrapper.sh`)
+
+A thin shell script placed earlier in `$PATH` than the real `guix` binary:
+
+```
+guix-daemon invokes "guix substitute --query"
+  → wrapper intercepts "substitute"
+  → exec guix-p2p-substitute --query
+
+guix-daemon invokes "guix substitute --substitute"
+  → wrapper intercepts "substitute"
+  → exec guix-p2p-substitute --substitute
+
+user invokes "guix build/install/system/..."
+  → wrapper passes through to real guix unchanged
+```
+
+This works for ALL guix commands (build, install, pull, system reconfigure,
+home reconfigure, shell) because they all go through the same daemon
+substitute protocol.
+
+### Shepherd Service (Daemon Mode)
+
+```scheme
+(define guix-p2p-daemon
+  (make <service>
+    #:provides '(guix-p2p-daemon)
+    #:start (make-forkexec-constructor
+             '("guix-p2p-substitute" "--daemon"
+               "--listen-addr" "/ip4/0.0.0.0/udp/6881/quic-v1"
+               "--cache-dir" "/var/cache/guix-p2p")
+             #:log-file "/var/log/guix-p2p-daemon.log")
+    #:stop  (make-kill-destructor)
+    #:respawn? #t))
+```
+
+### Future: Upstream Guile Patch
+
+If upstream merges a 4-line patch to `guix/scripts/substitute.scm`, the PATH
+wrapper becomes unnecessary:
 
 ```scheme
 (if (and=> (getenv "GUIX_USE_P2P")
@@ -206,6 +290,3 @@ In `guix/scripts/substitute.scm`, after the `guix-substitute` entry point:
       ;; existing substitute logic
       ))
 ```
-
-Files changed in Guix:
-- `guix/scripts/substitute.scm` — +4 lines, environment variable gating

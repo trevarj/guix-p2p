@@ -3,6 +3,7 @@ use std::{
     io::{self, BufRead},
     os::unix::io::RawFd,
     path::PathBuf,
+    sync::{Arc, Mutex},
 };
 
 use libp2p::PeerId;
@@ -12,8 +13,10 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::{
     channel::{SwarmCommand, SwarmNotification},
     config::Config,
+    connection::ConnectionManager,
     dht::ProviderCache,
     narinfo::NarinfoCache,
+    reputation::ReputationTracker,
     swarm::{
         block::BlockInfo,
         codec::{BlockData, BlockRequest, BlockResponse},
@@ -36,7 +39,7 @@ pub fn read_command() -> io::Result<DaemonCommand> {
     parse_command_line(line.trim())
 }
 
-fn parse_command_line(line: &str) -> io::Result<DaemonCommand> {
+pub fn parse_command_line(line: &str) -> io::Result<DaemonCommand> {
     if let Some(rest) = line.strip_prefix("have ") {
         let paths = rest.split_whitespace().map(str::to_string).collect();
         Ok(DaemonCommand::Have(paths))
@@ -57,6 +60,7 @@ pub struct ReplyWriter {
 }
 
 impl ReplyWriter {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         ReplyWriter { fd: 4 }
     }
@@ -102,7 +106,7 @@ pub async fn run_query_mode(
     query_tx: &UnboundedSender<String>,
     cmd_tx: &UnboundedSender<SwarmCommand>,
     notify_rx: tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
-    narinfo_cache: &std::sync::Mutex<NarinfoCache>,
+    narinfo_cache: &Mutex<NarinfoCache>,
     config: &Config,
 ) -> anyhow::Result<()> {
     let _ = (cmd_tx, notify_rx);
@@ -164,7 +168,7 @@ async fn handle_have(
 
 async fn handle_info(
     config: &Config,
-    cache: &std::sync::Mutex<NarinfoCache>,
+    cache: &Mutex<NarinfoCache>,
     reply: &mut ReplyWriter,
     path: &str,
 ) {
@@ -203,9 +207,10 @@ pub async fn run_substitute_mode(
     cache: &ProviderCache,
     cmd_tx: &UnboundedSender<SwarmCommand>,
     mut notify_rx: tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
-    narinfo_cache: &std::sync::Mutex<NarinfoCache>,
+    narinfo_cache: &Mutex<NarinfoCache>,
     config: &Config,
     _query_tx: &UnboundedSender<String>,
+    reputation: &Arc<Mutex<ReputationTracker>>,
 ) -> anyhow::Result<()> {
     let mut reply = ReplyWriter::new();
 
@@ -229,6 +234,7 @@ pub async fn run_substitute_mode(
                 &dest,
                 &mut notify_rx,
                 narinfo_cache,
+                reputation,
             )
             .await;
         }
@@ -247,7 +253,8 @@ async fn try_swarm_substitute(
     path: &str,
     dest: &str,
     notify_rx: &mut tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
-    narinfo_cache: &std::sync::Mutex<NarinfoCache>,
+    narinfo_cache: &Mutex<NarinfoCache>,
+    reputation: &Arc<Mutex<ReputationTracker>>,
 ) {
     let hash_part = match extract_hash_part(path) {
         Ok(h) => h,
@@ -296,6 +303,10 @@ async fn try_swarm_substitute(
     }
 
     tracing::info!("Found {} swarm providers for {}", providers.len(), nar_hash);
+
+    // Sort providers by reputation score (prefer reliable peers)
+    let mut providers = providers;
+    reputation.lock().unwrap().sort_by_score(&mut providers);
 
     // Step 2: handshake with each provider to discover block availability
     let handshakes = handshake_with_providers(cmd_tx, notify_rx, &providers, nar_hash_bytes).await;
@@ -572,6 +583,67 @@ pub fn format_trace_progress(store_path: &str, url: &str, total: u64, transferre
 
 pub fn format_trace_succeeded(store_path: &str, url: &str, size: u64) -> String {
     format!("@ download-succeeded {} {} {}", store_path, url, size)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_daemon_mode(
+    cache: &ProviderCache,
+    cmd_tx: &UnboundedSender<SwarmCommand>,
+    mut notify_rx: tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
+    narinfo_cache: &Mutex<NarinfoCache>,
+    config: &Config,
+    reputation: &Arc<Mutex<ReputationTracker>>,
+    conn_mgr: &Arc<Mutex<ConnectionManager>>,
+) -> anyhow::Result<()> {
+    use tokio::time::Duration;
+
+    let republish_interval = Duration::from_secs(22 * 3600);
+    let mut republish_tick = tokio::time::interval(republish_interval);
+
+    let mut reply = ReplyWriter::new();
+
+    tracing::info!("Daemon mode: swarm alive, accepting substitute requests");
+
+    loop {
+        tokio::select! {
+            _ = republish_tick.tick() => {
+                tracing::debug!("Daemon republish tick (no local nars to announce)");
+                conn_mgr.lock().unwrap().prune_dead();
+                reputation.lock().unwrap().prune_stale(Duration::from_secs(30 * 24 * 3600));
+            }
+            result = read_command_async() => {
+                let cmd = match result {
+                    Ok(c) => c,
+                    Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                    Err(e) => {
+                        tracing::error!("Failed to read daemon command: {}", e);
+                        break;
+                    },
+                };
+
+                if let DaemonCommand::Substitute { path, dest } = cmd {
+                    try_swarm_substitute(
+                        config,
+                        cache,
+                        cmd_tx,
+                        &mut reply,
+                        &path,
+                        &dest,
+                        &mut notify_rx,
+                        narinfo_cache,
+                        reputation,
+                    )
+                    .await;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn read_command_async() -> std::io::Result<DaemonCommand> {
+    tokio::task::spawn_blocking(read_command).await?
 }
 
 #[cfg(test)]

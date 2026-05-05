@@ -13,6 +13,11 @@ pub struct Config {
     pub substitute_urls: Vec<String>,
     pub min_providers: usize,
     pub acl_path: PathBuf,
+    pub max_total_peers: usize,
+    pub connection_retries: u32,
+    pub health_check_interval_secs: u64,
+    pub reputation_ban_threshold: u32,
+    pub reputation_prune_age_days: u64,
 }
 
 impl Config {
@@ -39,6 +44,11 @@ impl Config {
                 .unwrap_or_else(default_substitute_urls),
             min_providers: 3,
             acl_path: PathBuf::from("/etc/guix/acl"),
+            max_total_peers: 50,
+            connection_retries: 3,
+            health_check_interval_secs: 60,
+            reputation_ban_threshold: 5,
+            reputation_prune_age_days: 30,
         }
     }
 }

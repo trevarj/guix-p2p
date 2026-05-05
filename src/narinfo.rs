@@ -16,7 +16,10 @@ impl NarinfoCache {
     }
 
     pub fn get(&self, hash_part: &str) -> Option<Narinfo> {
-        let (_expiry, info) = self.entries.get(hash_part)?;
+        let (expiry, info) = self.entries.get(hash_part)?;
+        if tokio::time::Instant::now() >= *expiry {
+            return None;
+        }
         Some(info.clone())
     }
 

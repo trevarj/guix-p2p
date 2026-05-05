@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use sha2::{Digest, Sha256};
 
 pub const DEFAULT_BLOCK_SIZE: usize = 262144;
