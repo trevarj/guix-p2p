@@ -1,14 +1,24 @@
-# Architecture: guix-p2p-substitute
+# Architecture: guix-p2p
 
 ## Overview
 
-`guix-p2p-substitute` is a standalone Rust binary that speaks the guix-daemon's
+`guix-p2p` is a standalone Rust binary that speaks the guix-daemon's
 existing substituter pipe protocol, but sources binary substitutes (nars) from a
 libp2p-powered Kademlia DHT + custom block-swarm network instead of (or
 alongside) HTTP.
 
 Zero changes to the guix-daemon. Minimal 4-line Guile wrapper in `guix
 substitute` gated by an environment variable.
+
+## Architecture Overview
+
+The binary runs in two modes:
+- **Daemon** (`--daemon`): Persistent process with warm libp2p swarm, listening
+  on a Unix domain socket for relay connections
+- **Relay** (`--query --socket PATH` or `--substitute --socket PATH`): Thin
+  client that forwards stdin/fd4 through the Unix socket to the daemon,
+
+  avoiding cold-start cost
 
 ## Data Flow
 
@@ -18,15 +28,30 @@ guix-daemon
   │ stdin: "have /gnu/store/...", "info /gnu/store/...", "substitute /gnu/store/... /tmp/dest"
   │ fd 4:  reads "success sha256:... 12345" or "not-found" or "hash-mismatch ..."
   ▼
-guix substitute (Guile, 4-line patch)
-  │ if $GUIX_USE_P2P=1 → exec guix-p2p-substitute
+guix substitute (Guile, 4-line patch) or PATH wrapper
+  │ if $GUIX_USE_P2P=1 or wrapper detects "substitute" → exec guix-p2p
   ▼
-guix-p2p-substitute (Rust, libp2p)
+guix-p2p (Rust, libp2p)
+  │
+  ├─► Daemon Mode (--daemon)
+  │     Unix socket listener at $XDG_CACHE_HOME/guix-p2p/guix-p2p.sock
+  │     Accepts relay connections, processes query/substitute requests
+  │     Warm libp2p swarm, seeds to peers
+  │
+  ├─► Relay Mode (--query --socket PATH / --substitute --socket PATH)
+  │     Connects to daemon's Unix socket
+  │     Sends mode header + forwards stdin to daemon
+  │     Writes daemon replies to fd 4
+  │     Near-zero startup cost (<1ms vs cold-start libp2p init)
+  │
+  ├─► Direct Mode (--query / --substitute without --socket)
+  │     Legacy mode: initializes own libp2p swarm and processes requests
+  │     Higher startup cost, kept for development/fallback
   │
   ├─► Daemon Protocol Layer (stdin parser, fd 4 reply writer)
   │     "have" → DHT check if peers exist for nar hash
   │     "info" → fetch narinfo (HTTP or local cache) + return metadata
-   │     "substitute" → swarm download or reply not-found → fd 4 reply
+  │     "substitute" → swarm download or reply not-found → fd 4 reply
   │
   ├─► libp2p Kad DHT (QUIC transport, SHA-256 key = nar hash)
   │     get_providers(nar_hash) → list of PeerIds
@@ -36,22 +61,18 @@ guix-p2p-substitute (Rust, libp2p)
   ├─► Swarm Downloader (libp2p request-response streams)
   │     Handshake: nar_hash + block availability bitfield
   │     Request: up to 8 block indices per batch
-   │     Round-robin block assignment across connected peers
-   │     Per-block SHA-256 verification
-   │     Final nar-SHA-256 verification against narinfo
-   │     Peer reputation scoring (time-decay, ban threshold)
-   │     Connection management (retry/backoff, dead peer pruning)
-   │
-   ├─► Bandwidth Limiter (token-bucket, configurable caps)
-   │
-   ├─► Background Daemon Mode (--daemon)
-   │     Swarm stays alive, periodic DHT republishing
-   │     Serves block requests to other peers
-   │
-   └─► HTTP Narinfo Client (reqwest)
-         Narinfo fetch from official substitute URLs
-         Ed25519 signature verification against /etc/guix/acl
-         NarinfoCache with 60s TTL (shared via std::sync::Mutex)
+  │     Round-robin block assignment across connected peers
+  │     Per-block SHA-256 verification
+  │     Final nar-SHA-256 verification against narinfo
+  │     Peer reputation scoring (time-decay, ban threshold)
+  │     Connection management (retry/backoff, dead peer pruning)
+  │
+  ├─► Bandwidth Limiter (token-bucket, configurable caps)
+  │
+  └─► HTTP Narinfo Client (reqwest)
+       Narinfo fetch from official substitute URLs
+       Ed25519 signature verification against /etc/guix/acl
+       NarinfoCache with 60s TTL (shared via Arc<Mutex>)
 ```
 
 ## Design Decisions
@@ -63,7 +84,7 @@ guix-p2p-substitute (Rust, libp2p)
 | Swarm | Custom nar block protocol | BTv2 infohash is mathematically incompatible with nar-SHA-256 |
 | Transport | QUIC (libp2p-quic) + TCP fallback | Multiplexed, performant, NAT-friendly |
 | NAT traversal | Built into libp2p (autonat/relay/dcutr), deferred post-MVP | Significant complexity; initial users need open ports or IPv6 |
-| Daemon integration | Env var gating in existing `guix substitute` | Zero daemon C++ changes; 4-line Guile patch |
+| Daemon integration | Unix socket relay + PATH wrapper | Zero daemon C++ changes; relay gives <1ms startup |
 | Narinfos | HTTP fetch from official substitute URLs | Tiny (<500 bytes); existing trust chain unchanged |
 | Nars | DHT + swarm; not-found replies let guix-daemon chain to HTTP substituters | Heavy payload; distributed across peers for P2P |
 | Distribution | External project, crates.io for development, Guix channel for packaging | Not targeting upstream Guix inclusion (would need pure Guile) |
@@ -202,17 +223,20 @@ Narinfo flow:
 ```
 src/
 ├── lib.rs                   # Crate root (public API for integration tests)
-├── main.rs                  # CLI, swarm task, daemon task, bidirectional channels
+├── main.rs                  # CLI, swarm task, daemon/relay mode dispatch
 ├── behaviour.rs             # libp2p NetworkBehaviour (kad + block_exchange + mdns + identify)
-├── channel.rs               # SwarmCommand / SwarmNotification enums
-├── config.rs                # Config struct (block_size, timeouts, ACL path, substitute URLs, conn/rep config)
+├── channel.rs               # SwarmCommand / SwarmNotification enums (broadcast channel types)
+├── config.rs                # Config struct (block_size, timeouts, ACL path, socket_path, etc.)
 ├── connection.rs            # ConnectionManager (retry/backoff, dead peer pruning, max peers)
-├── daemon.rs                # stdin parser, fd 4 reply writer, swarm substitute pipeline, daemon mode
+├── daemon.rs                # stdin parser, fd 4 reply writer, swarm substitute pipeline, daemon + socket listener
+├── relay.rs                 # Unix socket relay client (stdin → socket → fd 4)
 ├── dht.rs                   # Kad wrapper, handle_kad_event → notifications, get_providers, bootstrap
 ├── reputation.rs            # ReputationTracker (time-decay scoring, ban threshold, JSON persistence)
 ├── bandwidth.rs             # BandwidthLimiter (token-bucket, configurable caps)
+├── dashboard.rs             # Web dashboard (optional, --dashboard flag)
 ├── http_client.rs           # Narinfo fetch (HTTP only), signature verification, cache
 ├── narinfo.rs               # Narinfo parser, ACL loader, Ed25519 verifier, NarinfoCache (with TTL eviction)
+├── nar_store.rs             # NarStore: local nar cache, block serving, seeding via guix archive --export
 ├── identity.rs              # Ed25519 keypair gen/persistence
 └── swarm/
     ├── mod.rs
@@ -231,24 +255,46 @@ libp2p provides built-in behaviours:
 When ready, it's a behaviour mix-in and relay node infrastructure deployment.
 Not a protocol rewrite.
 
-## Activation (No Upstream Patch Needed)
+## Activation
 
 The binary accepts `--query` / `--substitute` / `--daemon` as top-level flags
-(matching guix-daemon's invocation of `guix substitute --query`). Activation is
-done via a PATH-priority wrapper script — no changes to Guix source required.
+(matching guix-daemon's invocation of `guix substitute --query`). The `--socket`
+flag selects relay mode for `--query` and `--substitute`.
+
+### Daemon + Relay Architecture
+
+The recommended deployment uses a persistent daemon and thin relay clients:
+
+1. **Daemon** (`guix-p2p --daemon`): Listens on a Unix domain socket
+   (`$XDG_CACHE_HOME/guix-p2p/guix-p2p.sock` by default). Keeps the libp2p
+   swarm warm, serves block requests, processes queries and substitutes from
+   relay connections.
+
+2. **Relay** (`guix-p2p --query --socket PATH`): Connects to the daemon's Unix
+   socket, sends mode header (`mode: query\n`), then forwards stdin lines and
+   writes daemon replies to fd 4. Startup is <1ms since no libp2p
+   initialization is needed.
+
+Each relay connection sends a mode header and then streams daemon protocol
+commands. The daemon processes each connection independently, subscribing to
+the swarm's broadcast notification channel for that connection.
 
 ### PATH Wrapper (`scripts/guix-wrapper.sh`)
 
-A thin shell script placed earlier in `$PATH` than the real `guix` binary:
+A thin shell script placed earlier in `$PATH` than the real `guix` binary.
+Detects whether the daemon's socket is available and uses relay mode when
+possible, falling back to direct invocation otherwise:
 
 ```
 guix-daemon invokes "guix substitute --query"
   → wrapper intercepts "substitute"
-  → exec guix-p2p-substitute --query
+  → if socket exists: exec guix-p2p --query --socket $SOCKET
+  → else: exec real guix substitute --query
 
 guix-daemon invokes "guix substitute --substitute"
   → wrapper intercepts "substitute"
-  → exec guix-p2p-substitute --substitute
+  → if socket exists: exec guix-p2p --substitute --socket $SOCKET
+  → else: exec real guix substitute --substitute
 
 user invokes "guix build/install/system/..."
   → wrapper passes through to real guix unchanged
@@ -265,7 +311,7 @@ substitute protocol.
   (make <service>
     #:provides '(guix-p2p-daemon)
     #:start (make-forkexec-constructor
-             '("guix-p2p-substitute" "--daemon"
+             '("guix-p2p" "--daemon"
                "--listen-addr" "/ip4/0.0.0.0/udp/6881/quic-v1"
                "--cache-dir" "/var/cache/guix-p2p")
              #:log-file "/var/log/guix-p2p-daemon.log")
@@ -275,18 +321,47 @@ substitute protocol.
 
 ### Future: Upstream Guile Patch
 
-If upstream merges a 4-line patch to `guix/scripts/substitute.scm`, the PATH
-wrapper becomes unnecessary:
+If upstream merges a patch to `guix/scripts/substitute.scm`, the PATH
+wrapper becomes unnecessary. The patch would detect the P2P socket and
+relay through it directly.
 
-```scheme
-(if (and=> (getenv "GUIX_USE_P2P")
-           (cut string-ci=? <> "yes"))
-    (begin
-      (dup2 (fileno (current-output-port)) 4)
-      (apply execlp "guix-p2p-substitute"
-             "guix-p2p-substitute"
-             (cdr (command-line))))
-    (begin
-      ;; existing substitute logic
-      ))
+## Seeding Strategy
+
+Nars are seeded from a local cache directory after successful downloads or
+explicit `--seed` paths. The `NarStore` (`src/nar_store.rs`) manages storage
+and serving.
+
+### Approach: Hybrid nar cache seeding
+
+- **Post-download seeding**: After a successful swarm download, the nar is
+  saved to `<cache_dir>/nar/<sha256hex>.nar` and announced in the DHT via
+  `start_providing`. Future peers can download it from this node.
+- **Explicit seeding**: The `--seed` flag accepts comma-separated store paths.
+  Each is exported via `guix archive --export`, hashed via `guix hash -S nar
+  -f hex`, and stored in the nar cache. All seeded nars are announced in the
+  DHT on startup.
+- **Startup scan**: On startup, `NarStore::new()` scans `<cache_dir>/nar/*.nar`
+  and indexes each file by its filename stem (the hex sha256). All indexed
+  nars are announced in the DHT.
+- **Serving**: Incoming block requests are served from the nar store. The
+  `NarStore::handle_request()` method dispatches to handshake replies (with
+  block hashes) or block data reads. The old `serve_block_request()` stub has
+  been replaced.
+
+### NarStore wire-up
+
+- `NarStore` is wrapped in `Arc<Mutex<NarStore>>` and shared between:
+  - The swarm task (serves incoming block requests)
+  - The daemon substitute mode (saves nars after successful downloads)
+  - The daemon socket listener (same as substitute mode, for relay connections)
+- After saving a nar, a `SwarmCommand::StartProviding { hash }` is sent to the
+  swarm task to announce the new nar in the DHT.
+
+### `--seed` CLI flag
+
 ```
+guix-p2p --daemon --seed /gnu/store/...-foo,/gnu/store/...-bar
+```
+
+Each path is fed to `NarStore::seed_store_path()`, which runs `guix hash` and
+`guix archive --export` to compute the hash and export the nar data.

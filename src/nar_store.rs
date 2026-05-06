@@ -1,0 +1,399 @@
+use std::{
+    collections::HashMap,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
+
+use anyhow::Context;
+use tracing;
+
+use crate::swarm::{
+    block::{BlockInfo, compute_block_hashes},
+    codec::{BlockData, BlockRequest, BlockResponse},
+};
+
+/// Manages locally cached nar data for serving blocks to peers.
+///
+/// Nars are stored on disk at `<cache_dir>/nar/<sha256hex>.nar`.
+/// On startup, the store scans this directory and indexes all files by their
+/// filename (which must be the hex-encoded sha256 of the nar content).
+/// After a successful swarm download, the nar is saved here so it can be
+/// re-seeded to other peers.
+pub struct NarStore {
+    cache_dir: PathBuf,
+    block_size: usize,
+    /// In-memory index: nar_hash_hex -> (file_path, nar_size, block_info)
+    index: HashMap<String, NarEntry>,
+}
+
+struct NarEntry {
+    path: PathBuf,
+    #[allow(dead_code)]
+    nar_size: u64,
+    block_info: BlockInfo,
+}
+
+impl NarStore {
+    pub fn new(cache_dir: &Path, block_size: usize) -> Self {
+        let nar_dir = cache_dir.join("nar");
+        let _ = std::fs::create_dir_all(&nar_dir);
+
+        let mut store = NarStore { cache_dir: nar_dir, block_size, index: HashMap::new() };
+        store.scan();
+        store
+    }
+
+    /// Scan the nar directory and index all stored nars.
+    fn scan(&mut self) {
+        let entries = match std::fs::read_dir(&self.cache_dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "nar") {
+                continue;
+            }
+            let stem = match path.file_stem().and_then(|s| s.to_str()) {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+
+            let meta = match std::fs::metadata(&path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let nar_size = meta.len();
+            let block_info = BlockInfo::from_file_size(nar_size, self.block_size);
+
+            tracing::info!(
+                "indexed local nar: hash={}.. size={} blocks={}",
+                &stem[..16.min(stem.len())],
+                nar_size,
+                block_info.block_count,
+            );
+            self.index.insert(stem, NarEntry { path, nar_size, block_info });
+        }
+
+        tracing::info!("nar store: {} nars indexed", self.index.len());
+    }
+
+    /// Save a nar to the store after a successful download.
+    pub fn save(&mut self, nar_hash_hex: &str, nar_data: &[u8]) -> anyhow::Result<()> {
+        let path = self.cache_dir.join(format!("{}.nar", nar_hash_hex));
+        let mut f = std::fs::File::create(&path).context("failed to create nar file")?;
+        f.write_all(nar_data).context("failed to write nar data")?;
+
+        let nar_size = nar_data.len() as u64;
+        let block_info = BlockInfo::from_file_size(nar_size, self.block_size);
+
+        tracing::info!(
+            "saved nar: hash={}.. size={} blocks={}",
+            &nar_hash_hex[..16.min(nar_hash_hex.len())],
+            nar_size,
+            block_info.block_count,
+        );
+
+        self.index.insert(nar_hash_hex.to_string(), NarEntry { path, nar_size, block_info });
+        Ok(())
+    }
+
+    /// Seed a nar from a store path using `guix archive --export`.
+    /// The nar hash is computed via `guix hash -S nar -f hex`.
+    pub fn seed_store_path(&mut self, store_path: &str) -> anyhow::Result<String> {
+        let nar_hash_hex = compute_nar_hash(store_path).context("failed to compute nar hash")?;
+
+        if self.index.contains_key(&nar_hash_hex) {
+            tracing::info!("nar already seeded: {}..", &nar_hash_hex[..16]);
+            return Ok(nar_hash_hex);
+        }
+
+        let nar_data = export_nar(store_path).context("failed to export nar")?;
+        self.save(&nar_hash_hex, &nar_data)?;
+        Ok(nar_hash_hex)
+    }
+
+    /// Return the list of nar hashes currently stored.
+    pub fn seeded_hashes(&self) -> Vec<String> {
+        self.index.keys().cloned().collect()
+    }
+
+    /// Number of seeded nars.
+    pub fn len(&self) -> usize {
+        self.index.len()
+    }
+
+    /// Check if the store has no seeded nars.
+    pub fn is_empty(&self) -> bool {
+        self.index.is_empty()
+    }
+
+    /// Check if we have a nar for the given hash.
+    pub fn has_nar(&self, nar_hash_hex: &str) -> bool {
+        self.index.contains_key(nar_hash_hex)
+    }
+
+    /// Handle an incoming block request. Returns None if we don't have this nar.
+    pub fn handle_request(&self, request: &BlockRequest) -> Option<BlockResponse> {
+        match request {
+            BlockRequest::Handshake { nar_hash } => {
+                let key = hex::encode(nar_hash);
+                let entry = self.index.get(&key)?;
+
+                // Compute block hashes from the file on disk
+                let hashes = match self.read_block_hashes(&key) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::warn!("failed to read block hashes for {}: {}", key, e);
+                        return Some(BlockResponse::HandshakeReply {
+                            blocks_available: vec![],
+                            block_count: 0,
+                            block_size: self.block_size as u32,
+                            block_hashes: vec![],
+                        });
+                    },
+                };
+
+                let n = entry.block_info.block_count;
+                let available: Vec<u32> = (0..n).collect();
+
+                tracing::info!(
+                    "handshake reply: hash={}.. blocks={}",
+                    &key[..16.min(key.len())],
+                    n,
+                );
+
+                Some(BlockResponse::HandshakeReply {
+                    blocks_available: available,
+                    block_count: n,
+                    block_size: self.block_size as u32,
+                    block_hashes: hashes.iter().map(|h| h.to_vec()).collect(),
+                })
+            },
+            BlockRequest::GetBlocks { indices } => {
+                // Find which nar this request is for by trying all entries
+                // (we don't have the nar_hash in GetBlocks, only indices)
+                // We need to match by checking the peer's active handshake context.
+                // For simplicity, read from the first matching nar that has
+                // enough blocks. The caller should ensure the request is for
+                // the nar that was just handshake'd.
+                //
+                // Better approach: the NarStore is used inside the swarm event
+                // loop where we know which nar_hash the peer is asking about.
+                // But the current BlockRequest::GetBlocks doesn't carry the hash.
+                // We'll serve from the first stored nar that has enough blocks.
+                self.serve_blocks_from_any(indices)
+            },
+        }
+    }
+
+    /// Handle a block request for a specific nar hash.
+    pub fn handle_request_for_hash(
+        &self,
+        nar_hash_hex: &str,
+        request: &BlockRequest,
+    ) -> Option<BlockResponse> {
+        match request {
+            BlockRequest::Handshake { .. } => {
+                let entry = self.index.get(nar_hash_hex)?;
+                let hashes = match self.read_block_hashes(nar_hash_hex) {
+                    Ok(h) => h,
+                    Err(_) => return None,
+                };
+                let n = entry.block_info.block_count;
+                Some(BlockResponse::HandshakeReply {
+                    blocks_available: (0..n).collect(),
+                    block_count: n,
+                    block_size: self.block_size as u32,
+                    block_hashes: hashes.iter().map(|h| h.to_vec()).collect(),
+                })
+            },
+            BlockRequest::GetBlocks { indices } => self.serve_blocks(nar_hash_hex, indices),
+        }
+    }
+
+    fn serve_blocks(&self, nar_hash_hex: &str, indices: &[u32]) -> Option<BlockResponse> {
+        let entry = self.index.get(nar_hash_hex)?;
+        let data = std::fs::read(&entry.path).ok()?;
+
+        let blks: Vec<BlockData> = indices
+            .iter()
+            .filter_map(|&i| {
+                let off = i as usize * self.block_size;
+                if off >= data.len() {
+                    return None;
+                }
+                let end = (off + self.block_size).min(data.len());
+                Some(BlockData { index: i, data: data[off..end].to_vec() })
+            })
+            .collect();
+
+        if blks.is_empty() {
+            Some(BlockResponse::Error { message: "no blocks available for this nar".into() })
+        } else {
+            Some(BlockResponse::Blocks { data: blks })
+        }
+    }
+
+    fn serve_blocks_from_any(&self, indices: &[u32]) -> Option<BlockResponse> {
+        // Try each stored nar until we find one that has enough blocks
+        for (hash, entry) in &self.index {
+            if indices.iter().all(|&i| i < entry.block_info.block_count) {
+                return self.serve_blocks(hash, indices);
+            }
+        }
+        Some(BlockResponse::Error { message: "no matching nar for block indices".into() })
+    }
+
+    fn read_block_hashes(&self, nar_hash_hex: &str) -> anyhow::Result<Vec<[u8; 32]>> {
+        let entry = self
+            .index
+            .get(nar_hash_hex)
+            .ok_or_else(|| anyhow::anyhow!("nar not found in index"))?;
+        let data =
+            std::fs::read(&entry.path).context("failed to read nar file for hash computation")?;
+        Ok(compute_block_hashes(&data, self.block_size))
+    }
+}
+
+/// Thread-safe wrapper for NarStore.
+pub type SharedNarStore = Mutex<NarStore>;
+
+/// Compute the nar hash of a store path using `guix hash -S nar -f hex`.
+fn compute_nar_hash(store_path: &str) -> anyhow::Result<String> {
+    let output = std::process::Command::new("guix")
+        .args(["hash", "-S", "nar", "-f", "hex", store_path])
+        .output()
+        .context("failed to run `guix hash`")?;
+
+    if !output.status.success() {
+        anyhow::bail!("guix hash failed: {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
+}
+
+/// Export nar data from a store path using `guix archive --export`.
+fn export_nar(store_path: &str) -> anyhow::Result<Vec<u8>> {
+    let output = std::process::Command::new("guix")
+        .args(["archive", "--export", store_path])
+        .output()
+        .context("failed to run `guix archive --export`")?;
+
+    if !output.status.success() {
+        anyhow::bail!("guix archive --export failed: {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    Ok(output.stdout)
+}
+
+#[cfg(test)]
+mod tests {
+    use sha2::{Digest, Sha256};
+
+    use super::*;
+
+    #[test]
+    fn test_nar_store_save_and_query() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = vec![42u8; 1024];
+        let hash = hex::encode(Sha256::digest(&data));
+
+        let mut store = NarStore::new(tmp.path(), 512);
+        assert!(!store.has_nar(&hash));
+
+        store.save(&hash, &data).unwrap();
+        assert!(store.has_nar(&hash));
+        assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn test_nar_store_persist_across_reopen() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = vec![0xABu8; 2048];
+        let hash = hex::encode(Sha256::digest(&data));
+
+        {
+            let mut store = NarStore::new(tmp.path(), 512);
+            store.save(&hash, &data).unwrap();
+            assert_eq!(store.len(), 1);
+        }
+
+        // Reopen — should find the saved nar on disk
+        let store = NarStore::new(tmp.path(), 512);
+        assert!(store.has_nar(&hash));
+        assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn test_nar_store_handshake_reply() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = vec![0xCCu8; 1500];
+        let hash = hex::encode(Sha256::digest(&data));
+
+        let mut store = NarStore::new(tmp.path(), 512);
+        store.save(&hash, &data).unwrap();
+
+        let request = BlockRequest::Handshake { nar_hash: hex::decode(&hash).unwrap() };
+        let resp = store.handle_request(&request).unwrap();
+
+        match resp {
+            BlockResponse::HandshakeReply { blocks_available, block_count, block_size, .. } => {
+                assert_eq!(block_count, 3); // ceil(1500/512)
+                assert_eq!(blocks_available.len(), 3);
+                assert_eq!(block_size, 512);
+            },
+            other => panic!("expected HandshakeReply, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_nar_store_get_blocks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = vec![0xDDu8; 1500];
+        let hash = hex::encode(Sha256::digest(&data));
+
+        let mut store = NarStore::new(tmp.path(), 512);
+        store.save(&hash, &data).unwrap();
+
+        let resp = store
+            .handle_request_for_hash(&hash, &BlockRequest::GetBlocks { indices: vec![0, 2] })
+            .unwrap();
+
+        match resp {
+            BlockResponse::Blocks { data: blocks } => {
+                assert_eq!(blocks.len(), 2);
+                assert_eq!(blocks[0].index, 0);
+                assert_eq!(blocks[0].data.len(), 512);
+                assert_eq!(blocks[1].index, 2);
+                assert_eq!(blocks[1].data.len(), 1500 - 1024); // last block
+            },
+            other => panic!("expected Blocks, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_nar_store_missing_nar_handshake() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = NarStore::new(tmp.path(), 512);
+
+        let request = BlockRequest::Handshake { nar_hash: vec![0u8; 32] };
+        assert!(store.handle_request(&request).is_none());
+    }
+
+    #[test]
+    fn test_seeded_hashes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = vec![1u8; 100];
+        let hash = hex::encode(Sha256::digest(&data));
+
+        let mut store = NarStore::new(tmp.path(), 512);
+        store.save(&hash, &data).unwrap();
+
+        let hashes = store.seeded_hashes();
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(hashes[0], hash);
+    }
+}

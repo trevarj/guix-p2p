@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     io::{self, BufRead},
-    os::unix::io::RawFd,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -11,11 +10,12 @@ use sha2::{Digest, Sha256};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
-    channel::{SwarmCommand, SwarmNotification},
+    channel::{NotifyRx, NotifyTx, SwarmCommand, SwarmNotification},
     config::Config,
     connection::ConnectionManager,
     dashboard::{self, BuildRegistry, DashboardEvent, ObservedBuild},
     dht::ProviderCache,
+    nar_store::NarStore,
     narinfo::NarinfoCache,
     reputation::ReputationTracker,
     swarm::{
@@ -56,30 +56,84 @@ pub fn parse_command_line(line: &str) -> io::Result<DaemonCommand> {
     }
 }
 
-pub struct ReplyWriter {
-    fd: RawFd,
+pub enum ReplyWriter {
+    Fd4,
+    Buffer(Vec<u8>),
 }
 
 impl ReplyWriter {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        ReplyWriter { fd: 4 }
+        ReplyWriter::Fd4
+    }
+
+    pub fn buffer() -> Self {
+        ReplyWriter::Buffer(Vec::new())
     }
 
     pub fn write_line(&mut self, line: &str) -> io::Result<()> {
-        let mut buf = line.as_bytes().to_vec();
-        buf.push(b'\n');
-        unsafe {
-            let n = libc::write(self.fd, buf.as_ptr() as *const libc::c_void, buf.len());
-            if n < 0 {
-                return Err(io::Error::last_os_error());
-            }
+        match self {
+            ReplyWriter::Fd4 => {
+                let mut buf = line.as_bytes().to_vec();
+                buf.push(b'\n');
+                unsafe {
+                    let n = libc::write(4, buf.as_ptr() as *const libc::c_void, buf.len());
+                    if n < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                }
+                Ok(())
+            },
+            ReplyWriter::Buffer(buf) => {
+                buf.extend_from_slice(line.as_bytes());
+                buf.push(b'\n');
+                Ok(())
+            },
         }
-        Ok(())
     }
 
     pub fn write_end(&mut self) -> io::Result<()> {
         self.write_line("")
+    }
+}
+
+/// An `std::io::Write` implementation that collects lines into a Vec<String>.
+pub struct LineBuffer {
+    lines: Vec<String>,
+}
+
+impl Default for LineBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LineBuffer {
+    pub fn new() -> Self {
+        LineBuffer { lines: Vec::new() }
+    }
+
+    pub fn into_string(self) -> String {
+        let mut out = String::new();
+        for line in &self.lines {
+            out.push_str(line);
+            out.push('\n');
+        }
+        out
+    }
+}
+
+impl io::Write for LineBuffer {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let s = String::from_utf8_lossy(buf);
+        for line in s.lines() {
+            self.lines.push(line.to_string());
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 
@@ -106,12 +160,12 @@ pub async fn run_query_mode(
     cache: &ProviderCache,
     query_tx: &UnboundedSender<String>,
     cmd_tx: &UnboundedSender<SwarmCommand>,
-    notify_rx: tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
-    narinfo_cache: &Mutex<NarinfoCache>,
+    mut notify_rx: NotifyRx,
+    narinfo_cache: &Arc<Mutex<NarinfoCache>>,
     config: &Config,
     client: &reqwest::Client,
 ) -> anyhow::Result<()> {
-    let _ = (cmd_tx, notify_rx);
+    let _ = cmd_tx;
     let mut reply = ReplyWriter::new();
 
     loop {
@@ -133,6 +187,8 @@ pub async fn run_query_mode(
             },
             DaemonCommand::Substitute { .. } => {},
         }
+        // Drain any pending broadcast notifications to prevent lagging
+        while notify_rx.try_recv().is_ok() {}
     }
 
     Ok(())
@@ -210,12 +266,13 @@ async fn handle_info(
 pub async fn run_substitute_mode(
     cache: &ProviderCache,
     cmd_tx: &UnboundedSender<SwarmCommand>,
-    mut notify_rx: tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
-    narinfo_cache: &Mutex<NarinfoCache>,
+    mut notify_rx: NotifyRx,
+    narinfo_cache: &Arc<Mutex<NarinfoCache>>,
     config: &Config,
     _query_tx: &UnboundedSender<String>,
     reputation: &Arc<Mutex<ReputationTracker>>,
     client: &reqwest::Client,
+    nar_store: &Arc<Mutex<NarStore>>,
 ) -> anyhow::Result<()> {
     let mut reply = ReplyWriter::new();
 
@@ -246,6 +303,7 @@ pub async fn run_substitute_mode(
                 &dummy_registry,
                 &dummy_tx,
                 client,
+                nar_store,
             )
             .await;
         }
@@ -263,12 +321,13 @@ async fn try_swarm_substitute(
     reply: &mut ReplyWriter,
     path: &str,
     dest: &str,
-    notify_rx: &mut tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
-    narinfo_cache: &Mutex<NarinfoCache>,
+    notify_rx: &mut NotifyRx,
+    narinfo_cache: &Arc<Mutex<NarinfoCache>>,
     reputation: &Arc<Mutex<ReputationTracker>>,
     build_registry: &BuildRegistry,
     event_tx: &dashboard::EventBus,
     client: &reqwest::Client,
+    nar_store: &Arc<Mutex<NarStore>>,
 ) {
     let hash_part = match extract_hash_part(path) {
         Ok(h) => h,
@@ -407,6 +466,21 @@ async fn try_swarm_substitute(
             let size = nar_data.len() as u64;
             let elapsed_ms = download_start.elapsed().as_millis() as u64;
 
+            // Save nar to local store for re-seeding
+            {
+                let nar_hash_hex = nar_hash.strip_prefix("sha256:").unwrap_or(&nar_hash);
+                let mut store = nar_store.lock().unwrap();
+                if store.has_nar(nar_hash_hex) {
+                    tracing::debug!("nar already in store, skipping save");
+                } else if let Err(e) = store.save(nar_hash_hex, &nar_data) {
+                    tracing::warn!("failed to save nar to store for re-seeding: {}", e);
+                } else {
+                    drop(store);
+                    let _ = cmd_tx
+                        .send(SwarmCommand::StartProviding { hash: nar_hash_hex.to_string() });
+                }
+            }
+
             // Mark build as downloaded in registry
             {
                 let mut reg = build_registry.lock().unwrap();
@@ -452,7 +526,7 @@ async fn try_swarm_substitute(
 
 /// Wait for provider notifications for the given DHT key, with a timeout.
 async fn wait_for_providers(
-    notify_rx: &mut tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
+    notify_rx: &mut NotifyRx,
     dht_key: &str,
     config: &Config,
 ) -> Vec<PeerId> {
@@ -467,13 +541,19 @@ async fn wait_for_providers(
         }
 
         match tokio::time::timeout(tokio::time::Duration::from_secs(1), notify_rx.recv()).await {
-            Ok(Some(SwarmNotification::ProvidersFound { hash, peers })) => {
+            Ok(Ok(SwarmNotification::ProvidersFound { hash, peers })) => {
                 if hash == dht_key {
                     return peers;
                 }
             },
-            Ok(Some(_)) => {},
-            Ok(None) => return Vec::new(),
+            Ok(Ok(_)) => {},
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(n))) => {
+                tracing::warn!("Notification receiver lagged by {} messages", n);
+                continue;
+            },
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
+                return Vec::new();
+            },
             Err(_elapsed) => continue,
         }
     }
@@ -492,7 +572,7 @@ struct PeerHandshake {
 /// Send Handshake requests and collect replies.
 async fn handshake_with_providers(
     cmd_tx: &UnboundedSender<SwarmCommand>,
-    notify_rx: &mut tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
+    notify_rx: &mut NotifyRx,
     providers: &[PeerId],
     nar_hash_bytes: [u8; 32],
 ) -> Vec<PeerHandshake> {
@@ -519,7 +599,7 @@ async fn handshake_with_providers(
         }
 
         match tokio::time::timeout(tokio::time::Duration::from_secs(1), notify_rx.recv()).await {
-            Ok(Some(SwarmNotification::BlockResponse {
+            Ok(Ok(SwarmNotification::BlockResponse {
                 peer,
                 response:
                     BlockResponse::HandshakeReply {
@@ -549,9 +629,9 @@ async fn handshake_with_providers(
                 });
                 pending.retain(|_, p| *p != peer);
             },
-            Ok(None) => break,
+            Ok(Ok(_)) => {},
+            Ok(Err(_)) => break,
             Err(_elapsed) => continue,
-            _ => {},
         }
     }
 
@@ -561,7 +641,7 @@ async fn handshake_with_providers(
 /// Orchestrate block downloads from peers.
 async fn download_blocks_from_peers(
     cmd_tx: &UnboundedSender<SwarmCommand>,
-    notify_rx: &mut tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
+    notify_rx: &mut NotifyRx,
     handshakes: &[PeerHandshake],
     nar_size: u64,
     block_info: BlockInfo,
@@ -619,7 +699,7 @@ async fn download_blocks_from_peers(
         }
 
         match tokio::time::timeout(tokio::time::Duration::from_secs(1), notify_rx.recv()).await {
-            Ok(Some(SwarmNotification::BlockResponse {
+            Ok(Ok(SwarmNotification::BlockResponse {
                 peer,
                 response: BlockResponse::Blocks { data },
             })) => {
@@ -642,9 +722,9 @@ async fn download_blocks_from_peers(
                     break;
                 }
             },
-            Ok(None) => break,
+            Ok(Ok(_)) => {},
+            Ok(Err(_)) => break,
             Err(_elapsed) => continue,
-            _ => {},
         }
     }
 
@@ -678,17 +758,17 @@ pub fn format_trace_succeeded(store_path: &str, url: &str, size: u64) -> String 
 pub async fn run_daemon_mode(
     cache: &ProviderCache,
     cmd_tx: &UnboundedSender<SwarmCommand>,
-    mut notify_rx: tokio::sync::mpsc::UnboundedReceiver<SwarmNotification>,
-    narinfo_cache: &Mutex<NarinfoCache>,
+    query_tx: &UnboundedSender<String>,
+    notify_tx: &NotifyTx,
+    narinfo_cache: &Arc<Mutex<NarinfoCache>>,
     config: &Config,
     reputation: &Arc<Mutex<ReputationTracker>>,
     conn_mgr: &Arc<Mutex<ConnectionManager>>,
     build_registry: &BuildRegistry,
     event_tx: &dashboard::EventBus,
     client: &reqwest::Client,
+    nar_store: &Arc<Mutex<NarStore>>,
 ) -> anyhow::Result<()> {
-    use tokio::time::Duration;
-
     if config.dashboard_enabled {
         let state = dashboard::DashboardState {
             provider_cache: cache.clone(),
@@ -708,31 +788,177 @@ pub async fn run_daemon_mode(
         tracing::info!("Dashboard enabled on http://{}:{}", bind, port);
     }
 
-    let republish_interval = Duration::from_secs(22 * 3600);
-    let mut republish_tick = tokio::time::interval(republish_interval);
+    // Start Unix socket listener for relay connections
+    let socket_path = config.socket_path.clone();
+    start_socket_listener(
+        &socket_path,
+        cache,
+        cmd_tx,
+        query_tx,
+        notify_tx,
+        narinfo_cache,
+        config,
+        reputation,
+        conn_mgr,
+        build_registry,
+        event_tx,
+        client,
+        nar_store,
+    )
+    .await?;
 
-    let mut reply = ReplyWriter::new();
+    Ok(())
+}
 
-    tracing::info!("Daemon mode: swarm alive, accepting substitute requests");
+/// Start the Unix domain socket listener that accepts relay connections.
+#[allow(clippy::too_many_arguments)]
+async fn start_socket_listener(
+    socket_path: &str,
+    cache: &ProviderCache,
+    cmd_tx: &UnboundedSender<SwarmCommand>,
+    query_tx: &UnboundedSender<String>,
+    notify_tx: &NotifyTx,
+    narinfo_cache: &Arc<Mutex<NarinfoCache>>,
+    config: &Config,
+    reputation: &Arc<Mutex<ReputationTracker>>,
+    conn_mgr: &Arc<Mutex<ConnectionManager>>,
+    build_registry: &BuildRegistry,
+    event_tx: &dashboard::EventBus,
+    client: &reqwest::Client,
+    nar_store: &Arc<Mutex<NarStore>>,
+) -> anyhow::Result<()> {
+    // Remove stale socket file if present
+    let _ = std::fs::remove_file(socket_path);
+
+    let listener = tokio::net::UnixListener::bind(socket_path)
+        .map_err(|e| anyhow::anyhow!("failed to bind socket {}: {}", socket_path, e))?;
+    tracing::info!("Listening for relay connections on {}", socket_path);
 
     loop {
-        tokio::select! {
-            _ = republish_tick.tick() => {
-                tracing::debug!("Daemon republish tick (no local nars to announce)");
-                conn_mgr.lock().unwrap().prune_dead();
-                reputation.lock().unwrap().prune_stale(Duration::from_secs(30 * 24 * 3600));
-            }
-            result = read_command_async() => {
-                let cmd = match result {
-                    Ok(c) => c,
-                    Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                    Err(e) => {
-                        tracing::error!("Failed to read daemon command: {}", e);
-                        break;
+        match listener.accept().await {
+            Ok((stream, _addr)) => {
+                tracing::info!("Relay connection accepted");
+                let notify_rx = notify_tx.subscribe();
+                let cache = cache.clone();
+                let cmd_tx = cmd_tx.clone();
+                let query_tx = query_tx.clone();
+                let narinfo_cache = narinfo_cache.clone();
+                let config = config.clone();
+                let reputation = reputation.clone();
+                let _conn_mgr = conn_mgr.clone();
+                let build_registry = build_registry.clone();
+                let event_tx = event_tx.clone();
+                let client = client.clone();
+                let nar_store = nar_store.clone();
+
+                tokio::spawn(async move {
+                    if let Err(e) = handle_socket_connection(
+                        stream,
+                        notify_rx,
+                        &cache,
+                        &cmd_tx,
+                        &query_tx,
+                        &narinfo_cache,
+                        &config,
+                        &reputation,
+                        &build_registry,
+                        &event_tx,
+                        &client,
+                        &nar_store,
+                    )
+                    .await
+                    {
+                        tracing::warn!("Socket connection error: {}", e);
+                    }
+                });
+            },
+            Err(e) => {
+                tracing::warn!("Failed to accept socket connection: {}", e);
+            },
+        }
+    }
+}
+
+/// Handle a single relay connection over a Unix socket.
+#[allow(clippy::too_many_arguments)]
+async fn handle_socket_connection(
+    stream: tokio::net::UnixStream,
+    notify_rx: NotifyRx,
+    cache: &ProviderCache,
+    cmd_tx: &UnboundedSender<SwarmCommand>,
+    query_tx: &UnboundedSender<String>,
+    narinfo_cache: &Arc<Mutex<NarinfoCache>>,
+    config: &Config,
+    reputation: &Arc<Mutex<ReputationTracker>>,
+    build_registry: &BuildRegistry,
+    event_tx: &dashboard::EventBus,
+    client: &reqwest::Client,
+    nar_store: &Arc<Mutex<NarStore>>,
+) -> anyhow::Result<()> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+    let (socket_read, mut socket_write) = stream.into_split();
+    let mut reader = tokio::io::BufReader::new(socket_read);
+    let mut notify_rx = notify_rx;
+
+    // Read mode header: "mode: query" or "mode: substitute"
+    let mut mode_line = String::new();
+    let n = reader.read_line(&mut mode_line).await?;
+    if n == 0 {
+        return Err(anyhow::anyhow!("relay connection closed before sending mode header"));
+    }
+    let mode = mode_line.trim();
+
+    tracing::info!("Relay mode: {}", mode);
+
+    match mode {
+        "mode: query" => {
+            let mut line = String::new();
+            loop {
+                line.clear();
+                let n = reader.read_line(&mut line).await?;
+                if n == 0 {
+                    break;
+                }
+
+                let cmd = parse_command_line(line.trim())?;
+                let mut reply = ReplyWriter::buffer();
+
+                match cmd {
+                    DaemonCommand::Have(paths) => {
+                        handle_have(cache, query_tx, &mut reply, &paths).await;
                     },
-                };
+                    DaemonCommand::Info(path) => {
+                        handle_info(config, narinfo_cache, &mut reply, &path, client).await;
+                    },
+                    DaemonCommand::Substitute { .. } => {},
+                }
+
+                if let ReplyWriter::Buffer(buf) = &reply
+                    && !buf.is_empty()
+                {
+                    socket_write.write_all(buf).await?;
+                    socket_write.flush().await?;
+                }
+
+                while notify_rx.try_recv().is_ok() {}
+            }
+            Ok(())
+        },
+        "mode: substitute" => {
+            let mut line = String::new();
+            loop {
+                line.clear();
+                let n = reader.read_line(&mut line).await?;
+                if n == 0 {
+                    break;
+                }
+
+                let cmd = parse_command_line(line.trim())?;
 
                 if let DaemonCommand::Substitute { path, dest } = cmd {
+                    let mut reply = ReplyWriter::buffer();
+
                     try_swarm_substitute(
                         config,
                         cache,
@@ -746,16 +972,25 @@ pub async fn run_daemon_mode(
                         build_registry,
                         event_tx,
                         client,
+                        nar_store,
                     )
                     .await;
+
+                    if let ReplyWriter::Buffer(buf) = &reply
+                        && !buf.is_empty()
+                    {
+                        socket_write.write_all(buf).await?;
+                        socket_write.flush().await?;
+                    }
                 }
             }
-        }
+            Ok(())
+        },
+        other => Err(anyhow::anyhow!("unknown relay mode: {}", other)),
     }
-
-    Ok(())
 }
 
+#[allow(dead_code)]
 async fn read_command_async() -> std::io::Result<DaemonCommand> {
     tokio::task::spawn_blocking(read_command).await?
 }

@@ -2,19 +2,19 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Context;
 use clap::Parser;
-use guix_p2p_substitute::{
+use guix_p2p::{
     behaviour::{self, GuixP2PBehaviour, GuixP2PEvent},
-    channel::{SwarmCommand, SwarmNotification},
+    channel::{NotifyTx, SwarmCommand, SwarmNotification},
     config,
     connection::{ConnectionConfig, ConnectionManager},
-    daemon, dashboard, dht, identity, narinfo,
+    daemon, dashboard, dht, identity, nar_store, narinfo,
     reputation::ReputationTracker,
     swarm::codec::{BlockRequest, BlockResponse},
 };
 use libp2p::{SwarmBuilder, quic, request_response};
 
 #[derive(Parser)]
-#[command(name = "guix-p2p-substitute", version)]
+#[command(name = "guix-p2p", version)]
 struct Cli {
     /// Run in query mode (driven by guix-daemon --query)
     #[arg(long, conflicts_with_all = ["substitute", "daemon"])]
@@ -63,6 +63,14 @@ struct Cli {
     /// Route all traffic through Tor only (no direct connections)
     #[arg(long, global = true)]
     tor_only: bool,
+
+    /// Unix socket path for daemon to bind and relay to connect
+    #[arg(long, global = true)]
+    socket: Option<String>,
+
+    /// Comma-separated store paths to seed via guix archive --export
+    #[arg(long, global = true)]
+    seed: Option<String>,
 }
 
 #[tokio::main]
@@ -94,8 +102,28 @@ async fn main() -> anyhow::Result<()> {
         config.tor_only = cli.tor_only;
     }
 
-    tracing::info!("Starting guix-p2p-substitute");
+    if let Some(ref sock) = cli.socket {
+        config.socket_path = sock.clone();
+    }
+
+    if let Some(ref seed) = cli.seed {
+        config.seed_paths = seed.split(',').map(str::to_string).collect();
+    }
+
+    tracing::info!("Starting guix-p2p");
     tracing::info!("Cache directory: {}", config.cache_dir.display());
+
+    match (cli.query, cli.substitute, &cli.socket) {
+        (true, false, Some(sock)) => {
+            guix_p2p::relay::forward(sock, guix_p2p::relay::RelayMode::Query).await?;
+            return Ok(());
+        },
+        (false, true, Some(sock)) => {
+            guix_p2p::relay::forward(sock, guix_p2p::relay::RelayMode::Substitute).await?;
+            return Ok(());
+        },
+        _ => {},
+    }
 
     let keypair = identity::load_or_generate_keypair(&config.cache_dir)
         .context("failed to load or generate identity")?;
@@ -111,10 +139,36 @@ async fn main() -> anyhow::Result<()> {
 
     dht::bootstrap(&mut swarm, &config.bootstrap_peers)?;
 
+    // Initialize nar store and announce all seeded nars in the DHT
+    let nar_store = Arc::new(std::sync::Mutex::new(nar_store::NarStore::new(
+        &config.cache_dir,
+        config.block_size,
+    )));
+    {
+        let mut store = nar_store.lock().unwrap();
+        for path in &config.seed_paths {
+            match store.seed_store_path(path) {
+                Ok(hash) => tracing::info!("seeded {} -> {}..", path, &hash[..16]),
+                Err(e) => tracing::warn!("failed to seed {}: {}", path, e),
+            }
+        }
+        for hash in store.seeded_hashes() {
+            if let Ok(bytes) = hex::decode(&hash) {
+                let key = libp2p::kad::RecordKey::new(&bytes);
+                if let Err(e) = swarm.behaviour_mut().kad.start_providing(key) {
+                    tracing::warn!("failed to announce nar {}: {}", &hash[..16], e);
+                } else {
+                    tracing::info!("announced nar {}.. in DHT", &hash[..16]);
+                }
+            }
+        }
+    }
+
     let provider_cache = dht::create_provider_cache();
     let narinfo_cache = std::sync::Mutex::new(narinfo::NarinfoCache::new(60));
+    let narinfo_cache = std::sync::Arc::new(narinfo_cache);
 
-    let http_client = guix_p2p_substitute::http_client::create_http_client(&config)
+    let http_client = guix_p2p::http_client::create_http_client(&config)
         .context("failed to create HTTP client")?;
 
     let conn_config = ConnectionConfig {
@@ -135,7 +189,7 @@ async fn main() -> anyhow::Result<()> {
     let build_registry: dashboard::BuildRegistry = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel::<SwarmCommand>();
-    let (notify_tx, notify_rx) = tokio::sync::mpsc::unbounded_channel::<SwarmNotification>();
+    let (notify_tx, _) = tokio::sync::broadcast::channel::<SwarmNotification>(4096);
     let (query_tx, query_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
     let cache_for_swarm = provider_cache.clone();
@@ -144,6 +198,7 @@ async fn main() -> anyhow::Result<()> {
     let rep_for_swarm = reputation.clone();
     let conn_for_swarm = conn_mgr.clone();
     let evt_for_swarm = event_tx.clone();
+    let nar_store_for_swarm = nar_store.clone();
 
     tokio::spawn(async move {
         run_swarm_task(
@@ -155,11 +210,14 @@ async fn main() -> anyhow::Result<()> {
             rep_for_swarm,
             conn_for_swarm,
             evt_for_swarm,
+            nar_store_for_swarm,
         )
         .await;
     });
 
     tracing::info!("Swarm task spawned, entering daemon event loop");
+
+    let notify_rx = notify_tx.subscribe();
 
     if cli.query {
         daemon::run_query_mode(
@@ -182,13 +240,15 @@ async fn main() -> anyhow::Result<()> {
             &query_tx,
             &reputation,
             &http_client,
+            &nar_store,
         )
         .await?
     } else if cli.daemon {
         daemon::run_daemon_mode(
             &provider_cache,
             &cmd_tx,
-            notify_rx,
+            &query_tx,
+            &notify_tx,
             &narinfo_cache,
             &config,
             &reputation,
@@ -196,6 +256,7 @@ async fn main() -> anyhow::Result<()> {
             &build_registry,
             &event_tx,
             &http_client,
+            &nar_store,
         )
         .await?
     } else {
@@ -212,12 +273,13 @@ async fn main() -> anyhow::Result<()> {
 async fn run_swarm_task(
     mut swarm: libp2p::Swarm<GuixP2PBehaviour>,
     cache: dht::ProviderCache,
-    notify_tx: tokio::sync::mpsc::UnboundedSender<SwarmNotification>,
+    notify_tx: NotifyTx,
     mut cmd_rx: tokio_stream::wrappers::UnboundedReceiverStream<SwarmCommand>,
     mut query_rx: tokio::sync::mpsc::UnboundedReceiver<String>,
     reputation: Arc<std::sync::Mutex<ReputationTracker>>,
     conn_mgr: Arc<std::sync::Mutex<ConnectionManager>>,
     event_tx: dashboard::EventBus,
+    nar_store: Arc<std::sync::Mutex<nar_store::NarStore>>,
 ) {
     use std::time::Duration;
 
@@ -241,7 +303,7 @@ async fn run_swarm_task(
                         dht::handle_kad_event(&cache, &notify_tx, e);
                     },
                     SwarmEvent::Behaviour(GuixP2PEvent::BlockExchange(e)) => {
-                        handle_block_exchange(&notify_tx, e, &reputation, &conn_mgr, &mut swarm);
+                        handle_block_exchange(&notify_tx, e, &reputation, &conn_mgr, &mut swarm, &nar_store);
                     },
                     SwarmEvent::ConnectionEstablished {
                         peer_id,
@@ -297,21 +359,43 @@ fn handle_swarm_command(swarm: &mut libp2p::Swarm<GuixP2PBehaviour>, cmd: SwarmC
             let req_id = swarm.behaviour_mut().block_exchange.send_request(&peer, request);
             tracing::debug!("Sent block request {:?} to peer={}", req_id, peer);
         },
+        SwarmCommand::StartProviding { hash } => {
+            if let Ok(bytes) = hex::decode(&hash) {
+                let key = libp2p::kad::RecordKey::new(&bytes);
+                if let Err(e) = swarm.behaviour_mut().kad.start_providing(key) {
+                    tracing::warn!(
+                        "failed to start providing nar {}: {}",
+                        &hash[..16.min(hash.len())],
+                        e
+                    );
+                } else {
+                    tracing::info!(
+                        "announced nar {}.. in DHT (post-download)",
+                        &hash[..16.min(hash.len())]
+                    );
+                }
+            }
+        },
     }
 }
 
 fn handle_block_exchange(
-    notify_tx: &tokio::sync::mpsc::UnboundedSender<SwarmNotification>,
+    notify_tx: &NotifyTx,
     event: request_response::Event<BlockRequest, BlockResponse>,
     reputation: &Arc<std::sync::Mutex<ReputationTracker>>,
     conn_mgr: &Arc<std::sync::Mutex<ConnectionManager>>,
     swarm: &mut libp2p::Swarm<GuixP2PBehaviour>,
+    nar_store: &Arc<std::sync::Mutex<nar_store::NarStore>>,
 ) {
     match event {
         request_response::Event::Message { peer, message, .. } => match message {
             request_response::Message::Request { request_id, request, channel, .. } => {
                 tracing::trace!("Incoming block request from {}", peer);
-                if let Some(resp) = serve_block_request(&request) {
+                let resp = {
+                    let store = nar_store.lock().unwrap();
+                    store.handle_request(&request)
+                };
+                if let Some(resp) = resp {
                     let _ = swarm.behaviour_mut().block_exchange.send_response(channel, resp);
                     tracing::trace!("Served block request to {}", peer);
                 } else {
@@ -330,26 +414,6 @@ fn handle_block_exchange(
         },
         other => {
             tracing::trace!("BlockExchange event: {:?}", other);
-        },
-    }
-}
-
-fn serve_block_request(request: &BlockRequest) -> Option<BlockResponse> {
-    match request {
-        BlockRequest::Handshake { nar_hash } => {
-            let hash_hex = hex::encode(nar_hash);
-            tracing::info!("Handshake request for nar_hash={}", hash_hex);
-
-            Some(BlockResponse::HandshakeReply {
-                blocks_available: vec![],
-                block_count: 0,
-                block_size: 262144,
-                block_hashes: vec![],
-            })
-        },
-        BlockRequest::GetBlocks { indices: _ } => {
-            tracing::trace!("Block request for indices, but local storage not implemented");
-            Some(BlockResponse::Error { message: "blocks not available".into() })
         },
     }
 }

@@ -23,6 +23,9 @@ pub struct Config {
     pub dashboard_bind: String,
     pub tor_socks: Option<String>,
     pub tor_only: bool,
+    pub socket_path: String,
+    /// Store paths to seed on startup via `guix archive --export`.
+    pub seed_paths: Vec<String>,
 }
 
 impl Config {
@@ -59,6 +62,8 @@ impl Config {
             dashboard_bind: "127.0.0.1".into(),
             tor_socks: None,
             tor_only: false,
+            socket_path: dirs_cache_dir().join("guix-p2p.sock").display().to_string(),
+            seed_paths: vec![],
         }
     }
 }

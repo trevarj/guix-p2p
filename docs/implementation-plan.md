@@ -207,14 +207,15 @@
 
 ### Tasks
 
-- [ ] Rename binary `guix-p2p-substitute` → `guix-p2p`
-- [ ] Add `socket_path` to Config
-- [ ] Add `--socket` CLI flag
-- [ ] Create relay module (`src/relay.rs`) — Unix socket stdin→daemon→fd4 bridge
-- [ ] Route `--query --socket` / `--substitute --socket` to relay
-- [ ] Refactor daemon mode to accept Unix socket connections
-- [ ] Update wrapper script with socket path
-- [ ] Update architectural docs
+- [x] Rename binary `guix-p2p-substitute` → `guix-p2p`
+- [x] Add `socket_path` to Config
+- [x] Add `--socket` CLI flag
+- [x] Create relay module (`src/relay.rs`) — Unix socket stdin→daemon→fd4 bridge
+- [x] Route `--query --socket` / `--substitute --socket` to relay
+- [x] Refactor daemon mode to accept Unix socket connections
+- [x] Convert notification channel from mpsc to broadcast for multi-connection fan-out
+- [x] Update wrapper script with socket path and fallback logic
+- [x] Update architectural docs
 
 ### Deliverables
 - Daemon + relay architecture with warm swarm for all substitute operations
@@ -260,7 +261,7 @@
 | NAT traversal / hole-punching | libp2p has built-in support (autonat/relay/dcutr); needs relay infrastructure |
 | Bandwidth accounting / ratio enforcement | Requires persistent peer state; not needed for MVP utility |
 | Incentive / token economics | Intentional non-goal |
-| Web UI / dashboard | Separate project |
 | IPFS integration | `(guix ipfs)` in Guix is unused dead code; could be wired later |
 | Tor onion service DHT bootstrapping | Nice-to-have for censorship resistance |
 | Store-level deduplication across peers | Hard; existing Guix dedup is local filesystem only |
+| Eager/lazy nar seeding from local store | Implemented as hybrid nar cache seeding; see `docs/architecture.md` |
