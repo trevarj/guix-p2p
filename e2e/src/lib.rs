@@ -6,9 +6,9 @@ use std::{
 
 use anyhow::Context;
 use futures::StreamExt;
-use guix_p2p_substitute::{
+use guix_p2p::{
     behaviour::{GuixP2PBehaviour, GuixP2PEvent, create_swarm_behaviour},
-    channel::{SwarmCommand, SwarmNotification},
+    channel::SwarmCommand,
     swarm::{
         block::compute_block_hashes,
         codec::{BlockData, BlockRequest, BlockResponse},
@@ -20,10 +20,7 @@ use libp2p::{
     request_response,
     swarm::SwarmEvent,
 };
-use tokio::sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
-    oneshot,
-};
+use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 pub const BLOCK_SIZE: usize = 65536;
@@ -33,8 +30,8 @@ type BlockMap = Arc<Mutex<HashMap<String, Vec<u8>>>>;
 pub struct TestNode {
     pub peer_id: PeerId,
     listen_addr: Multiaddr,
-    cmd_tx: UnboundedSender<SwarmCommand>,
-    notify_rx: Option<UnboundedReceiver<SwarmNotification>>,
+    cmd_tx: tokio::sync::mpsc::UnboundedSender<SwarmCommand>,
+    notify_rx: Option<tokio::sync::broadcast::Receiver<guix_p2p::channel::SwarmNotification>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     _task: tokio::task::JoinHandle<()>,
 }
@@ -61,14 +58,20 @@ impl TestNode {
         let _ = self.cmd_tx.send(SwarmCommand::GetProviders { hash: nar_hash.into() });
     }
 
-    async fn recv(&mut self, deadline: Duration) -> Option<SwarmNotification> {
+    async fn recv(&mut self, deadline: Duration) -> Option<guix_p2p::channel::SwarmNotification> {
         match &mut self.notify_rx {
-            Some(rx) => tokio::time::timeout(deadline, rx.recv()).await.ok().flatten(),
+            Some(rx) => match tokio::time::timeout(deadline, rx.recv()).await {
+                Ok(Ok(n)) => Some(n),
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => None,
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => None,
+                Err(_) => None,
+            },
             None => None,
         }
     }
 
     pub async fn wait_providers(&mut self, nar_hash: &str, timeout: Duration) -> Vec<PeerId> {
+        use guix_p2p::channel::SwarmNotification;
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
             let rem = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -90,6 +93,7 @@ impl TestNode {
         peer: PeerId,
         timeout: Duration,
     ) -> Option<BlockResponse> {
+        use guix_p2p::channel::SwarmNotification;
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
             let rem = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -130,7 +134,6 @@ async fn start(
     let target: Multiaddr = "/ip4/127.0.0.1/udp/0/quic-v1".parse()?;
     swarm.listen_on(target)?;
 
-    // Pre-seed Kademlia provider records before starting the loop
     let blocks: BlockMap = Arc::new(Mutex::new(seed));
     for hash in blocks.lock().unwrap().keys() {
         let bytes = hex::decode(hash).context("invalid nar hash hex")?;
@@ -138,7 +141,8 @@ async fn start(
     }
 
     let (cmd_tx, cmd_rx) = unbounded_channel::<SwarmCommand>();
-    let (notify_tx, notify_rx) = unbounded_channel::<SwarmNotification>();
+    let (notify_tx, notify_rx) =
+        tokio::sync::broadcast::channel::<guix_p2p::channel::SwarmNotification>(256);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let (addr_tx, addr_rx) = oneshot::channel::<Multiaddr>();
 
@@ -150,7 +154,6 @@ async fn start(
         run_loop(swarm, blocks_clone, cmd_stream, notify_tx, shutdown_rx, addr_tx, bootstrap).await;
     });
 
-    // Also need oneshot, so we poll the receiver after the spawn
     let listen_addr = addr_rx.await.context("swarm did not report listen address")?;
 
     Ok(TestNode {
@@ -178,7 +181,7 @@ async fn run_loop(
     mut swarm: libp2p::Swarm<GuixP2PBehaviour>,
     blocks: BlockMap,
     mut cmd_rx: UnboundedReceiverStream<SwarmCommand>,
-    notify_tx: UnboundedSender<SwarmNotification>,
+    notify_tx: tokio::sync::broadcast::Sender<guix_p2p::channel::SwarmNotification>,
     mut shutdown: oneshot::Receiver<()>,
     addr_tx: oneshot::Sender<Multiaddr>,
     bootstrap: Vec<Multiaddr>,
@@ -202,12 +205,10 @@ async fn run_loop(
                     }
                 }
                 SwarmEvent::ConnectionEstablished { .. } => {
-                    // Bootstrap Kademlia routing table to enable provider lookups
                     if let Err(e) = swarm.behaviour_mut().kad.bootstrap() {
                         tracing::warn!("kad bootstrap error: {}", e);
                     }
                 }
-                // Provider discovery result → forward
                 SwarmEvent::Behaviour(GuixP2PEvent::Kad(
                     kad::Event::OutboundQueryProgressed {
                         result: QueryResult::GetProviders(Ok(
@@ -216,12 +217,11 @@ async fn run_loop(
                         ..
                     },
                 )) => {
-                    let _ = notify_tx.send(SwarmNotification::ProvidersFound {
+                    let _ = notify_tx.send(guix_p2p::channel::SwarmNotification::ProvidersFound {
                         hash: hex::encode(key.as_ref()),
                         peers: providers.iter().copied().collect(),
                     });
                 }
-                // Incoming block request → serve
                 SwarmEvent::Behaviour(GuixP2PEvent::BlockExchange(
                     request_response::Event::Message {
                         peer: _,
@@ -232,7 +232,6 @@ async fn run_loop(
                     let resp = serve(&blocks, &request);
                     let _ = swarm.behaviour_mut().block_exchange.send_response(channel, resp);
                 }
-                // Response to our block request → forward
                 SwarmEvent::Behaviour(GuixP2PEvent::BlockExchange(
                     request_response::Event::Message {
                         peer,
@@ -240,7 +239,7 @@ async fn run_loop(
                         ..
                     },
                 )) => {
-                    let _ = notify_tx.send(SwarmNotification::BlockResponse { peer, response });
+                    let _ = notify_tx.send(guix_p2p::channel::SwarmNotification::BlockResponse { peer, response });
                 }
                 _ => {}
             },
@@ -252,6 +251,12 @@ async fn run_loop(
                 }
                 SwarmCommand::SendBlockRequest { peer, request } => {
                     let _ = swarm.behaviour_mut().block_exchange.send_request(&peer, request);
+                }
+                SwarmCommand::StartProviding { hash } => {
+                    if let Ok(bytes) = hex::decode(hash) {
+                        let key = RecordKey::new(&bytes);
+                        let _ = swarm.behaviour_mut().kad.start_providing(key);
+                    }
                 }
             },
         }
