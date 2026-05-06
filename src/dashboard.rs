@@ -17,7 +17,10 @@ use axum::{
 };
 use serde::Serialize;
 
-use crate::{connection::ConnectionManager, dht::ProviderCache, reputation::ReputationTracker};
+use crate::{
+    connection::ConnectionManager, dht::ProviderCache, nar_store::NarStore,
+    reputation::ReputationTracker,
+};
 
 pub type EventBus = tokio::sync::broadcast::Sender<DashboardEvent>;
 
@@ -32,6 +35,8 @@ pub enum DashboardEvent {
     BlockReceived { nar_hash: String, peer_id: String, blocks: usize },
     DownloadSucceeded { nar_hash: String, store_path: String, size: u64, elapsed_ms: u64 },
     DownloadFailed { nar_hash: String, store_path: String, reason: String },
+    SeedAdded { nar_hash: String, store_path: Option<String>, nar_size: u64 },
+    BlockServed { nar_hash: String, peer_id: String, indices: Vec<u32> },
 }
 
 pub type BuildRegistry = Arc<Mutex<HashMap<String, ObservedBuild>>>;
@@ -69,6 +74,7 @@ struct ApiStatus {
     connected_peers: usize,
     dht_entries: usize,
     build_count: usize,
+    seed_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -77,6 +83,14 @@ struct ApiBuild {
     store_path: Option<String>,
     nar_size: Option<u64>,
     provider_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ApiSeededNar {
+    nar_hash: String,
+    nar_size: u64,
+    block_count: u32,
+    block_size: u32,
 }
 
 #[derive(Clone)]
@@ -88,6 +102,7 @@ pub struct DashboardState {
     pub started: Instant,
     pub peer_id: String,
     pub event_bus: EventBus,
+    pub nar_store: Arc<Mutex<NarStore>>,
 }
 
 pub async fn serve(state: DashboardState, port: u16, bind: &str) {
@@ -100,6 +115,7 @@ pub async fn serve(state: DashboardState, port: u16, bind: &str) {
         .route("/api/peers", get(api_peers))
         .route("/api/builds", get(api_builds))
         .route("/api/build/{hash}", get(api_build_detail))
+        .route("/api/seeds", get(api_seeds))
         .route("/ws", get(ws_handler))
         .with_state(state);
 
@@ -118,6 +134,7 @@ async fn api_status(State(state): State<DashboardState>) -> Json<ApiStatus> {
     let now = state.started.elapsed().as_secs();
     let dht = state.provider_cache.lock().await.len();
     let builds = state.build_registry.lock().unwrap().len();
+    let seed_count = state.nar_store.lock().unwrap().len();
 
     let status = ApiStatus {
         peer_id: state.peer_id.clone(),
@@ -125,6 +142,7 @@ async fn api_status(State(state): State<DashboardState>) -> Json<ApiStatus> {
         connected_peers: 0,
         dht_entries: dht,
         build_count: builds,
+        seed_count,
     };
 
     Json(status)
@@ -168,6 +186,24 @@ async fn api_builds(State(state): State<DashboardState>) -> Json<Vec<ApiBuild>> 
         .collect();
     builds.sort_by_key(|b| std::cmp::Reverse(b.provider_count));
     Json(builds)
+}
+
+async fn api_seeds(State(state): State<DashboardState>) -> Json<Vec<ApiSeededNar>> {
+    let store = state.nar_store.lock().unwrap();
+    let seeds: Vec<ApiSeededNar> = store
+        .seeded_hashes()
+        .into_iter()
+        .filter_map(|hash| {
+            let info = store.seed_info(&hash)?;
+            Some(ApiSeededNar {
+                nar_hash: hash,
+                nar_size: info.nar_size,
+                block_count: info.block_count,
+                block_size: info.block_size,
+            })
+        })
+        .collect();
+    Json(seeds)
 }
 
 async fn api_build_detail(

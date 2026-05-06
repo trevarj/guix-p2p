@@ -365,3 +365,25 @@ guix-p2p --daemon --seed /gnu/store/...-foo,/gnu/store/...-bar
 
 Each path is fed to `NarStore::seed_store_path()`, which runs `guix hash` and
 `guix archive --export` to compute the hash and export the nar data.
+
+## Dashboard Seeding View
+
+The web dashboard (`--dashboard`) includes a **seeds** panel that shows all
+locally-seeded nars in real time:
+
+- **Seed list**: Each seeded nar is displayed with its hash, size, and block
+  count. Clicking a row opens a detail overlay.
+- **Real-time events**: `BlockServed` events stream via WebSocket showing
+  which blocks are being uploaded to which peers. Served rows flash green
+  momentarily.
+- **Seed count** in the header bar updates as nars are seeded or auto-saved
+  after downloads.
+- The `/api/seeds` endpoint returns the full list of seeded nars with size,
+  block count, and block size.
+
+Dashboard events related to seeding:
+
+| Event | Description |
+|-------|-------------|
+| `SeedAdded` | Emitted when a nar is added to the local store (startup seeding or post-download) |
+| `BlockServed` | Emitted when blocks are served to a requesting peer (includes nar hash, peer, indices) |

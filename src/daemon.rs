@@ -478,6 +478,11 @@ async fn try_swarm_substitute(
                     drop(store);
                     let _ = cmd_tx
                         .send(SwarmCommand::StartProviding { hash: nar_hash_hex.to_string() });
+                    let _ = event_tx.send(DashboardEvent::SeedAdded {
+                        nar_hash: nar_hash_hex.to_string(),
+                        store_path: Some(store_path.clone()),
+                        nar_size: size,
+                    });
                 }
             }
 
@@ -778,6 +783,7 @@ pub async fn run_daemon_mode(
             started: std::time::Instant::now(),
             peer_id: String::new(),
             event_bus: event_tx.clone(),
+            nar_store: nar_store.clone(),
         };
         let port = config.dashboard_port;
         let bind = config.dashboard_bind.clone();

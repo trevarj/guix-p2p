@@ -39,7 +39,7 @@ header button{
 }
 header button:hover{border-color:var(--acc)}
 main{
-  display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr auto;
+  display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr auto;
   flex:1;overflow:hidden;gap:0
 }
 .panel{
@@ -49,6 +49,10 @@ main{
   font-size:11px;text-transform:uppercase;letter-spacing:2px;
   color:var(--acc);margin-bottom:6px;position:sticky;top:0;
   background:var(--bg);padding:4px 0;z-index:1
+}
+.panel h2 .badge{
+  display:inline-block;background:var(--acc);color:var(--bg);
+  padding:0 5px;margin-left:6px;font-size:10px;border-radius:2px;vertical-align:middle
 }
 .events{grid-column:1/-1;max-height:180px;border-top:1px solid var(--dim)}
 .events .entry{font-size:11px;padding:1px 0;border-bottom:1px solid var(--dim)}
@@ -60,22 +64,32 @@ main{
 .events .entry.dl-start .sym{color:var(--fg)}
 .events .entry.dl-ok .sym{color:var(--ok)}
 .events .entry.dl-fail .sym{color:var(--err)}
+.events .entry.seed-add .sym{color:var(--ok)}
+.events .entry.block-served .sym{color:var(--acc)}
 
 @keyframes slidein{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
 
-.peer-row,.build-row{
+.peer-row,.build-row,.seed-row{
   display:flex;align-items:center;gap:6px;padding:3px 0;
   border-bottom:1px solid var(--dim);font-size:12px
 }
-.peer-row .flag,.build-row .flag{font-size:14px;min-width:24px}
+.peer-row .flag,.build-row .flag,.seed-row .flag{font-size:14px;min-width:24px}
 .peer-row .peer-id{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .peer-row .bar,.build-row .bar{flex:1;height:6px;background:var(--bg3)}
 .peer-row .bar-inner,.build-row .bar-inner{height:100%;background:var(--acc)}
 .peer-row .meta{min-width:90px;text-align:right;font-size:11px;opacity:.8}
-.build-row{cursor:pointer}
-.build-row:hover{background:var(--bg2)}
-.build-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
+.build-row,.seed-row{cursor:pointer}
+.build-row:hover,.seed-row:hover{background:var(--bg2)}
+.build-row .path,.seed-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
 .build-row .providers{min-width:60px;text-align:right;color:var(--acc)}
+.seed-row .hash{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7;font-family:var(--font)}
+.seed-row .seed-meta{min-width:100px;text-align:right;font-size:11px;opacity:.8}
+.seed-row .seed-meta .sz{color:var(--fg)}
+.seed-row .seed-meta .bl{color:var(--dim);font-size:10px;margin-left:4px}
+
+/* transfer flash animation */
+.seed-row.flash{animation:flash .6s ease}
+@keyframes flash{0%{background:var(--acc);color:var(--bg)}100%{background:transparent;color:var(--fg)}}
 
 /* detail panel overlay */
 .overlay{
@@ -120,6 +134,7 @@ main{
     <div>CONN <span id="connected">0</span></div>
     <div>PEERS <span id="total-peers">0</span></div>
     <div>DHT <span id="dht-entries">0</span></div>
+    <div>SEEDS <span id="seed-count">0</span></div>
     <div>UPTIME <span id="uptime">00:00:00</span></div>
   </div>
   <div>
@@ -134,6 +149,10 @@ main{
   <div class="panel builds-panel">
     <h2>builds</h2>
     <div id="builds-list"><div class="empty">no builds observed</div></div>
+  </div>
+  <div class="panel seeds-panel">
+    <h2>seeds <span class="badge" id="seed-badge">0</span></h2>
+    <div id="seeds-list"><div class="empty">not seeding</div></div>
   </div>
   <div class="panel events">
     <h2>events</h2>
@@ -153,6 +172,7 @@ var STARTED=Date.now();
 var EVENT_IDX=0;
 var PEERS={};
 var BUILDS={};
+var SEEDS={};
 var WS=null;
 var WS_RETRY=1000;
 
@@ -245,6 +265,56 @@ function renderBuilds(){
       +'</div>';
   });
   el.innerHTML=h;
+}
+
+function flashSeedRow(narHash){
+  var rows=document.querySelectorAll('.seed-row');
+  rows.forEach(function(r){
+    if(r.dataset.hash===narHash){
+      r.classList.remove('flash');
+      void r.offsetWidth;
+      r.classList.add('flash');
+    }
+  });
+}
+
+function renderSeeds(){
+  var el=document.getElementById('seeds-list');
+  var keys=Object.keys(SEEDS);
+  var count=keys.length;
+  document.getElementById('seed-count').textContent=count;
+  document.getElementById('seed-badge').textContent=count;
+  if(!count){el.innerHTML='<div class="empty">not seeding</div>';return}
+  var arr=keys.map(function(k){var s=SEEDS[k];s._key=k;return s});
+  arr.sort(function(a,b){return(b.nar_size||0)-(a.nar_size||0)});
+  var h='';
+  arr.forEach(function(s){
+    var k=s._key;
+    var sz=fmtSize(s.nar_size||0);
+    var bl=s.block_count||'?';
+    var bs=s.block_size?fmtSize(s.block_size):'256KB';
+    h+='<div class="seed-row" data-hash="'+k+'" onclick="openSeedDetail(\''+k+'\')">'
+      +'<span class="hash" title="'+k+'">'+k.slice(0,24)+'...</span>'
+      +'<span class="seed-meta"><span class="sz">'+sz+'</span><span class="bl">'+bl+' x '+bs+'</span></span>'
+      +'</div>';
+  });
+  el.innerHTML=h;
+}
+
+function openSeedDetail(hash){
+  var s=SEEDS[hash];
+  if(!s)return;
+  var c=document.getElementById('detail-content');
+  var sz=fmtSize(s.nar_size||0);
+  var bl=s.block_count||'?';
+  var bs=s.block_size?fmtSize(s.block_size):'256KB';
+  c.innerHTML='<h2>seeded nar</h2>'
+    +'<div class="field"><label>hash</label><span class="val" style="font-size:11px;word-break:break-all">'+hash+'</span></div>'
+    +'<div class="field"><label>size</label><span class="val">'+sz+'</span></div>'
+    +'<div class="field"><label>blocks</label><span class="val">'+bl+' x '+bs+'</span></div>'
+    +'<div class="field"><label>status</label><span class="val" style="color:var(--ok)">seeding</span></div>';
+  var ov=document.getElementById('overlay');
+  ov.classList.remove('hidden');
 }
 
 function openDetail(hash){
@@ -367,6 +437,20 @@ function handleEvent(e){
     case 'DownloadFailed':
       addEvent('dl-fail','x','Download failed: '+(e.store_path||e.nar_hash)+' ('+e.reason+')');
       break;
+
+    case 'SeedAdded':
+      SEEDS[e.nar_hash]={nar_size:e.nar_size,block_count:null,block_size:null};
+      addEvent('seed-add','*','Seed added: '+e.nar_hash.slice(0,16)+'... ('+fmtSize(e.nar_size)+')');
+      renderSeeds();
+      loadSeeds();
+      break;
+
+    case 'BlockServed':
+      var blockIdxs=e.indices||[];
+      var blkMsg=blockIdxs.length?blockIdxs.length+' block'+(blockIdxs.length>1?'s':''):'handshake';
+      addEvent('block-served','\u2191','Served '+blkMsg+' to '+peerIdShort(e.peer_id)+(e.nar_hash?' for '+e.nar_hash.slice(0,16)+'...':''));
+      if(e.nar_hash)flashSeedRow(e.nar_hash);
+      break;
   }
 }
 
@@ -437,8 +521,19 @@ function ipCountry(ip){
     }).catch(function(){})
   }
 
+  window.loadSeeds=function(){
+    fetch('/api/seeds').then(function(r){return r.json()}).then(function(ss){
+      SEEDS={};
+      ss.forEach(function(s){
+        SEEDS[s.nar_hash]={nar_size:s.nar_size,block_count:s.block_count,block_size:s.block_size}
+      });
+      renderSeeds()
+    }).catch(function(){})
+  };
+
   loadPeers();
   loadBuilds();
+  loadSeeds();
   connectWS();
 })();
 </script>

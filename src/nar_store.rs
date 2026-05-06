@@ -29,9 +29,16 @@ pub struct NarStore {
 
 struct NarEntry {
     path: PathBuf,
-    #[allow(dead_code)]
     nar_size: u64,
     block_info: BlockInfo,
+}
+
+/// Summary info for a seeded nar, used by the dashboard API.
+#[derive(Debug, Clone)]
+pub struct SeededNarInfo {
+    pub nar_size: u64,
+    pub block_count: u32,
+    pub block_size: u32,
 }
 
 impl NarStore {
@@ -133,6 +140,16 @@ impl NarStore {
     /// Check if we have a nar for the given hash.
     pub fn has_nar(&self, nar_hash_hex: &str) -> bool {
         self.index.contains_key(nar_hash_hex)
+    }
+
+    /// Return summary info for a seeded nar (for dashboard).
+    pub fn seed_info(&self, nar_hash_hex: &str) -> Option<SeededNarInfo> {
+        let entry = self.index.get(nar_hash_hex)?;
+        Some(SeededNarInfo {
+            nar_size: entry.nar_size,
+            block_count: entry.block_info.block_count,
+            block_size: self.block_size as u32,
+        })
     }
 
     /// Handle an incoming block request. Returns None if we don't have this nar.

@@ -188,6 +188,20 @@ async fn main() -> anyhow::Result<()> {
     let (event_tx, _) = tokio::sync::broadcast::channel::<dashboard::DashboardEvent>(256);
     let build_registry: dashboard::BuildRegistry = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
+    // Emit SeedAdded events for pre-seeded nars
+    {
+        let store = nar_store.lock().unwrap();
+        for hash in store.seeded_hashes() {
+            let info = store.seed_info(&hash);
+            let nar_size = info.map_or(0, |i| i.nar_size);
+            let _ = event_tx.send(dashboard::DashboardEvent::SeedAdded {
+                nar_hash: hash.clone(),
+                store_path: None,
+                nar_size,
+            });
+        }
+    }
+
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel::<SwarmCommand>();
     let (notify_tx, _) = tokio::sync::broadcast::channel::<SwarmNotification>(4096);
     let (query_tx, query_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -303,7 +317,7 @@ async fn run_swarm_task(
                         dht::handle_kad_event(&cache, &notify_tx, e);
                     },
                     SwarmEvent::Behaviour(GuixP2PEvent::BlockExchange(e)) => {
-                        handle_block_exchange(&notify_tx, e, &reputation, &conn_mgr, &mut swarm, &nar_store);
+                        handle_block_exchange(&notify_tx, &event_tx, e, &reputation, &conn_mgr, &mut swarm, &nar_store);
                     },
                     SwarmEvent::ConnectionEstablished {
                         peer_id,
@@ -381,6 +395,7 @@ fn handle_swarm_command(swarm: &mut libp2p::Swarm<GuixP2PBehaviour>, cmd: SwarmC
 
 fn handle_block_exchange(
     notify_tx: &NotifyTx,
+    event_bus: &dashboard::EventBus,
     event: request_response::Event<BlockRequest, BlockResponse>,
     reputation: &Arc<std::sync::Mutex<ReputationTracker>>,
     conn_mgr: &Arc<std::sync::Mutex<ConnectionManager>>,
@@ -391,6 +406,14 @@ fn handle_block_exchange(
         request_response::Event::Message { peer, message, .. } => match message {
             request_response::Message::Request { request_id, request, channel, .. } => {
                 tracing::trace!("Incoming block request from {}", peer);
+                let nar_hash_for_event = match &request {
+                    BlockRequest::Handshake { nar_hash } => hex::encode(nar_hash),
+                    BlockRequest::GetBlocks { .. } => String::new(),
+                };
+                let indices_for_event = match &request {
+                    BlockRequest::GetBlocks { indices } => indices.clone(),
+                    BlockRequest::Handshake { .. } => vec![],
+                };
                 let resp = {
                     let store = nar_store.lock().unwrap();
                     store.handle_request(&request)
@@ -398,6 +421,11 @@ fn handle_block_exchange(
                 if let Some(resp) = resp {
                     let _ = swarm.behaviour_mut().block_exchange.send_response(channel, resp);
                     tracing::trace!("Served block request to {}", peer);
+                    let _ = event_bus.send(dashboard::DashboardEvent::BlockServed {
+                        nar_hash: nar_hash_for_event,
+                        peer_id: peer.to_string(),
+                        indices: indices_for_event,
+                    });
                 } else {
                     tracing::trace!("Could not serve block request (request_id={})", request_id);
                 }
