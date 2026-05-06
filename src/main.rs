@@ -271,6 +271,7 @@ async fn main() -> anyhow::Result<()> {
             &event_tx,
             &http_client,
             &nar_store,
+            &peer_id.to_string(),
         )
         .await?
     } else {

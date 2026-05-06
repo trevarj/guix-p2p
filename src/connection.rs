@@ -71,6 +71,12 @@ impl ConnectionManager {
         self.peers.len()
     }
 
+    /// Number of currently connected peers (includes recently active peers
+    /// that haven't been pruned yet).
+    pub fn connected_count(&self) -> usize {
+        self.peers.len()
+    }
+
     pub fn can_connect(&self, peer: &PeerId) -> bool {
         if self.peers.len() >= self.config.max_peers {
             return false;

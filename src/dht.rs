@@ -2,7 +2,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use libp2p::kad::{Event as KadEvent, GetProvidersOk, QueryResult};
 
-use crate::{behaviour::GuixP2PBehaviour, channel::SwarmNotification};
+use crate::{
+    behaviour::GuixP2PBehaviour,
+    channel::{NotifyTx, SwarmNotification},
+};
 
 pub type ProviderCache = Arc<tokio::sync::Mutex<HashMap<String, Vec<libp2p::PeerId>>>>;
 
@@ -29,11 +32,7 @@ pub fn extract_hash_bytes(hex_hash: &str) -> [u8; 32] {
     arr
 }
 
-pub fn handle_kad_event(
-    cache: &ProviderCache,
-    notify_tx: &tokio::sync::mpsc::UnboundedSender<SwarmNotification>,
-    event: &KadEvent,
-) {
+pub fn handle_kad_event(cache: &ProviderCache, notify_tx: &NotifyTx, event: &KadEvent) {
     let (key_hex, _key_bytes, providers) = match event {
         KadEvent::OutboundQueryProgressed {
             result:
@@ -50,12 +49,16 @@ pub fn handle_kad_event(
 
     tracing::debug!("DHT found {} providers for {}", providers.len(), key_hex);
 
-    let cache = cache.clone();
-    let hex = key_hex.clone();
+    // Insert synchronously — cache is an async mutex so we need to spawn,
+    // but we also send the notification before the spawn completes. This is
+    // fine because the notification is what drives the daemon logic; the
+    // cache is secondary.
+    let cache_clone = cache.clone();
+    let hex_clone = key_hex.clone();
     let peers_clone = providers.clone();
     tokio::spawn(async move {
-        let mut guard = cache.lock().await;
-        guard.insert(hex, peers_clone);
+        let mut guard = cache_clone.lock().await;
+        guard.insert(hex_clone, peers_clone);
     });
 
     let _ = notify_tx.send(SwarmNotification::ProvidersFound { hash: key_hex, peers: providers });

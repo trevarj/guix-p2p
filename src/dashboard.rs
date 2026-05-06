@@ -135,11 +135,12 @@ async fn api_status(State(state): State<DashboardState>) -> Json<ApiStatus> {
     let dht = state.provider_cache.lock().await.len();
     let builds = state.build_registry.lock().unwrap().len();
     let seed_count = state.nar_store.lock().unwrap().len();
+    let connected = state.conn_mgr.lock().unwrap().connected_count();
 
     let status = ApiStatus {
         peer_id: state.peer_id.clone(),
         uptime_secs: now,
-        connected_peers: 0,
+        connected_peers: connected,
         dht_entries: dht,
         build_count: builds,
         seed_count,

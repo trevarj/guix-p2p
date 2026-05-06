@@ -773,6 +773,7 @@ pub async fn run_daemon_mode(
     event_tx: &dashboard::EventBus,
     client: &reqwest::Client,
     nar_store: &Arc<Mutex<NarStore>>,
+    local_peer_id: &str,
 ) -> anyhow::Result<()> {
     if config.dashboard_enabled {
         let state = dashboard::DashboardState {
@@ -781,7 +782,7 @@ pub async fn run_daemon_mode(
             conn_mgr: conn_mgr.clone(),
             build_registry: build_registry.clone(),
             started: std::time::Instant::now(),
-            peer_id: String::new(),
+            peer_id: local_peer_id.to_string(),
             event_bus: event_tx.clone(),
             nar_store: nar_store.clone(),
         };

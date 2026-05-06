@@ -4,6 +4,8 @@
 
 The `guix-p2p-e2e` binary launches local test networks with web dashboards.
 
+### `run` — synthetic test network
+
 ```sh
 # Launch 2 seeders + 1 downloader, dashboards on ports 3031-3033
 cargo run -p guix-p2p-e2e -- run
@@ -12,31 +14,35 @@ cargo run -p guix-p2p-e2e -- run
 cargo run -p guix-p2p-e2e -- run --seeders 3 --downloaders 2 --nar-kb 512 --dashboard-port 4000
 ```
 
-Open each dashboard URL printed to stdout in a browser to see:
+Seeders generate synthetic nars and announce them in the DHT. Downloaders
+connect, discover providers, and request blocks. Each node gets its own
+dashboard URL printed at startup.
+
+### `seed` — real store path seeding
+
+```sh
+# Seed linux and firefox from the local Guix store
+cargo run -p guix-p2p-e2e -- seed --paths /gnu/store/abc-linux-6.1,/gnu/store/def-firefox-115
+```
+
+This uses `guix hash` and `guix archive --export` to compute nar hashes and
+export the nar data, then starts a single seeder node with a dashboard. Other
+guix-p2p nodes can connect and download the seeded packages.
+
+Options:
+- `--paths` (required): comma-separated `/gnu/store/` paths to seed
+- `--dashboard-port`: port for the web dashboard (default 3031)
+- `--connect`: multiaddr of a peer to dial (for downloader testing)
+
+### What you see on the dashboard
+
 - **Peers panel** — connected peers with reputation scores
 - **Builds panel** — observed nar hashes and providers
-- **Seeds panel** — locally stored nars available for serving (nar hash, size, blocks)
-- **Events panel** — real-time stream: peer connections, DHT discoveries, block transfers,
-  seed additions, and blocks served to remote peers
-
-The seeds panel shows every nar that has been saved to the local store. When a
-remote peer requests blocks, a `BlockServed` event appears in the event log and the
-corresponding seed row flashes green.
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `run` | Launch a multi-node test network with dashboards |
-
-### `run` options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--seeders` | 2 | Number of seeder nodes |
-| `--downloaders` | 1 | Number of downloader nodes |
-| `--dashboard-port` | 3031 | Starting port for dashboards |
-| `--nar-kb` | 256 | Size of synthetic nars in KB |
+- **Seeds panel** — locally stored nars (hash, size, blocks) with real-time
+  flash animation when blocks are served to remote peers
+- **Events panel** — live stream of peer connections, DHT discoveries,
+  block transfers, seed additions, and blocks served
+- **Header** — peer ID, connected peer count, DHT entries, seed count, uptime
 
 ## Running E2E Tests
 
@@ -56,9 +62,10 @@ cargo test --workspace
 ## Architecture
 
 Each node runs its own libp2p QUIC swarm with Kademlia DHT and block exchange.
-Seeder nodes generate synthetic nar data, save it to a `NarStore`, and announce
-the hash in the DHT. Downloader nodes connect to seeders, discover providers,
-request blocks, and stream all events to the dashboard via WebSocket.
+Seeder nodes generate synthetic nar data (or export real store paths), save it
+to a `NarStore`, and announce the hash in the DHT. Downloader nodes connect to
+seeders, discover providers, request blocks, and stream all events to the
+dashboard via WebSocket.
 
 The `NarStore` is shared with the dashboard so the seeds panel reflects the
 current state of locally cached nars in real time.

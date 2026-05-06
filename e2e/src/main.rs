@@ -54,6 +54,18 @@ enum Commands {
         #[arg(long, default_value = "256")]
         nar_kb: usize,
     },
+    /// Seed real store paths from /gnu/store/ and serve via P2P
+    Seed {
+        /// Comma-separated /gnu/store/ paths to seed
+        #[arg(long)]
+        paths: String,
+        /// Dashboard port
+        #[arg(long, default_value = "3031")]
+        dashboard_port: u16,
+        /// Connect to a seeder at this multiaddr (for downloaders)
+        #[arg(long)]
+        connect: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -70,6 +82,9 @@ async fn main() -> anyhow::Result<()> {
     match cli.cmd {
         Commands::Run { seeders, downloaders, dashboard_port, nar_kb } => {
             run_network(seeders, downloaders, dashboard_port, nar_kb).await
+        },
+        Commands::Seed { paths, dashboard_port, connect } => {
+            run_seed(&paths, dashboard_port, connect.as_deref()).await
         },
     }
 }
@@ -536,4 +551,165 @@ fn handle_block_response(
         },
     }
     let _ = nar_store;
+}
+
+// ── Seed command: seed real store paths from /gnu/store/ ────────────────
+
+async fn run_seed(
+    paths_str: &str,
+    dashboard_port: u16,
+    connect_addr: Option<&str>,
+) -> anyhow::Result<()> {
+    let block_size = 262144;
+    let paths: Vec<&str> = paths_str.split(',').map(str::trim).collect();
+
+    println!();
+    tracing::info!("guix-p2p e2e seed mode");
+    tracing::info!("  seeding {} store path(s)", paths.len());
+
+    // Create nar store and seed each path using guix archive --export
+    let tmp_dir = tempfile::tempdir()?;
+    let cache_dir = tmp_dir.path().to_path_buf();
+    let nar_store = Arc::new(std::sync::Mutex::new(NarStore::new(&cache_dir, block_size)));
+
+    let mut block_map: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut seeder_hashes: Vec<String> = Vec::new();
+
+    for path in &paths {
+        tracing::info!("seeding {}...", path);
+        let mut store = nar_store.lock().unwrap();
+        match store.seed_store_path(path) {
+            Ok(hash) => {
+                let info =
+                    store.seed_info(&hash).unwrap_or_else(|| guix_p2p::nar_store::SeededNarInfo {
+                        nar_size: 0,
+                        block_count: 0,
+                        block_size: block_size as u32,
+                    });
+                tracing::info!(
+                    "  hash={}.. size={} blocks={}",
+                    &hash[..16],
+                    info.nar_size,
+                    info.block_count
+                );
+                // Also populate the simple block_map for direct serving
+                let data_path = cache_dir.join("nar").join(format!("{}.nar", hash));
+                if let Ok(data) = std::fs::read(&data_path) {
+                    block_map.insert(hash.clone(), data);
+                }
+                seeder_hashes.push(hash);
+            },
+            Err(e) => {
+                tracing::error!("  failed to seed {}: {}", path, e);
+            },
+        }
+    }
+
+    // Keep temp dir alive
+    std::mem::forget(tmp_dir);
+
+    // Build the swarm
+    let kp = libp2p::identity::Keypair::generate_ed25519();
+    let pid = PeerId::from(kp.public());
+    let mut swarm = build_swarm(&kp)?;
+    swarm.listen_on("/ip4/127.0.0.1/udp/0/quic-v1".parse()?)?;
+
+    // Announce all hashes in DHT
+    for hash in &seeder_hashes {
+        if let Ok(bytes) = hex::decode(hash) {
+            let _ = swarm.behaviour_mut().kad.start_providing(RecordKey::new(&bytes));
+        }
+    }
+
+    let blocks: BlockMap = Arc::new(std::sync::Mutex::new(block_map));
+    let provider_cache = dht::create_provider_cache();
+    let rep = Arc::new(std::sync::Mutex::new(ReputationTracker::new(5)));
+    let conn = Arc::new(std::sync::Mutex::new(ConnectionManager::new(ConnectionConfig::default())));
+    let build_reg: BuildRegistry = Arc::new(std::sync::Mutex::new(HashMap::new()));
+    let (event_tx, _) = tokio::sync::broadcast::channel::<DashboardEvent>(256);
+    let (_cmd_tx, cmd_rx) = unbounded_channel::<SwarmCommand>();
+    let (addr_tx, addr_rx) = oneshot::channel::<Multiaddr>();
+
+    // Populate build registry for seeded items
+    for (i, hash) in seeder_hashes.iter().enumerate() {
+        let store_path = paths.get(i).unwrap_or(&"").to_string();
+        let sz = {
+            let s = nar_store.lock().unwrap();
+            s.seed_info(hash).map(|i| i.nar_size).unwrap_or(0)
+        };
+        build_reg.lock().unwrap().entry(hash.clone()).or_insert_with(|| ObservedBuild {
+            nar_hash: hash.clone(),
+            store_path: Some(store_path),
+            nar_size: Some(sz),
+            references: vec![],
+            deriver: None,
+            narinfo_raw: None,
+            providers: vec![],
+            downloaded_at: None,
+            download_size: None,
+        });
+    }
+
+    // Dashboard
+    let dash_state = dashboard::DashboardState {
+        provider_cache: provider_cache.clone(),
+        reputation: rep.clone(),
+        conn_mgr: conn.clone(),
+        build_registry: build_reg.clone(),
+        started: std::time::Instant::now(),
+        peer_id: pid.to_string(),
+        event_bus: event_tx.clone(),
+        nar_store: nar_store.clone(),
+    };
+
+    let port = dashboard_port;
+    tokio::spawn(async move {
+        dashboard::serve(dash_state, port, "127.0.0.1").await;
+    });
+
+    // Swarm event loop
+    let cmd_stream = UnboundedReceiverStream::new(cmd_rx);
+    let c_cache = provider_cache.clone();
+    let c_rep = rep.clone();
+    let c_conn = conn.clone();
+    let c_evt = event_tx.clone();
+    let c_blocks = blocks.clone();
+    let c_nar = nar_store.clone();
+    let connect_addr = connect_addr.map(|s| s.parse::<Multiaddr>()).transpose()?;
+
+    tokio::spawn(async move {
+        run_node_loop(
+            swarm,
+            c_cache,
+            c_rep,
+            c_conn,
+            c_evt,
+            c_blocks,
+            c_nar,
+            addr_tx,
+            cmd_stream,
+            connect_addr.map(|a| vec![a]).unwrap_or_default(),
+            block_size,
+            "seed",
+        )
+        .await;
+    });
+
+    let listen_addr = addr_rx.await.context("node did not report address")?;
+
+    println!();
+    tracing::info!("seed node ready!");
+    tracing::info!("  peer_id: {}", pid);
+    tracing::info!("  listen:   {}", listen_addr);
+    tracing::info!("  dashboard: http://127.0.0.1:{}", port);
+    tracing::info!("  seeded {} hash(es)", seeder_hashes.len());
+    for hash in &seeder_hashes {
+        tracing::info!("    {}...", &hash[..16]);
+    }
+    println!();
+    tracing::info!("other nodes can connect to download. press Ctrl-C to stop.");
+
+    tokio::signal::ctrl_c().await?;
+    tracing::info!("shutting down");
+    Ok(())
 }
