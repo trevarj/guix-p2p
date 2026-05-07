@@ -123,6 +123,7 @@ struct ApiStatus {
 
 #[derive(Debug, Clone, Serialize)]
 struct ApiBuild {
+    lookup_key: String,
     nar_hash: String,
     store_path: Option<String>,
     nar_size: Option<u64>,
@@ -172,7 +173,10 @@ pub async fn serve(state: DashboardState, port: u16, bind: &str) {
     let addr: SocketAddr =
         format!("{}:{}", bind, port).parse().expect("invalid dashboard bind address");
 
-    spawn_catalog_indexer(state.clone());
+    let catalog_state = state.clone();
+    tokio::spawn(async move {
+        maintain_catalog(catalog_state).await;
+    });
 
     let app = Router::new()
         .route("/", get(index_html))
@@ -218,17 +222,17 @@ async fn api_status(State(state): State<DashboardState>) -> Json<ApiStatus> {
 async fn api_peers(State(state): State<DashboardState>) -> Json<Vec<ApiPeer>> {
     let rep = state.reputation.lock().unwrap();
     let peers: Vec<ApiPeer> = rep
-        .peers()
-        .iter()
-        .map(|(peer, score)| {
+        .peer_entries()
+        .into_iter()
+        .map(|(peer, peer_score)| {
             let addrs = vec![];
             let (ip, country) = extract_addr_info(&addrs);
             ApiPeer {
-                peer_id: peer.to_base58()[..16].to_string(),
-                score: *score,
-                completed: 0,
-                failed: 0,
-                bytes_served: 0,
+                peer_id: peer.to_string(),
+                score: peer_score.score(Instant::now()),
+                completed: peer_score.completed,
+                failed: peer_score.failed,
+                bytes_served: peer_score.bytes_served,
                 connected: false,
                 addresses: addrs.clone(),
                 country,
@@ -243,21 +247,27 @@ async fn api_peers(State(state): State<DashboardState>) -> Json<Vec<ApiPeer>> {
 async fn api_builds(State(state): State<DashboardState>) -> Json<Vec<ApiBuild>> {
     let reg = state.build_registry.lock().unwrap();
     let mut builds: Vec<ApiBuild> = reg
-        .values()
-        .map(|b| ApiBuild {
+        .iter()
+        .map(|(lookup_key, b)| ApiBuild {
+            lookup_key: lookup_key.clone(),
             nar_hash: b.nar_hash.clone(),
             store_path: b.store_path.clone(),
             nar_size: b.nar_size,
             provider_count: b.providers.len(),
         })
         .collect();
-    builds.sort_by_key(|b| std::cmp::Reverse(b.provider_count));
+    builds.sort_by(|a, b| {
+        b.provider_count
+            .cmp(&a.provider_count)
+            .then_with(|| a.store_path.cmp(&b.store_path))
+            .then_with(|| a.nar_hash.cmp(&b.nar_hash))
+    });
     Json(builds)
 }
 
 async fn api_catalog(State(state): State<DashboardState>) -> Json<Vec<ApiCatalogEntry>> {
     let cat = state.catalog.lock().unwrap();
-    let entries: Vec<ApiCatalogEntry> = cat
+    let mut entries: Vec<ApiCatalogEntry> = cat
         .values()
         .map(|c| ApiCatalogEntry {
             hash_part: c.hash_part.clone(),
@@ -267,12 +277,18 @@ async fn api_catalog(State(state): State<DashboardState>) -> Json<Vec<ApiCatalog
             p2p_available: c.p2p_available,
         })
         .collect();
+    entries.sort_by(|a, b| {
+        b.p2p_available
+            .cmp(&a.p2p_available)
+            .then_with(|| a.store_path.cmp(&b.store_path))
+            .then_with(|| a.hash_part.cmp(&b.hash_part))
+    });
     Json(entries)
 }
 
 async fn api_seeds(State(state): State<DashboardState>) -> Json<Vec<ApiSeededNar>> {
     let store = state.nar_store.lock().unwrap();
-    let seeds: Vec<ApiSeededNar> = store
+    let mut seeds: Vec<ApiSeededNar> = store
         .seeded_hashes()
         .into_iter()
         .filter_map(|hash| {
@@ -285,6 +301,7 @@ async fn api_seeds(State(state): State<DashboardState>) -> Json<Vec<ApiSeededNar
             })
         })
         .collect();
+    seeds.sort_by(|a, b| b.nar_size.cmp(&a.nar_size).then_with(|| a.nar_hash.cmp(&b.nar_hash)));
     Json(seeds)
 }
 
@@ -293,7 +310,11 @@ async fn api_build_detail(
     Path(hash): Path<String>,
 ) -> Result<Json<ObservedBuild>, StatusCode> {
     let reg = state.build_registry.lock().unwrap();
-    reg.get(&hash).cloned().map(Json).ok_or(StatusCode::NOT_FOUND)
+    reg.get(&hash)
+        .cloned()
+        .or_else(|| reg.values().find(|build| build.nar_hash == hash).cloned())
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
 }
 
 async fn ws_handler(
@@ -316,8 +337,6 @@ async fn handle_ws(mut socket: WebSocket, state: DashboardState) {
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
         };
 
-        apply_catalog_event(&state, &event);
-
         let json = match serde_json::to_string(&event) {
             Ok(j) => j,
             Err(_) => continue,
@@ -329,54 +348,68 @@ async fn handle_ws(mut socket: WebSocket, state: DashboardState) {
     }
 }
 
-fn spawn_catalog_indexer(state: DashboardState) {
+async fn maintain_catalog(state: DashboardState) {
     let mut rx = state.event_bus.subscribe();
-    tokio::spawn(async move {
-        loop {
-            match rx.recv().await {
-                Ok(event) => apply_catalog_event(&state, &event),
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::debug!("Dashboard catalog indexer lagged by {} events", n);
-                },
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
+
+    loop {
+        let event = match rx.recv().await {
+            Ok(e) => e,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                tracing::debug!("Dashboard catalog listener lagged by {} events", n);
+                continue;
+            },
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        };
+
+        if let DashboardEvent::CatalogEntry {
+            hash_part,
+            store_path,
+            nar_size,
+            nar_hash,
+            p2p_available,
+        } = event
+        {
+            upsert_catalog_item(
+                &state.catalog,
+                hash_part,
+                store_path,
+                nar_size,
+                nar_hash,
+                p2p_available,
+            );
         }
-    });
+    }
 }
 
-fn apply_catalog_event(state: &DashboardState, event: &DashboardEvent) {
-    if let DashboardEvent::CatalogEntry {
-        hash_part,
-        store_path,
-        nar_size,
-        nar_hash,
-        p2p_available,
-    } = event
-    {
-        let mut cat = state.catalog.lock().unwrap();
-        cat.entry(hash_part.clone())
-            .and_modify(|e: &mut CatalogItem| {
-                if store_path.is_some() {
-                    e.store_path = store_path.clone();
-                }
-                if nar_size.is_some() {
-                    e.nar_size = *nar_size;
-                }
-                if nar_hash.is_some() {
-                    e.nar_hash = nar_hash.clone();
-                }
-                if *p2p_available {
-                    e.p2p_available = true;
-                }
-            })
-            .or_insert_with(|| CatalogItem {
-                hash_part: hash_part.clone(),
-                store_path: store_path.clone(),
-                nar_size: *nar_size,
-                nar_hash: nar_hash.clone(),
-                p2p_available: *p2p_available,
-            });
-    }
+fn upsert_catalog_item(
+    catalog: &Arc<Mutex<HashMap<String, CatalogItem>>>,
+    hash_part: String,
+    store_path: Option<String>,
+    nar_size: Option<u64>,
+    nar_hash: Option<String>,
+    p2p_available: bool,
+) {
+    let mut cat = catalog.lock().unwrap();
+    cat.entry(hash_part.clone())
+        .and_modify(|entry: &mut CatalogItem| {
+            if store_path.is_some() {
+                entry.store_path = store_path.clone();
+            }
+            if nar_size.is_some() {
+                entry.nar_size = nar_size;
+            }
+            if nar_hash.is_some() {
+                entry.nar_hash = nar_hash.clone();
+            }
+            entry.p2p_available |= p2p_available;
+        })
+        .or_insert_with(|| CatalogItem {
+            hash_part,
+            store_path,
+            nar_size,
+            nar_hash,
+            p2p_available,
+        });
 }
 
 fn extract_addr_info(addrs: &[String]) -> (Option<String>, Option<String>) {
@@ -505,4 +538,104 @@ pub fn country_flag(code: &str) -> String {
         char::from_u32(0x1F1E6 + (a - b'A') as u32).unwrap_or(' '),
         char::from_u32(0x1F1E6 + (b - b'A') as u32).unwrap_or(' '),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        connection::{ConnectionConfig, ConnectionManager},
+        dht::create_provider_cache,
+    };
+
+    fn dashboard_state() -> (DashboardState, tempfile::TempDir) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let (event_bus, _) = tokio::sync::broadcast::channel(16);
+        let state = DashboardState {
+            provider_cache: create_provider_cache(),
+            reputation: Arc::new(Mutex::new(ReputationTracker::new(5))),
+            conn_mgr: Arc::new(Mutex::new(ConnectionManager::new(ConnectionConfig::default()))),
+            build_registry: Arc::new(Mutex::new(HashMap::new())),
+            started: Instant::now(),
+            peer_id: "local-peer".to_string(),
+            event_bus,
+            nar_store: Arc::new(Mutex::new(NarStore::new(tmp.path(), 262_144))),
+            catalog: Arc::new(Mutex::new(HashMap::new())),
+        };
+        (state, tmp)
+    }
+
+    #[tokio::test]
+    async fn build_detail_can_be_loaded_by_registry_key_or_nar_hash() {
+        let (state, _tmp) = dashboard_state();
+        let build = ObservedBuild {
+            nar_hash: "sha256:abcdef".to_string(),
+            store_path: Some("/gnu/store/hash-package".to_string()),
+            nar_size: Some(42),
+            references: vec![],
+            deriver: None,
+            narinfo_raw: None,
+            providers: vec![],
+            downloaded_at: None,
+            download_size: None,
+        };
+        state.build_registry.lock().unwrap().insert("storehash".to_string(), build);
+
+        let by_key =
+            api_build_detail(State(state.clone()), Path("storehash".to_string())).await.unwrap().0;
+        let by_nar_hash =
+            api_build_detail(State(state), Path("sha256:abcdef".to_string())).await.unwrap().0;
+
+        assert_eq!(by_key.nar_hash, "sha256:abcdef");
+        assert_eq!(by_nar_hash.store_path.as_deref(), Some("/gnu/store/hash-package"));
+    }
+
+    #[tokio::test]
+    async fn peers_api_returns_full_peer_ids_and_reputation_counters() {
+        let (state, _tmp) = dashboard_state();
+        let peer = libp2p::PeerId::random();
+        {
+            let mut reputation = state.reputation.lock().unwrap();
+            reputation.record_success(peer, 4096);
+            reputation.record_failure(peer);
+        }
+
+        let peers = api_peers(State(state)).await.0;
+
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].peer_id, peer.to_string());
+        assert_eq!(peers[0].completed, 1);
+        assert_eq!(peers[0].failed, 1);
+        assert_eq!(peers[0].bytes_served, 4096);
+    }
+
+    #[test]
+    fn catalog_upsert_preserves_known_fields_and_latches_p2p_availability() {
+        let catalog = Arc::new(Mutex::new(HashMap::new()));
+
+        upsert_catalog_item(
+            &catalog,
+            "hashpart".to_string(),
+            Some("/gnu/store/hash-package".to_string()),
+            None,
+            None,
+            false,
+        );
+        upsert_catalog_item(
+            &catalog,
+            "hashpart".to_string(),
+            None,
+            Some(128),
+            Some("sha256:abcdef".to_string()),
+            true,
+        );
+        upsert_catalog_item(&catalog, "hashpart".to_string(), None, None, None, false);
+
+        let guard = catalog.lock().unwrap();
+        let item = guard.get("hashpart").unwrap();
+        assert_eq!(item.store_path.as_deref(), Some("/gnu/store/hash-package"));
+        assert_eq!(item.nar_size, Some(128));
+        assert_eq!(item.nar_hash.as_deref(), Some("sha256:abcdef"));
+        assert!(item.p2p_available);
+    }
 }
