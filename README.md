@@ -36,13 +36,21 @@ scripts/guix-wrapper.sh build hello
 
 ## Validation
 
+Run the fast dashboard demo with synthetic nars:
+
+```sh
+scripts/e2e-fast-demo.sh
+```
+
 Run the real Guix smoke test:
 
 ```sh
 cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport tcp
 ```
 
-For the dashboard-first local prototype, boot the disposable Guix VM:
+For strict local proof on a host with a read-only `/gnu/store`, boot the
+disposable Guix VM. This builds a full Guix system image and can download
+`linux-libre` the first time:
 
 ```sh
 scripts/e2e-vm.sh run

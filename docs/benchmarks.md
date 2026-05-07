@@ -1,5 +1,24 @@
 # E2E and Benchmarks
 
+## Fast Dashboard Demo
+
+Use this for quick demos and UI iteration:
+
+```sh
+scripts/e2e-fast-demo.sh
+```
+
+It starts a synthetic local network with two seeders, one downloader, and
+dashboards on ports `3031` through `3033`. It does not build a Guix system
+image and does not download `linux-libre`.
+
+Environment overrides:
+
+- `GUIX_P2P_DEMO_SEEDERS`
+- `GUIX_P2P_DEMO_DOWNLOADERS`
+- `GUIX_P2P_DEMO_NAR_KB`
+- `GUIX_P2P_DEMO_DASHBOARD_PORT`
+
 ## Container Smoke
 
 ```sh
@@ -74,7 +93,8 @@ Environment variables retained by the wrapper:
 
 ## Disposable VM
 
-On hosts where `/gnu/store` is read-only, use the disposable Guix VM runner:
+On hosts where `/gnu/store` is read-only, use the disposable Guix VM runner for
+strict proof:
 
 ```sh
 scripts/e2e-vm.sh run
@@ -83,6 +103,9 @@ scripts/e2e-vm.sh run
 The runner builds a qcow2 image, boots a writable copy under QEMU, shares the
 checkout into the guest, forwards dashboard ports `3031` and `3032`, and runs
 the same `container-smoke --hold` command inside the VM.
+
+This path can download `linux-libre` because it builds a full Guix system
+image. Use `scripts/e2e-fast-demo.sh` when you need a quick dashboard demo.
 
 See [e2e-vm.md](e2e-vm.md) for the full flow.
 

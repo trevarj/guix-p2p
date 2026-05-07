@@ -21,6 +21,9 @@ Commands:
   run     Build the image if needed, then boot it
   clean   Remove generated VM state under target/guix-p2p-vm
 
+This is the strict real-Guix proof path and can download linux-libre while
+building the image. For a fast dashboard demo, run scripts/e2e-fast-demo.sh.
+
 Environment:
   GUIX_P2P_E2E_VM_SIZE    Image size, default 20G
   GUIX_P2P_E2E_VM_MEMORY  QEMU memory in MB, default 4096

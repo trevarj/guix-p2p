@@ -4,6 +4,13 @@ Use this when the host exposes `/gnu/store` read-only. The real smoke proof
 needs a raw `guix-daemon` to import substituted nars, so the test runs in a
 throwaway Guix System qcow2 image with its own writable store.
 
+This is the slow strict-proof path. The first image build can download
+`linux-libre`. For a quick dashboard demo, use:
+
+```sh
+scripts/e2e-fast-demo.sh
+```
+
 ## Build and Boot
 
 ```sh
