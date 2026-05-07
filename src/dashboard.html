@@ -78,6 +78,7 @@ main{
 .peer-row .bar,.build-row .bar{flex:1;height:6px;background:var(--bg3)}
 .peer-row .bar-inner,.build-row .bar-inner{height:100%;background:var(--acc)}
 .peer-row .meta{min-width:90px;text-align:right;font-size:11px;opacity:.8}
+.peer-row.offline{opacity:.55}
 .catalog-row,.build-row,.seed-row{cursor:pointer}
 .catalog-row:hover,.build-row:hover,.seed-row:hover{background:var(--bg2)}
 .catalog-row .path,.build-row .path,.seed-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
@@ -127,6 +128,19 @@ main{
 .detail .narinfo-raw.open{display:block}
 
 .empty{text-align:center;padding:20px;color:var(--dim);font-size:12px;font-style:italic}
+
+@media (max-width:1100px){
+  header{align-items:flex-start;flex-wrap:wrap}
+  header .stats{flex-wrap:wrap;gap:10px 16px}
+  main{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr auto}
+}
+@media (max-width:720px){
+  body{overflow:auto}
+  header .stats{width:100%}
+  main{display:block;overflow:visible}
+  .panel{min-height:220px;max-height:360px}
+  .events{max-height:260px}
+}
 </style>
 </head>
 <body class="theme-yellow">
@@ -194,7 +208,7 @@ function fmtTime(s){
 }
 
 function fmtSize(b){
-  if(!b)return '?';
+  if(b==null)return '?';
   if(b<1024)return b+' B';
   if(b<1048576)return (b/1024).toFixed(1)+' KB';
   if(b<1073741824)return (b/1048576).toFixed(1)+' MB';
@@ -207,6 +221,22 @@ function fmtBytes(b){
 }
 
 function fmtScore(s){return (s||0).toFixed(2)}
+
+function clamp(n,min,max){return Math.max(min,Math.min(max,n))}
+
+function esc(v){
+  return String(v==null?'':v).replace(/[&<>"']/g,function(ch){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]
+  })
+}
+
+function attr(v){return esc(v)}
+
+function jsArg(v){return String(v==null?'':v).replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
+
+function updatePeerCount(){
+  document.getElementById('total-peers').textContent=Object.keys(PEERS).length
+}
 
 function cycleTheme(){
   THEME_IDX=(THEME_IDX+1)%THEMES.length;
@@ -221,7 +251,15 @@ function addEvent(cls,sym,msg){
   d.className='entry '+cls+' added';
   var now=new Date();
   var ts=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
-  d.innerHTML='<span class="ts">'+ts+'</span><span class="sym">'+sym+'</span> '+msg;
+  var tsEl=document.createElement('span');
+  tsEl.className='ts';
+  tsEl.textContent=ts;
+  var symEl=document.createElement('span');
+  symEl.className='sym';
+  symEl.textContent=sym;
+  d.appendChild(tsEl);
+  d.appendChild(symEl);
+  d.appendChild(document.createTextNode(' '+msg));
   el.appendChild(d);
   EVENT_IDX++;
   while(el.children.length>200)el.removeChild(el.firstChild);
@@ -241,20 +279,21 @@ function flagEmoji(code){
 function renderPeers(){
   var el=document.getElementById('peers-list');
   var keys=Object.keys(PEERS);
+  updatePeerCount();
   if(!keys.length){el.innerHTML='<div class="empty">no peers yet</div>';return}
   var h='';
   keys.sort(function(a,b){return(PEERS[b].score||0)-(PEERS[a].score||0)});
   keys.forEach(function(k){
     var p=PEERS[k];
     var sc=p.score||0;
-    var w=Math.round(sc*100);
+    var w=clamp(Math.round(sc*100),0,100);
     var flag=p.country?flagEmoji(p.country):'[??] ';
     var ip=p.ip||'?';
-    h+='<div class="peer-row">'
-      +'<span class="flag">'+flag+'</span>'
-      +'<span class="peer-id" title="'+k+'">'+peerIdShort(k)+'</span>'
+    h+='<div class="peer-row '+(p.connected?'':'offline')+'">'
+      +'<span class="flag">'+esc(flag)+'</span>'
+      +'<span class="peer-id" title="'+attr(k)+'">'+esc(peerIdShort(k))+'</span>'
       +'<span class="bar"><span class="bar-inner" style="width:'+w+'%"></span></span>'
-      +'<span class="meta">'+ip+' ('+fmtScore(sc)+')</span>'
+      +'<span class="meta">'+esc(ip)+' ('+esc(fmtScore(sc))+')</span>'
       +'</div>';
   });
   el.innerHTML=h;
@@ -268,12 +307,13 @@ function renderBuilds(){
   arr.sort(function(a,b){return(b.providers||0)-(a.providers||0)});
   var h='';
   arr.forEach(function(b){
-    var sz=b.nar_size?fmtSize(b.nar_size):'?';
+    var sz=b.nar_size!=null?fmtSize(b.nar_size):'?';
     var name=b.store_path?b.store_path.split('-').slice(1).join('-'):b.nar_hash.slice(0,16);
-    h+='<div class="build-row" data-hash="'+b.nar_hash+'" onclick="openDetail(\''+b.nar_hash+'\')">'
-      +'<span class="path">'+name+'</span>'
-      +'<span class="providers">'+(b.providers||0)+' peers</span>'
-      +'<span style="font-size:11px;opacity:.6">'+sz+'</span>'
+    var lookup=b.lookup_key||b.nar_hash;
+    h+='<div class="build-row" data-hash="'+attr(lookup)+'" onclick="openDetail(\''+jsArg(lookup)+'\')">'
+      +'<span class="path" title="'+attr(b.store_path||b.nar_hash)+'">'+esc(name)+'</span>'
+      +'<span class="providers">'+esc(b.providers||0)+' peers</span>'
+      +'<span style="font-size:11px;opacity:.6">'+esc(sz)+'</span>'
       +'</div>';
   });
   el.innerHTML=h;
@@ -290,11 +330,11 @@ function renderCatalog(){
   var h='';
   arr.forEach(function(c){
     var name=c.store_path?c.store_path.split('-').slice(1).join('-'):c.hash_part;
-    var sz=c.nar_size?fmtSize(c.nar_size):'?';
+    var sz=c.nar_size!=null?fmtSize(c.nar_size):'?';
     var p2p=c.p2p_available?'yes':'no';
     h+='<div class="catalog-row">'
-      +'<span class="path" title="'+(c.store_path||c.hash_part)+'">'+name+'</span>'
-      +'<span class="size">'+sz+'</span>'
+      +'<span class="path" title="'+attr(c.store_path||c.hash_part)+'">'+esc(name)+'</span>'
+      +'<span class="size">'+esc(sz)+'</span>'
       +'<span class="p2p '+p2p+'">'+(c.p2p_available?'P2P':'http')+'</span>'
       +'</div>';
   });
@@ -327,9 +367,9 @@ function renderSeeds(){
     var sz=fmtSize(s.nar_size||0);
     var bl=s.block_count||'?';
     var bs=s.block_size?fmtSize(s.block_size):'256KB';
-    h+='<div class="seed-row" data-hash="'+k+'" onclick="openSeedDetail(\''+k+'\')">'
-      +'<span class="hash" title="'+k+'">'+k.slice(0,24)+'...</span>'
-      +'<span class="seed-meta"><span class="sz">'+sz+'</span><span class="bl">'+bl+' x '+bs+'</span></span>'
+    h+='<div class="seed-row" data-hash="'+attr(k)+'" onclick="openSeedDetail(\''+jsArg(k)+'\')">'
+      +'<span class="hash" title="'+attr(k)+'">'+esc(k.slice(0,24)+'...')+'</span>'
+      +'<span class="seed-meta"><span class="sz">'+esc(sz)+'</span><span class="bl">'+esc(bl+' x '+bs)+'</span></span>'
       +'</div>';
   });
   el.innerHTML=h;
@@ -343,9 +383,9 @@ function openSeedDetail(hash){
   var bl=s.block_count||'?';
   var bs=s.block_size?fmtSize(s.block_size):'256KB';
   c.innerHTML='<h2>seeded nar</h2>'
-    +'<div class="field"><label>hash</label><span class="val" style="font-size:11px;word-break:break-all">'+hash+'</span></div>'
-    +'<div class="field"><label>size</label><span class="val">'+sz+'</span></div>'
-    +'<div class="field"><label>blocks</label><span class="val">'+bl+' x '+bs+'</span></div>'
+    +'<div class="field"><label>hash</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(hash)+'</span></div>'
+    +'<div class="field"><label>size</label><span class="val">'+esc(sz)+'</span></div>'
+    +'<div class="field"><label>blocks</label><span class="val">'+esc(bl+' x '+bs)+'</span></div>'
     +'<div class="field"><label>status</label><span class="val" style="color:var(--ok)">seeding</span></div>';
   var ov=document.getElementById('overlay');
   ov.classList.remove('hidden');
@@ -357,23 +397,23 @@ function openDetail(hash){
     return r.json()
   }).then(function(b){
     var c=document.getElementById('detail-content');
-    var sz=b.nar_size?fmtSize(b.nar_size):'?';
+    var sz=b.nar_size!=null?fmtSize(b.nar_size):'?';
     var dl=b.downloaded_at?'downloaded '+new Date(b.downloaded_at*1000).toISOString().slice(0,16):'not cached';
-    var refs=(b.references||[]).map(function(r){return'<div>'+r+'</div>'}).join('');
+    var refs=(b.references||[]).map(function(r){return'<div>'+esc(r)+'</div>'}).join('');
     var provs='';
     (b.providers||[]).forEach(function(p){
-      provs+='<div class="peer-row"><span style="font-size:11px">'+peerIdShort(p)+'</span></div>';
+      provs+='<div class="peer-row"><span style="font-size:11px">'+esc(peerIdShort(p))+'</span></div>';
     });
 
     var rawNarinfo=b.narinfo_raw||'';
     var rawBlock=rawNarinfo?'<div class="narinfo-toggle" onclick="toggleNarinfo(this)">\u25b6 narinfo (raw signed text)</div>'
-      +'<div class="narinfo-raw">'+rawNarinfo.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>':'';
+      +'<div class="narinfo-raw">'+esc(rawNarinfo)+'</div>':'';
 
-    c.innerHTML='<h2>'+b.nar_hash.slice(0,24)+'...</h2>'
-      +'<div class="field"><label>store</label><span class="val">'+(b.store_path||'?')+'</span></div>'
-      +'<div class="field"><label>size</label><span class="val">'+sz+'</span></div>'
-      +'<div class="field"><label>deriver</label><span class="val">'+(b.deriver||'?')+'</span></div>'
-      +'<div class="field"><label>status</label><span class="val">'+dl+'</span></div>'
+    c.innerHTML='<h2>'+esc(b.nar_hash.slice(0,24)+'...')+'</h2>'
+      +'<div class="field"><label>store</label><span class="val">'+esc(b.store_path||'?')+'</span></div>'
+      +'<div class="field"><label>size</label><span class="val">'+esc(sz)+'</span></div>'
+      +'<div class="field"><label>deriver</label><span class="val">'+esc(b.deriver||'?')+'</span></div>'
+      +'<div class="field"><label>status</label><span class="val">'+esc(dl)+'</span></div>'
       +'<h3>references ('+(b.references||[]).length+')</h3>'
       +'<div style="margin-left:8px;font-size:11px">'+(refs||'<span style="color:var(--dim)">none</span>')+'</div>'
       +'<h3>providers ('+(b.providers||[]).length+')</h3>'
@@ -422,9 +462,7 @@ function connectWS(){
 function handleEvent(e){
   switch(e.type){
     case 'PeerConnected':
-      PEERS[e.peer_id]=PEERS[e.peer_id]||{score:0.5,completed:0,failed:0,bytes_served:0,connected:false,addresses:e.addresses||[],country:null,ip:null};
-      PEERS[e.peer_id].connected=true;
-      PEERS[e.peer_id].addresses=e.addresses||[];
+      mergePeer({peer_id:e.peer_id,connected:true,addresses:e.addresses||[]});
       (e.addresses||[]).forEach(function(a){
         var ip=extractIP(a);
         if(ip){PEERS[e.peer_id].ip=ip;PEERS[e.peer_id].country=ipCountry(ip)}
@@ -441,17 +479,14 @@ function handleEvent(e){
 
     case 'ProvidersFound':
       var b=BUILDS[e.nar_hash];
-      if(!b){b={nar_hash:e.nar_hash,store_path:null,nar_size:null,providers:e.provider_count};BUILDS[e.nar_hash]=b}
-      b.providers=Math.max(b.providers||0,e.provider_count);
+      if(!b){b={nar_hash:e.nar_hash,store_path:null,nar_size:null,providers:0};BUILDS[e.nar_hash]=b}
+      b.providers=Math.max(b.providers||0,e.provider_count||0);
       addEvent('providers','#','Providers found: '+e.nar_hash.slice(0,16)+'... ('+e.provider_count+')');
       renderBuilds();
       break;
 
     case 'BuildDiscovered':
-      var b=BUILDS[e.nar_hash];
-      if(!b){b={nar_hash:e.nar_hash,store_path:e.store_path,nar_size:e.nar_size,providers:0};BUILDS[e.nar_hash]=b}
-      if(e.store_path)b.store_path=e.store_path;
-      if(e.nar_size)b.nar_size=e.nar_size;
+      mergeBuild({nar_hash:e.nar_hash,store_path:e.store_path,nar_size:e.nar_size,providers:0});
       addEvent('providers','+','Build observed: '+(e.store_path||e.nar_hash.slice(0,16)+'...'));
       renderBuilds();
       break;
@@ -473,7 +508,7 @@ function handleEvent(e){
       break;
 
     case 'CatalogEntry':
-      CATALOG[e.hash_part]={hash_part:e.hash_part,store_path:e.store_path,nar_size:e.nar_size,nar_hash:e.nar_hash,p2p_available:e.p2p_available};
+      mergeCatalogEntry(e);
       renderCatalog();
       break;
 
@@ -511,6 +546,41 @@ function ipCountry(ip){
   return null
 }
 
+function mergePeer(p){
+  if(!p||!p.peer_id)return;
+  var cur=PEERS[p.peer_id]||{peer_id:p.peer_id,score:0.5,completed:0,failed:0,bytes_served:0,connected:false,addresses:[],country:null,ip:null};
+  if(p.score!=null)cur.score=p.score;
+  if(p.completed!=null)cur.completed=p.completed;
+  if(p.failed!=null)cur.failed=p.failed;
+  if(p.bytes_served!=null)cur.bytes_served=p.bytes_served;
+  if(p.connected!=null)cur.connected=p.connected;
+  if(p.addresses)cur.addresses=p.addresses;
+  if(p.country)cur.country=p.country;
+  if(p.ip)cur.ip=p.ip;
+  PEERS[p.peer_id]=cur
+}
+
+function mergeBuild(b){
+  if(!b||!b.nar_hash)return;
+  var cur=BUILDS[b.nar_hash]||{nar_hash:b.nar_hash,store_path:null,nar_size:null,providers:0,lookup_key:null};
+  if(b.lookup_key)cur.lookup_key=b.lookup_key;
+  if(b.store_path)cur.store_path=b.store_path;
+  if(b.nar_size!=null)cur.nar_size=b.nar_size;
+  if(b.provider_count!=null)cur.providers=b.provider_count;
+  if(b.providers!=null)cur.providers=b.providers;
+  BUILDS[b.nar_hash]=cur
+}
+
+function mergeCatalogEntry(c){
+  if(!c||!c.hash_part)return;
+  var cur=CATALOG[c.hash_part]||{hash_part:c.hash_part,store_path:null,nar_size:null,nar_hash:null,p2p_available:false};
+  if(c.store_path)cur.store_path=c.store_path;
+  if(c.nar_size!=null)cur.nar_size=c.nar_size;
+  if(c.nar_hash)cur.nar_hash=c.nar_hash;
+  cur.p2p_available=Boolean(cur.p2p_available||c.p2p_available);
+  CATALOG[c.hash_part]=cur
+}
+
 (function(){
   var saved=localStorage.getItem('guix-p2p-theme');
   if(saved&&THEMES.indexOf(saved)>=0){THEME_IDX=THEMES.indexOf(saved)}
@@ -542,13 +612,8 @@ function ipCountry(ip){
   function loadPeers(){
     fetch('/api/peers').then(function(r){return r.json()}).then(function(ps){
       ps.forEach(function(p){
-        if(!PEERS[p.peer_id]){
-          PEERS[p.peer_id]={peer_id:p.peer_id,score:p.score||0.5,completed:p.completed||0,failed:p.failed||0,bytes_served:p.bytes_served||0,connected:p.connected||false,addresses:p.addresses||[],country:p.country||null,ip:p.ip||null}
-        }
-        PEERS[p.peer_id].score=p.score||PEERS[p.peer_id].score;
-        PEERS[p.peer_id].connected=p.connected||PEERS[p.peer_id].connected
+        mergePeer(p)
       });
-      document.getElementById('total-peers').textContent=Object.keys(PEERS).length;
       renderPeers()
     }).catch(function(){})
   }
@@ -556,10 +621,7 @@ function ipCountry(ip){
   function loadBuilds(){
     fetch('/api/builds').then(function(r){return r.json()}).then(function(bs){
       bs.forEach(function(b){
-        if(!BUILDS[b.nar_hash]){
-          BUILDS[b.nar_hash]={nar_hash:b.nar_hash,store_path:b.store_path,nar_size:b.nar_size,providers:b.provider_count}
-        }
-        BUILDS[b.nar_hash].providers=b.provider_count||BUILDS[b.nar_hash].providers
+        mergeBuild(b)
       });
       renderBuilds()
     }).catch(function(){})
@@ -578,11 +640,16 @@ function ipCountry(ip){
   function loadCatalog(){
     fetch('/api/catalog').then(function(r){return r.json()}).then(function(cs){
       cs.forEach(function(c){
-        CATALOG[c.hash_part]=c
+        mergeCatalogEntry(c)
       });
       renderCatalog()
     }).catch(function(){})
   }
+
+  setInterval(loadPeers,10000);
+  setInterval(loadBuilds,10000);
+  setInterval(loadSeeds,15000);
+  setInterval(loadCatalog,10000);
 
   loadPeers();
   loadBuilds();

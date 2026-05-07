@@ -491,4 +491,15 @@ whether P2P providers are available.
 - `/api/catalog` returns all catalog entries seen by this node
 - `CatalogEntry` events are emitted by the daemon when a `have` query
   processes a store path with narinfo metadata
+- A dashboard-owned catalog listener records `CatalogEntry` events whether or
+  not a browser is currently connected to `/ws`
 - P2P availability is updated when DHT provider lookups succeed
+
+Dashboard API endpoints:
+
+- `/api/status` returns the local peer id, uptime, connected peer count, DHT
+  entry count, observed build count, and seed count.
+- `/api/peers` returns full peer ids and reputation counters.
+- `/api/builds` returns observed builds with a `lookup_key` for detail links.
+- `/api/build/{hash}` accepts either the registry lookup key or the nar hash.
+- `/api/catalog` and `/api/seeds` return deterministic sorted snapshots.
