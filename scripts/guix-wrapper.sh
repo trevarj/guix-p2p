@@ -1,30 +1,32 @@
 #!/bin/sh
-# guix-p2p-substitute activation wrapper
+# guix-p2p activation wrapper
 #
 # Intercepts guix-daemon's "guix substitute --query" / "--substitute"
-# invocations and redirects to guix-p2p-substitute. All other guix
-# subcommands pass through unchanged.
+# invocations. When the daemon is running, relays through the Unix socket
+# for near-instant response with a warm swarm. Falls through to direct
+# invocation when the daemon is not available.
 #
 # Usage:
-#   1. Build/install guix-p2p-substitute on PATH
-#   2. Install this script as "guix" early in PATH (e.g. ~/.local/bin/guix)
-#   3. Restart guix-daemon with the modified PATH
-#   4. Optionally run guix-p2p-substitute --daemon as a background service
-#
-# The wrapper works for ALL guix commands that trigger builds and
-# downloads: build, install, pull, system reconfigure, home reconfigure,
-# shell, etc. Only "substitute" subcommands are intercepted.
+#   1. Build/install guix-p2p on PATH
+#   2. Start the daemon: guix-p2p --daemon
+#   3. Install this script as "guix" early in PATH (e.g. ~/.local/bin/guix)
+#   4. Restart guix-daemon with the modified PATH
 
 set -eu
 
 REAL_GUIX="/run/current-system/profile/bin/guix"
+SOCKET="${GUIX_P2P_SOCKET:-${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock}"
 
 case "${1-}" in
     substitute)
         shift
         case "${1-}" in
             --query|--substitute)
-                exec guix-p2p-substitute "$@"
+                if [ -S "$SOCKET" ]; then
+                    exec guix-p2p "$@" --socket "$SOCKET"
+                else
+                    exec "$REAL_GUIX" substitute "$@"
+                fi
                 ;;
             *)
                 exec "$REAL_GUIX" substitute "$@"

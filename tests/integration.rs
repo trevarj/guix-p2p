@@ -1,12 +1,12 @@
 mod daemon_protocol {
-    use guix_p2p_substitute::daemon::{DaemonCommand, extract_hash_part};
+    use guix_p2p::daemon::{DaemonCommand, extract_hash_part};
 
     fn parse_line(line: &str) -> std::io::Result<DaemonCommand> {
         let mut cmd = line.to_string();
         if !cmd.ends_with('\n') {
             cmd.push('\n');
         }
-        guix_p2p_substitute::daemon::parse_command_line(cmd.trim())
+        guix_p2p::daemon::parse_command_line(cmd.trim())
     }
 
     #[test]
@@ -83,7 +83,7 @@ mod daemon_protocol {
 // ======================================================================
 
 mod reputation {
-    use guix_p2p_substitute::reputation::ReputationTracker;
+    use guix_p2p::reputation::ReputationTracker;
 
     #[test]
     fn test_clean_slate() {
@@ -160,7 +160,7 @@ mod reputation {
 
 mod connection_manager {
 
-    use guix_p2p_substitute::connection::{ConnectionConfig, ConnectionManager};
+    use guix_p2p::connection::{ConnectionConfig, ConnectionManager};
 
     #[test]
     fn test_record_attempt_tracks_retries() {
@@ -214,7 +214,7 @@ mod connection_manager {
 // ======================================================================
 
 mod block_utils {
-    use guix_p2p_substitute::swarm::block::BlockInfo;
+    use guix_p2p::swarm::block::BlockInfo;
 
     #[test]
     fn test_block_count_for_exact_size() {
@@ -255,7 +255,7 @@ mod block_utils {
 // ======================================================================
 
 mod narinfo_parsing {
-    use guix_p2p_substitute::narinfo::parse_narinfo;
+    use guix_p2p::narinfo::parse_narinfo;
 
     #[test]
     fn test_empty_input() {

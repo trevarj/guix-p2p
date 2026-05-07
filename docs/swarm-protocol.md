@@ -69,6 +69,7 @@ enum SwarmMessage {
         block_hashes: Vec<[u8; 32]>,  // SHA-256 of each block
     },
     Request {
+        nar_hash: [u8; 32],
         indices: Vec<u32>,  // 1..8 block indices
     },
     Blocks {
@@ -95,7 +96,8 @@ Downloader                        Peer
   │  }                              │
   │ <────────────────────────────── │
   │                                 │
-  │  REQUEST { indices: [17, 42] } │  "Send me blocks 17 and 42"
+  │  REQUEST { nar_hash, indices: [17, 42] }
+  │                                 │  "Send me blocks 17 and 42"
   │ ──────────────────────────────> │
   │                                 │
   │  BLOCKS { data: [(17, bytes)]} │  Peer sends blocks
@@ -109,6 +111,7 @@ Downloader                        Peer
 A peer serving blocks MUST:
 - Respond to HANDSHAKE within 10 seconds
 - Serve at least the blocks claimed in HANDSHAKE_REPLY
+- Use the `nar_hash` carried by each REQUEST to select the correct local nar
 - Respond to each REQUEST within 30 seconds
 - Not require choking/unchoking (free seeding model)
 
@@ -149,7 +152,7 @@ struct NarDownloader {
 6. **Download loop**:
    - For each peer, if peer has blocks we need AND peer has < 4 outstanding requests:
      - Select up to 8 rarest blocks this peer has
-     - Send REQUEST
+     - Send REQUEST with `nar_hash` and block indices
    - When BLOCKS response arrives:
      - Verify each block: SHA-256(block) == block_hash[index]
      - On success: store block, mark as received in needed_blocks

@@ -17,8 +17,9 @@ use guix_p2p::{
 use libp2p::{
     Multiaddr, PeerId, SwarmBuilder,
     kad::{self, GetProvidersOk, QueryResult, RecordKey},
-    request_response,
+    noise, request_response,
     swarm::SwarmEvent,
+    tcp, yamux,
 };
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -131,7 +132,7 @@ async fn start(
     let pid = PeerId::from(kp.public());
     let mut swarm = build_swarm(&kp)?;
 
-    let target: Multiaddr = "/ip4/127.0.0.1/udp/0/quic-v1".parse()?;
+    let target: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse()?;
     swarm.listen_on(target)?;
 
     let blocks: BlockMap = Arc::new(Mutex::new(seed));
@@ -171,6 +172,7 @@ fn build_swarm(kp: &libp2p::identity::Keypair) -> anyhow::Result<libp2p::Swarm<G
     cfg.max_idle_timeout = 30_000;
     Ok(SwarmBuilder::with_existing_identity(kp.clone())
         .with_tokio()
+        .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
         .with_quic_config(|_| cfg)
         .with_dns()?
         .with_behaviour(|kp| Ok(create_swarm_behaviour(kp)))?
@@ -285,8 +287,9 @@ fn serve(blocks: &BlockMap, req: &BlockRequest) -> BlockResponse {
                 }
             }
         },
-        BlockRequest::GetBlocks { indices } => {
-            if let Some(data) = blocks.lock().unwrap().values().next() {
+        BlockRequest::GetBlocks { nar_hash, indices } => {
+            let key = hex::encode(nar_hash);
+            if let Some(data) = blocks.lock().unwrap().get(&key) {
                 let blks: Vec<BlockData> = indices
                     .iter()
                     .filter_map(|&i| {

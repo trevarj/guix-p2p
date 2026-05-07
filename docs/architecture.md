@@ -53,14 +53,14 @@ guix-p2p (Rust, libp2p)
   │     "info" → fetch narinfo (HTTP or local cache) + return metadata
   │     "substitute" → swarm download or reply not-found → fd 4 reply
   │
-  ├─► libp2p Kad DHT (QUIC transport, SHA-256 key = nar hash)
+  ├─► libp2p Kad DHT (QUIC/TCP transport, SHA-256 key = nar hash)
   │     get_providers(nar_hash) → list of PeerIds
   │     start_providing(nar_hash) → announce availability
   │     Bootstrap from community-maintained seed nodes
   │
   ├─► Swarm Downloader (libp2p request-response streams)
   │     Handshake: nar_hash + block availability bitfield
-  │     Request: up to 8 block indices per batch
+  │     Request: nar_hash + up to 8 block indices per batch
   │     Round-robin block assignment across connected peers
   │     Per-block SHA-256 verification
   │     Final nar-SHA-256 verification against narinfo
@@ -82,7 +82,7 @@ guix-p2p (Rust, libp2p)
 | Language | Rust | tokio async runtime, mature crypto ecosystem, libp2p crate |
 | DHT | libp2p-kad, SHA-256 keys | Native alignment with nar-SHA-256; battle-tested implementation |
 | Swarm | Custom nar block protocol | BTv2 infohash is mathematically incompatible with nar-SHA-256 |
-| Transport | QUIC (libp2p-quic) + TCP fallback | Multiplexed, performant, NAT-friendly |
+| Transport | QUIC (libp2p-quic) + TCP fallback | QUIC is the default listen address; TCP is enabled for restricted containers and networks where UDP is unavailable |
 | NAT traversal | Built into libp2p (autonat/relay/dcutr), deferred post-MVP | Significant complexity; initial users need open ports or IPv6 |
 | Daemon integration | Unix socket relay + PATH wrapper | Zero daemon C++ changes; relay gives <1ms startup |
 | Narinfos | HTTP fetch from official substitute URLs | Tiny (<500 bytes); existing trust chain unchanged |
@@ -122,21 +122,68 @@ struct ConnectionManager { .. }     // src/connection.rs: retry/backoff, pruning
 struct BandwidthLimiter { .. }     // src/bandwidth.rs: token-bucket rate limiting
 ```
 
+## Daemon Protocol Layer
+
+The daemon protocol follows guix-daemon's substituter pipe protocol exactly.
+
+### Socket relay protocol
+
+The Unix socket between daemon and relay uses channel prefix framing:
+- `fd4:<line>\n` — structured reply data (have paths, info metadata, success/not-found)
+- `out:<line>\n` — trace output (`@ download-started`, `@ download-succeeded`)
+
+The relay demuxes these: `fd4:` lines are written to fd 4, `out:` lines to
+stdout (fd 1). This matches guix-daemon's expectation that the substituter
+process writes structured replies on fd 4 and progress traces on stdout.
+
+### Query protocol
+
+- **have**: daemon writes `have <path1> <path2> ...\n`. Reply: each available
+  path on a separate line, terminated by blank line.
+- **info**: daemon writes `info <path1> ...\n`. Reply per path: store_path,
+  deriver, ref_count, refs, download_size, nar_size, then blank line.
+
+### Substitute protocol
+
+- **substitute**: daemon writes `substitute <store-path> <dest>\n`. Reply:
+  `success sha256:<hash> <size>`, or `hash-mismatch sha256 <expected> <actual>`,
+  or `not-found`.
+
+Before the download, `@ download-started <path> <url> <size>` is written to
+the trace channel. After success, `@ download-succeeded <path> <url> <size>`
+is written. These match the guix-daemon build trace protocol.
+
+### Nar hash verification
+
+After downloading (P2P or HTTP), the nar's SHA-256 hash is verified against
+the narinfo's expected `NarHash`. If they don't match:
+1. The destination file is deleted
+2. `hash-mismatch sha256 <expected> <actual>` is replied on fd 4
+3. guix-daemon treats this as a corruption error (not a simple fallback)
+
 ## DHT Flow
 
 ```
 1. "have /gnu/store/abc...-foo /gnu/store/def...-bar"
 2. For each path, extract 32-char hash part
-3. kad.get_providers(nar_hash) → Vec<PeerId>
-4. If peers found → include path in reply to daemon
-5. If none → path excluded (daemon falls through to other substituters or builds)
+3. If policy is http-first or p2p-first:
+     → include all paths in reply (we can serve via HTTP)
+   If policy is p2p-only:
+     → kad.get_providers(nar_hash) → Vec<PeerId>
+     → include path only if peers found
 
-6. "substitute /gnu/store/abc...-foo /tmp/dest"
-7. kad.get_providers(nar_hash) → Vec<PeerId>
-8. Connect QUIC to each PeerId, establish block_exchange streams
-9. Download blocks in parallel, verify SHA-256 per block
-10. Reassemble, verify SHA-256(full nar) == narinfo NarHash
-11. Write to dest, reply "success sha256:... 12345"
+4. "substitute /gnu/store/abc...-foo /tmp/dest"
+5. Fetch narinfo from substitute servers, verify signature
+6. If policy is http-first:
+     → try HTTP nar download first
+     → on failure, fall back to P2P swarm
+   If policy is p2p-first:
+     → try P2P swarm first
+     → on failure, fall back to HTTP nar download
+   If policy is p2p-only:
+     → P2P swarm only, fail on no providers
+7. On success: write nar to dest, save to NarStore for re-seeding, announce in DHT
+8. Reply "success sha256:... <size>" or "not-found <path>"
 ```
 
 ## Swarm Block Protocol
@@ -148,7 +195,7 @@ Block count = ceil(nar_size / 256KiB)
 ```
 Client → Peer: HANDSHAKE { nar_hash: [u8; 32], blocks_available: BitVec }
 Peer → Client: HANDSHAKE_REPLY { blocks_available: BitVec, block_count: u32, block_size: u32 }
-Client → Peer: REQUEST { indices: [u32; 1..8] }
+Client → Peer: REQUEST { nar_hash: [u8; 32], indices: [u32; 1..8] }
 Peer → Client: BLOCKS { data: [(u32, Vec<u8>); 1..8] }
 ```
 
@@ -179,10 +226,32 @@ Expired records are handled by libp2p-kad's TTL-based record management.
 ## HTTP Narinfo Client
 
 Narinfos are fetched from official substitute URLs and verified against ACL keys.
-Nar downloads are handled by guix-daemon's substituter chaining (reply `not-found`
-to let daemon fall through to HTTP substituters).
+Nar downloads use the substitute policy to choose between P2P and HTTP.
 
-Safety thresholds:
+### Substitute Policy
+
+Three modes control how nars are sourced, configured via `--policy` CLI flag
+or `substitute_policy` in the TOML config file:
+
+| Mode | Behavior |
+|------|----------|
+| `p2p-only` | Only use P2P swarm. Fail with `not-found` if no peers. No HTTP nar download. |
+| `p2p-first` | Try P2P first. Fall back to HTTP nar download if swarm fails (not enough providers, handshake failure, download error). |
+| `http-first` | Try HTTP nar download first. Fall back to P2P if HTTP fails or returns 404. |
+
+Default: `p2p-first`.
+
+The policy also affects the `have` query:
+- `http-first` and `p2p-first`: Always respond with the path (we can serve via HTTP fallback).
+- `p2p-only`: Only respond if DHT providers exist for the nar hash.
+
+### HTTP Nar Download
+
+When the policy allows HTTP fallback, nars are downloaded from the substitute
+server URLs in the narinfo. Decompression supports gzip and zstd; lzip is not
+yet supported. The preference order is: zstd > gzip > none.
+
+### Safety thresholds:
 - DHT returns < `min_providers` (3) peers → skip swarm, reply not-found
 - Swarm download stalls (no new blocks for `stall_timeout_secs` (30s)) → abort, reply not-found
 - Nar hash verification failed → reply not-found
@@ -206,6 +275,9 @@ Narinfo flow:
 | `sha2` | SHA-256 (block hashes, nar verification) |
 | `reqwest` | HTTP narinfo fetching from official substitute URLs |
 | `serde` / `serde_json` | Protocol message serialization, config parsing, reputation persistence |
+| `toml` | TOML config file parsing |
+| `flate2` | Gzip decompression for HTTP nar downloads |
+| `zstd` | Zstd decompression for HTTP nar downloads |
 | `serde_bytes` | Efficient byte slice serialization for protocol messages |
 | `clap` | CLI argument parsing |
 | `tracing` / `tracing-subscriber` | Structured logging with env-filter |
@@ -254,6 +326,9 @@ libp2p provides built-in behaviours:
 
 When ready, it's a behaviour mix-in and relay node infrastructure deployment.
 Not a protocol rewrite.
+
+mDNS LAN discovery is best-effort. It is enabled when the OS permits multicast
+sockets and disabled with a warning in restricted containers or sandboxes.
 
 ## Activation
 
@@ -312,11 +387,30 @@ substitute protocol.
     #:provides '(guix-p2p-daemon)
     #:start (make-forkexec-constructor
              '("guix-p2p" "--daemon"
-               "--listen-addr" "/ip4/0.0.0.0/udp/6881/quic-v1"
-               "--cache-dir" "/var/cache/guix-p2p")
+                "--listen-addr" "/ip4/0.0.0.0/udp/6881/quic-v1"
+                "--cache-dir" "/var/cache/guix-p2p")
              #:log-file "/var/log/guix-p2p-daemon.log")
     #:stop  (make-kill-destructor)
     #:respawn? #t))
+```
+
+### TOML Config File
+
+Settings can be persisted in `$XDG_CONFIG_HOME/guix-p2p/config.toml`
+(or `~/.config/guix-p2p/config.toml`). CLI flags override file values.
+
+```toml
+substitute_policy = "p2p-first"
+bootstrap_peers = "/ip4/1.2.3.4/udp/6881/quic-v1/p2p/QmPeer1,/ip4/5.6.7.8/udp/6881/quic-v1/p2p/QmPeer2"
+substitute_urls = "https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org"
+min_providers = 3
+request_timeout_secs = 30
+stall_timeout_secs = 30
+block_size = 262144
+max_peers_per_download = 8
+max_total_peers = 50
+acl_path = "/etc/guix/acl"
+seed_paths = ["/gnu/store/abc-foo", "/gnu/store/def-bar"]
 ```
 
 ### Future: Upstream Guile Patch
@@ -387,3 +481,14 @@ Dashboard events related to seeding:
 |-------|-------------|
 | `SeedAdded` | Emitted when a nar is added to the local store (startup seeding or post-download) |
 | `BlockServed` | Emitted when blocks are served to a requesting peer (includes nar hash, peer, indices) |
+
+## Dashboard Catalog View
+
+The web dashboard includes a **catalog** panel showing packages discovered
+during substitute queries. Each entry shows the store path name, nar size, and
+whether P2P providers are available.
+
+- `/api/catalog` returns all catalog entries seen by this node
+- `CatalogEntry` events are emitted by the daemon when a `have` query
+  processes a store path with narinfo metadata
+- P2P availability is updated when DHT provider lookups succeed

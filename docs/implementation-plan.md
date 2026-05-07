@@ -222,6 +222,81 @@
 
 ---
 
+## Phase 8: Substitute Policy + HTTP Nar Download + Config File
+
+### Goals
+- Support three substitute sourcing policies: p2p-only, p2p-first, http-first
+- HTTP nar download with gzip/zstd decompression as fallback
+- TOML config file for persistent settings
+
+### Tasks
+
+- [x] `SubstitutePolicy` enum in `src/config.rs`:
+  - `P2pOnly`: P2P only, `not-found` on no providers
+  - `P2pFirst`: try P2P, fall back to HTTP nar download
+  - `HttpFirst`: try HTTP nar download, fall back to P2P
+  - `--policy` CLI flag, `substitute_policy` TOML config key
+- [x] TOML config file support in `src/config.rs`:
+  - Config loaded from `$XDG_CONFIG_HOME/guix-p2p/config.toml`
+  - All settings configurable via file; CLI flags override
+  - `serde(Deserialize)` + `toml` crate
+- [x] HTTP nar download in `src/http_client.rs`:
+  - `download_nar_http()`: download compressed nar from substitute server
+  - Gzip decompression via `flate2`
+  - Zstd decompression via `zstd`
+  - URL selection: zstd > gzip > lzip > none
+- [x] Policy-aware `handle_have()` in `src/daemon.rs`:
+  - `http-first` and `p2p-first`: always respond with path (HTTP fallback available)
+  - `p2p-only`: only respond if DHT providers exist
+- [x] Policy-aware substitute flow in `src/daemon.rs`:
+  - `try_swarm_substitute()` dispatches to `try_p2p_download()` and `try_http_download()`
+  - Fallback chain based on policy
+  - All successful downloads (P2P or HTTP) save to NarStore for re-seeding
+
+### Deliverables
+- Three substitute policies with HTTP nar fallback
+- Persistent TOML config file
+- `--policy` CLI flag
+
+---
+
+## Phase 9: Socket Protocol + Daemon Protocol Compliance
+
+### Goals
+- Socket relay carries both fd 4 data and stdout traces
+- guix-daemon build trace protocol compliance (`@ download-started/succeeded`)
+- Nar hash verification against narinfo + `hash-mismatch` reply
+- End-to-end compatibility with guix-daemon
+
+### Tasks
+
+- [x] Channel prefix framing on socket protocol:
+  - `fd4:<line>` → structured reply data (written to fd 4 by relay)
+  - `out:<line>` → trace output (written to stdout by relay)
+  - `ReplyWriter::Socket` variant for socket mode with separate buffers
+  - `ReplyWriter::write_trace()` for trace output (stdout or `out:` prefix)
+  - `ReplyWriter::flush_socket()` for async write to socket
+- [x] Relay demux (`src/relay.rs`):
+  - Reads `fd4:` lines → writes to fd 4 via `libc::write(4, ...)`
+  - Reads `out:` lines → writes to stdout via `libc::write(1, ...)`
+  - Unprefixed lines treated as fd 4 data (backward compat)
+- [x] Trace emission in substitute flow:
+  - `@ download-started <path> <url> <size>` before each download attempt
+  - `@ download-succeeded <path> <url> <size>` after successful download
+  - Uses `reply.write_trace()` which routes to correct channel
+- [x] Nar hash verification:
+  - After download, verify SHA-256(nar_data) matches narinfo's NarHash
+  - On mismatch: delete dest file, reply `hash-mismatch sha256 <expected> <actual>`
+  - On match: reply `success sha256:<hash> <size>`
+- [x] `handle_socket_connection` uses `ReplyWriter::socket()` + `flush_socket()`
+
+### Deliverables
+- Socket protocol carries both fd 4 and stdout data
+- guix-daemon build traces work through relay
+- Hash verification ensures corrupted downloads are caught
+
+---
+
 ## Phase 6: Ship (Week 10)
 
 ### Goals
@@ -251,6 +326,65 @@
 
 ### Deliverables
 - Usable P2P substitute client with community bootstrap infrastructure
+
+---
+
+## Phase 10: E2E Container Test
+
+### Goals
+
+- Multi-node P2P substitute test using `guix shell -CN` containers
+- End-to-end `guix build hello` through guix-daemon with `GUIX` env var
+  pointing to guix-p2p wrapper
+- Verify P2P nar download from seeder to builder node
+
+### Tasks
+
+- [x] Create orchestrator script (`scripts/e2e-container-test.sh`)
+- [x] Find raw C++ guix-daemon binary (not Guile wrapper) for `GUIX` env var
+  override
+- [x] Generate per-node wrapper scripts with `GUIX_P2P_SOCKET` and
+  `GUIX_P2P_BIN` env vars
+- [x] Phase 1: Start Node A (seeder) — guix-p2p daemon, wait for readiness,
+  capture PeerId via dashboard API
+- [x] Phase 2: Start Node B (builder) — guix-p2p daemon with
+  `--bootstrap-peers` pointing to Node A
+- [x] Phase 3: Start guix-daemon inside Node B with separate
+  `GUIX_STATE_DIRECTORY` (empty DB) and `GUIX` pointing to wrapper
+- [x] Phase 4: Seed hello on Node A via `--seed` flag
+- [x] Phase 5: Run `guix build hello` inside Node B
+- [x] Phase 6: Print dashboard catalog/seeds and propagate build exit code
+- [x] Phase 7: Cleanup (kill processes)
+
+### Key Design Decisions
+
+- `guix shell -CN` containers sharing host network, separate filesystems
+- Separate `GUIX_STATE_DIRECTORY` per container (empty DB) so daemon doesn't
+  know existing packages and must substitute
+- Shared writable `/gnu/store` from host (daemon needs to write nar imports)
+- Raw C++ `guix-daemon` binary (not Guile wrapper which overwrites `GUIX`)
+- `--disable-chroot` + `--max-jobs=0` for substitute-only container operation
+- `--policy p2p-only` to force pure P2P (no HTTP nar fallback)
+
+### Findings Applied 2026-05-07
+
+- mDNS must be optional: restricted containers can deny multicast socket setup.
+- TCP fallback must be active, not just documented, because UDP/QUIC is often
+  denied in test containers.
+- `GetBlocks` now carries `nar_hash`, so multi-nar seed caches serve the
+  requested nar instead of relying on prior handshake state.
+- The E2E script defaults to TCP loopback. Set `GUIX_P2P_E2E_TRANSPORT=quic`
+  to exercise QUIC where UDP sockets are available.
+
+### See Also
+
+- `docs/e2e-container-test-plan.md` — full detailed plan with architecture,
+  execution phases, known challenges, and wrapper script specification
+
+### Deliverables
+
+- Automated multi-node P2P substitute test with real guix-daemon integration
+- Verified end-to-end `guix build hello` via P2P
 
 ---
 

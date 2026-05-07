@@ -19,8 +19,9 @@ use guix_p2p::{
 use libp2p::{
     Multiaddr, PeerId, SwarmBuilder,
     kad::{self, GetProvidersOk, QueryResult, RecordKey},
-    request_response,
+    noise, request_response,
     swarm::SwarmEvent,
+    tcp, yamux,
 };
 use sha2::Digest;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
@@ -188,7 +189,10 @@ async fn run_network(
             tracing::info!("dl-{i} -> seeder-{j}: requesting {block_count} blocks");
             let _ = dl.cmd_tx.send(SwarmCommand::SendBlockRequest {
                 peer: seeder_pid,
-                request: BlockRequest::GetBlocks { indices: (0u32..block_count).collect() },
+                request: BlockRequest::GetBlocks {
+                    nar_hash: hex::decode(hash).unwrap(),
+                    indices: (0u32..block_count).collect(),
+                },
             });
 
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -223,7 +227,7 @@ async fn launch_node(
     let kp = libp2p::identity::Keypair::generate_ed25519();
     let pid = PeerId::from(kp.public());
     let mut swarm = build_swarm(&kp)?;
-    swarm.listen_on("/ip4/127.0.0.1/udp/0/quic-v1".parse()?)?;
+    swarm.listen_on("/ip4/127.0.0.1/tcp/0".parse()?)?;
 
     // Set up nar store
     let tmp_dir = tempfile::tempdir()?;
@@ -280,6 +284,7 @@ async fn launch_node(
         peer_id: pid.to_string(),
         event_bus: event_tx.clone(),
         nar_store: nar_store.clone(),
+        catalog: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let dash_label = label.clone();
@@ -396,10 +401,10 @@ async fn run_node_loop(
                 )) => {
                     let nar_hash_event = match &request {
                         BlockRequest::Handshake { nar_hash } => hex::encode(nar_hash),
-                        BlockRequest::GetBlocks { .. } => String::new(),
+                        BlockRequest::GetBlocks { nar_hash, .. } => hex::encode(nar_hash),
                     };
                     let indices_event = match &request {
-                        BlockRequest::GetBlocks { indices } => indices.clone(),
+                        BlockRequest::GetBlocks { indices, .. } => indices.clone(),
                         BlockRequest::Handshake { .. } => vec![],
                     };
                     let resp = {
@@ -464,6 +469,7 @@ fn build_swarm(kp: &libp2p::identity::Keypair) -> anyhow::Result<libp2p::Swarm<G
     cfg.max_idle_timeout = 30_000;
     Ok(SwarmBuilder::with_existing_identity(kp.clone())
         .with_tokio()
+        .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
         .with_quic_config(|_| cfg)
         .with_dns()?
         .with_behaviour(|kp| Ok(create_swarm_behaviour(kp)))?
@@ -496,8 +502,9 @@ fn serve_from_blocks(
                 })
             }
         },
-        BlockRequest::GetBlocks { indices } => {
-            if let Some(data) = blocks.lock().unwrap().values().next() {
+        BlockRequest::GetBlocks { nar_hash, indices } => {
+            let key = hex::encode(nar_hash);
+            if let Some(data) = blocks.lock().unwrap().get(&key) {
                 let blks: Vec<BlockData> = indices
                     .iter()
                     .filter_map(|&i| {
@@ -580,12 +587,11 @@ async fn run_seed(
         let mut store = nar_store.lock().unwrap();
         match store.seed_store_path(path) {
             Ok(hash) => {
-                let info =
-                    store.seed_info(&hash).unwrap_or_else(|| guix_p2p::nar_store::SeededNarInfo {
-                        nar_size: 0,
-                        block_count: 0,
-                        block_size: block_size as u32,
-                    });
+                let info = store.seed_info(&hash).unwrap_or(guix_p2p::nar_store::SeededNarInfo {
+                    nar_size: 0,
+                    block_count: 0,
+                    block_size: block_size as u32,
+                });
                 tracing::info!(
                     "  hash={}.. size={} blocks={}",
                     &hash[..16],
@@ -612,7 +618,7 @@ async fn run_seed(
     let kp = libp2p::identity::Keypair::generate_ed25519();
     let pid = PeerId::from(kp.public());
     let mut swarm = build_swarm(&kp)?;
-    swarm.listen_on("/ip4/127.0.0.1/udp/0/quic-v1".parse()?)?;
+    swarm.listen_on("/ip4/127.0.0.1/tcp/0".parse()?)?;
 
     // Announce all hashes in DHT
     for hash in &seeder_hashes {
@@ -660,6 +666,7 @@ async fn run_seed(
         peer_id: pid.to_string(),
         event_bus: event_tx.clone(),
         nar_store: nar_store.clone(),
+        catalog: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let port = dashboard_port;

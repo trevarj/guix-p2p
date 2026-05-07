@@ -5,13 +5,13 @@ use clap::Parser;
 use guix_p2p::{
     behaviour::{self, GuixP2PBehaviour, GuixP2PEvent},
     channel::{NotifyTx, SwarmCommand, SwarmNotification},
-    config,
+    config::{self, SubstitutePolicy},
     connection::{ConnectionConfig, ConnectionManager},
     daemon, dashboard, dht, identity, nar_store, narinfo,
     reputation::ReputationTracker,
     swarm::codec::{BlockRequest, BlockResponse},
 };
-use libp2p::{SwarmBuilder, quic, request_response};
+use libp2p::{SwarmBuilder, noise, quic, request_response, tcp, yamux};
 
 #[derive(Parser)]
 #[command(name = "guix-p2p", version)]
@@ -43,6 +43,10 @@ struct Cli {
     /// Comma-separated substitute URLs for HTTP fallback
     #[arg(long, global = true)]
     substitute_urls: Option<String>,
+
+    /// Substitute download policy: p2p-only, p2p-first, or http-first
+    #[arg(long, global = true)]
+    policy: Option<SubstitutePolicy>,
 
     /// Enable web dashboard in daemon mode
     #[arg(long)]
@@ -88,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
         cli.listen_addr,
         cli.cache_dir,
         cli.substitute_urls,
+        cli.policy,
     );
 
     let dashboard_enabled = cli.dashboard;
@@ -409,10 +414,10 @@ fn handle_block_exchange(
                 tracing::trace!("Incoming block request from {}", peer);
                 let nar_hash_for_event = match &request {
                     BlockRequest::Handshake { nar_hash } => hex::encode(nar_hash),
-                    BlockRequest::GetBlocks { .. } => String::new(),
+                    BlockRequest::GetBlocks { nar_hash, .. } => hex::encode(nar_hash),
                 };
                 let indices_for_event = match &request {
-                    BlockRequest::GetBlocks { indices } => indices.clone(),
+                    BlockRequest::GetBlocks { indices, .. } => indices.clone(),
                     BlockRequest::Handshake { .. } => vec![],
                 };
                 let resp = {
@@ -455,6 +460,7 @@ fn build_swarm(
 
     let swarm = SwarmBuilder::with_existing_identity(keypair.clone())
         .with_tokio()
+        .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
         .with_quic_config(|_| quic_config)
         .with_dns()?
         .with_behaviour(|keypair| Ok(behaviour::create_swarm_behaviour(keypair)))?

@@ -39,7 +39,7 @@ header button{
 }
 header button:hover{border-color:var(--acc)}
 main{
-  display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr auto;
+  display:grid;grid-template-columns:1fr 1fr 1fr 1fr;grid-template-rows:1fr auto;
   flex:1;overflow:hidden;gap:0
 }
 .panel{
@@ -78,8 +78,13 @@ main{
 .peer-row .bar,.build-row .bar{flex:1;height:6px;background:var(--bg3)}
 .peer-row .bar-inner,.build-row .bar-inner{height:100%;background:var(--acc)}
 .peer-row .meta{min-width:90px;text-align:right;font-size:11px;opacity:.8}
-.build-row,.seed-row{cursor:pointer}
-.build-row:hover,.seed-row:hover{background:var(--bg2)}
+.catalog-row,.build-row,.seed-row{cursor:pointer}
+.catalog-row:hover,.build-row:hover,.seed-row:hover{background:var(--bg2)}
+.catalog-row .path,.build-row .path,.seed-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
+.catalog-row .size{min-width:70px;text-align:right;font-size:11px;opacity:.6}
+.catalog-row .p2p{min-width:40px;text-align:center;font-size:10px}
+.catalog-row .p2p.yes{color:var(--ok)}
+.catalog-row .p2p.no{color:var(--dim)}
 .build-row .path,.seed-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
 .build-row .providers{min-width:60px;text-align:right;color:var(--acc)}
 .seed-row .hash{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7;font-family:var(--font)}
@@ -134,6 +139,7 @@ main{
     <div>CONN <span id="connected">0</span></div>
     <div>PEERS <span id="total-peers">0</span></div>
     <div>DHT <span id="dht-entries">0</span></div>
+    <div>CATALOG <span id="catalog-count">0</span></div>
     <div>SEEDS <span id="seed-count">0</span></div>
     <div>UPTIME <span id="uptime">00:00:00</span></div>
   </div>
@@ -145,6 +151,10 @@ main{
   <div class="panel peers-panel">
     <h2>peers</h2>
     <div id="peers-list"><div class="empty">no peers yet</div></div>
+  </div>
+  <div class="panel catalog-panel">
+    <h2>catalog <span class="badge" id="catalog-badge">0</span></h2>
+    <div id="catalog-list"><div class="empty">no packages discovered</div></div>
   </div>
   <div class="panel builds-panel">
     <h2>builds</h2>
@@ -172,9 +182,11 @@ var STARTED=Date.now();
 var EVENT_IDX=0;
 var PEERS={};
 var BUILDS={};
+var CATALOG={};
 var SEEDS={};
 var WS=null;
 var WS_RETRY=1000;
+var SERVER_STARTED=null;
 
 function fmtTime(s){
   var h=Math.floor(s/3600),m=Math.floor(s%3600/60),se=s%60;
@@ -262,6 +274,28 @@ function renderBuilds(){
       +'<span class="path">'+name+'</span>'
       +'<span class="providers">'+(b.providers||0)+' peers</span>'
       +'<span style="font-size:11px;opacity:.6">'+sz+'</span>'
+      +'</div>';
+  });
+  el.innerHTML=h;
+}
+
+function renderCatalog(){
+  var el=document.getElementById('catalog-list');
+  var keys=Object.keys(CATALOG);
+  document.getElementById('catalog-count').textContent=keys.length;
+  document.getElementById('catalog-badge').textContent=keys.length;
+  if(!keys.length){el.innerHTML='<div class="empty">no packages discovered</div>';return}
+  var arr=keys.map(function(k){return CATALOG[k]});
+  arr.sort(function(a,b){return(b.nar_size||0)-(a.nar_size||0)});
+  var h='';
+  arr.forEach(function(c){
+    var name=c.store_path?c.store_path.split('-').slice(1).join('-'):c.hash_part;
+    var sz=c.nar_size?fmtSize(c.nar_size):'?';
+    var p2p=c.p2p_available?'yes':'no';
+    h+='<div class="catalog-row">'
+      +'<span class="path" title="'+(c.store_path||c.hash_part)+'">'+name+'</span>'
+      +'<span class="size">'+sz+'</span>'
+      +'<span class="p2p '+p2p+'">'+(c.p2p_available?'P2P':'http')+'</span>'
       +'</div>';
   });
   el.innerHTML=h;
@@ -438,6 +472,11 @@ function handleEvent(e){
       addEvent('dl-fail','x','Download failed: '+(e.store_path||e.nar_hash)+' ('+e.reason+')');
       break;
 
+    case 'CatalogEntry':
+      CATALOG[e.hash_part]={hash_part:e.hash_part,store_path:e.store_path,nar_size:e.nar_size,nar_hash:e.nar_hash,p2p_available:e.p2p_available};
+      renderCatalog();
+      break;
+
     case 'SeedAdded':
       SEEDS[e.nar_hash]={nar_size:e.nar_size,block_count:null,block_size:null};
       addEvent('seed-add','*','Seed added: '+e.nar_hash.slice(0,16)+'... ('+fmtSize(e.nar_size)+')');
@@ -479,7 +518,8 @@ function ipCountry(ip){
   document.body.classList.add(THEMES[THEME_IDX]);
 
   function tickUptime(){
-    var s=Math.floor((Date.now()-STARTED)/1000);
+    if(!SERVER_STARTED)return;
+    var s=Math.floor((Date.now()-SERVER_STARTED)/1000);
     document.getElementById('uptime').textContent=fmtTime(s)
   }
   setInterval(tickUptime,1000);
@@ -489,7 +529,11 @@ function ipCountry(ip){
     fetch('/api/status').then(function(r){return r.json()}).then(function(s){
       document.getElementById('peer-id').textContent=s.peer_id;
       document.getElementById('connected').textContent=s.connected_peers;
-      document.getElementById('dht-entries').textContent=s.dht_entries
+      document.getElementById('dht-entries').textContent=s.dht_entries;
+      if(s.uptime_secs!=null){
+        SERVER_STARTED=Date.now()-s.uptime_secs*1000;
+        tickUptime()
+      }
     }).catch(function(){})
   }
   setInterval(refreshStatus,5000);
@@ -531,9 +575,19 @@ function ipCountry(ip){
     }).catch(function(){})
   };
 
+  function loadCatalog(){
+    fetch('/api/catalog').then(function(r){return r.json()}).then(function(cs){
+      cs.forEach(function(c){
+        CATALOG[c.hash_part]=c
+      });
+      renderCatalog()
+    }).catch(function(){})
+  }
+
   loadPeers();
   loadBuilds();
   loadSeeds();
+  loadCatalog();
   connectWS();
 })();
 </script>

@@ -2,8 +2,8 @@
 # Standalone test suite for the guix wrapper script's interception logic.
 # Run: scripts/test-wrapper.sh
 #
-# Does NOT require the real guix binary or guix-p2p-substitute.
-# Uses a mock "guix" and mock "guix-p2p-substitute" to verify
+# Does NOT require the real guix binary or guix-p2p.
+# Uses a mock "guix" and mock "guix-p2p" to verify
 # every invocation pattern is routed correctly.
 
 set -eu
@@ -13,7 +13,7 @@ trap 'rm -rf "$DIR"' EXIT
 
 WRAPPER="$DIR/guix"
 MOCK_REAL="$DIR/real-guix"
-MOCK_P2P="$DIR/guix-p2p-substitute"
+MOCK_P2P="$DIR/guix-p2p"
 PASSED=0
 FAILED=0
 

@@ -13,7 +13,7 @@ pub struct BlockData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BlockRequest {
     Handshake { nar_hash: Vec<u8> },
-    GetBlocks { indices: Vec<u32> },
+    GetBlocks { nar_hash: Vec<u8>, indices: Vec<u32> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

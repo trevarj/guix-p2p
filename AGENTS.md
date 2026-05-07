@@ -78,23 +78,24 @@ Run in order:
 ## Project Structure
 
 ```
-guix-p2p-substitute/
+src/
 ├── Cargo.toml
 ├── src/
-│   ├── main.rs               # CLI, swarm task, daemon task, bidirectional channels
-│   ├── channel.rs            # SwarmCommand / SwarmNotification enums
-│   ├── daemon.rs             # stdin parser, fd 4 reply writer, swarm substitute pipeline
+│   ├── main.rs               # CLI, swarm task, daemon/relay mode dispatch
+│   ├── channel.rs            # SwarmCommand / SwarmNotification enums (broadcast channel types)
+│   ├── daemon.rs             # stdin parser, fd 4 reply writer, swarm substitute pipeline, daemon + socket listener
+│   ├── relay.rs              # Unix socket relay client (stdin → socket → fd 4)
 │   ├── behaviour.rs          # libp2p NetworkBehaviour (kad + block_exchange + mdns + identify)
 │   ├── dht.rs                # Kad wrapper, handle_kad_event → notifications, get_providers
 │   ├── swarm/
 │   │   ├── mod.rs
 │   │   ├── block.rs          # Block split/join, SHA-256, bitfields, BlockInfo
 │   │   ├── codec.rs          # Request/response codec (cbor BlockRequest/BlockResponse)
-│   │   └── downloader.rs     # ActiveDownload state machine, peer pool
+│   │   └── downloader.rs    # ActiveDownload state machine, peer pool
 │   ├── http_client.rs        # Narinfo fetch (HTTP only), signature verification, cache
 │   ├── narinfo.rs            # Narinfo parser, ACL loader, Ed25519 verifier, NarinfoCache
 │   ├── identity.rs           # Ed25519 keypair gen/persistence
-│   └── config.rs             # Config struct (block_size, timeouts, acl_path, substitute_urls, etc.)
+│   └── config.rs             # Config struct (block_size, timeouts, acl_path, socket_path, substitute_urls, etc.)
 └── tests/
     ├── integration.rs
     └── block.rs

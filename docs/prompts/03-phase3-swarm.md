@@ -164,7 +164,7 @@ Flow:
    b. Sort needed blocks by rarity (ascending = rarest first)
    c. For each peer with available capacity:
       - Find up to `blocks_per_request` rarest blocks this peer has
-      - Send `BlockRequest::GetBlocks { indices }`
+      - Send `BlockRequest::GetBlocks { nar_hash, indices }`
    d. When `BlockResponse::Blocks { data }` arrives:
       - For each block: verify SHA-256(block) == block_hashes[index]
       - Store block, remove from needed_blocks

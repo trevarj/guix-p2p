@@ -27,16 +27,60 @@ pub type EventBus = tokio::sync::broadcast::Sender<DashboardEvent>;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum DashboardEvent {
-    PeerConnected { peer_id: String, addresses: Vec<String> },
-    PeerDisconnected { peer_id: String },
-    ProvidersFound { nar_hash: String, provider_count: usize },
-    BuildDiscovered { nar_hash: String, store_path: Option<String>, nar_size: Option<u64> },
-    DownloadStarted { nar_hash: String, store_path: String, nar_size: u64 },
-    BlockReceived { nar_hash: String, peer_id: String, blocks: usize },
-    DownloadSucceeded { nar_hash: String, store_path: String, size: u64, elapsed_ms: u64 },
-    DownloadFailed { nar_hash: String, store_path: String, reason: String },
-    SeedAdded { nar_hash: String, store_path: Option<String>, nar_size: u64 },
-    BlockServed { nar_hash: String, peer_id: String, indices: Vec<u32> },
+    PeerConnected {
+        peer_id: String,
+        addresses: Vec<String>,
+    },
+    PeerDisconnected {
+        peer_id: String,
+    },
+    ProvidersFound {
+        nar_hash: String,
+        provider_count: usize,
+    },
+    BuildDiscovered {
+        nar_hash: String,
+        store_path: Option<String>,
+        nar_size: Option<u64>,
+    },
+    DownloadStarted {
+        nar_hash: String,
+        store_path: String,
+        nar_size: u64,
+    },
+    BlockReceived {
+        nar_hash: String,
+        peer_id: String,
+        blocks: usize,
+    },
+    DownloadSucceeded {
+        nar_hash: String,
+        store_path: String,
+        size: u64,
+        elapsed_ms: u64,
+    },
+    DownloadFailed {
+        nar_hash: String,
+        store_path: String,
+        reason: String,
+    },
+    SeedAdded {
+        nar_hash: String,
+        store_path: Option<String>,
+        nar_size: u64,
+    },
+    BlockServed {
+        nar_hash: String,
+        peer_id: String,
+        indices: Vec<u32>,
+    },
+    CatalogEntry {
+        hash_part: String,
+        store_path: Option<String>,
+        nar_size: Option<u64>,
+        nar_hash: Option<String>,
+        p2p_available: bool,
+    },
 }
 
 pub type BuildRegistry = Arc<Mutex<HashMap<String, ObservedBuild>>>;
@@ -93,6 +137,24 @@ struct ApiSeededNar {
     block_size: u32,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ApiCatalogEntry {
+    hash_part: String,
+    store_path: Option<String>,
+    nar_size: Option<u64>,
+    nar_hash: Option<String>,
+    p2p_available: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CatalogItem {
+    hash_part: String,
+    store_path: Option<String>,
+    nar_size: Option<u64>,
+    nar_hash: Option<String>,
+    p2p_available: bool,
+}
+
 #[derive(Clone)]
 pub struct DashboardState {
     pub provider_cache: ProviderCache,
@@ -103,6 +165,7 @@ pub struct DashboardState {
     pub peer_id: String,
     pub event_bus: EventBus,
     pub nar_store: Arc<Mutex<NarStore>>,
+    pub catalog: Arc<Mutex<HashMap<String, CatalogItem>>>,
 }
 
 pub async fn serve(state: DashboardState, port: u16, bind: &str) {
@@ -115,6 +178,7 @@ pub async fn serve(state: DashboardState, port: u16, bind: &str) {
         .route("/api/peers", get(api_peers))
         .route("/api/builds", get(api_builds))
         .route("/api/build/{hash}", get(api_build_detail))
+        .route("/api/catalog", get(api_catalog))
         .route("/api/seeds", get(api_seeds))
         .route("/ws", get(ws_handler))
         .with_state(state);
@@ -189,6 +253,21 @@ async fn api_builds(State(state): State<DashboardState>) -> Json<Vec<ApiBuild>> 
     Json(builds)
 }
 
+async fn api_catalog(State(state): State<DashboardState>) -> Json<Vec<ApiCatalogEntry>> {
+    let cat = state.catalog.lock().unwrap();
+    let entries: Vec<ApiCatalogEntry> = cat
+        .values()
+        .map(|c| ApiCatalogEntry {
+            hash_part: c.hash_part.clone(),
+            store_path: c.store_path.clone(),
+            nar_size: c.nar_size,
+            nar_hash: c.nar_hash.clone(),
+            p2p_available: c.p2p_available,
+        })
+        .collect();
+    Json(entries)
+}
+
 async fn api_seeds(State(state): State<DashboardState>) -> Json<Vec<ApiSeededNar>> {
     let store = state.nar_store.lock().unwrap();
     let seeds: Vec<ApiSeededNar> = store
@@ -234,6 +313,39 @@ async fn handle_ws(mut socket: WebSocket, state: DashboardState) {
             },
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
         };
+
+        if let DashboardEvent::CatalogEntry {
+            ref hash_part,
+            ref store_path,
+            nar_size,
+            ref nar_hash,
+            p2p_available,
+        } = event
+        {
+            let mut cat = state.catalog.lock().unwrap();
+            cat.entry(hash_part.clone())
+                .and_modify(|e: &mut CatalogItem| {
+                    if store_path.is_some() {
+                        e.store_path = store_path.clone();
+                    }
+                    if nar_size.is_some() {
+                        e.nar_size = nar_size;
+                    }
+                    if nar_hash.is_some() {
+                        e.nar_hash = nar_hash.clone();
+                    }
+                    if p2p_available {
+                        e.p2p_available = true;
+                    }
+                })
+                .or_insert_with(|| CatalogItem {
+                    hash_part: hash_part.clone(),
+                    store_path: store_path.clone(),
+                    nar_size,
+                    nar_hash: nar_hash.clone(),
+                    p2p_available,
+                });
+        }
 
         let json = match serde_json::to_string(&event) {
             Ok(j) => j,

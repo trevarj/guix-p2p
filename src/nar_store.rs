@@ -189,19 +189,9 @@ impl NarStore {
                     block_hashes: hashes.iter().map(|h| h.to_vec()).collect(),
                 })
             },
-            BlockRequest::GetBlocks { indices } => {
-                // Find which nar this request is for by trying all entries
-                // (we don't have the nar_hash in GetBlocks, only indices)
-                // We need to match by checking the peer's active handshake context.
-                // For simplicity, read from the first matching nar that has
-                // enough blocks. The caller should ensure the request is for
-                // the nar that was just handshake'd.
-                //
-                // Better approach: the NarStore is used inside the swarm event
-                // loop where we know which nar_hash the peer is asking about.
-                // But the current BlockRequest::GetBlocks doesn't carry the hash.
-                // We'll serve from the first stored nar that has enough blocks.
-                self.serve_blocks_from_any(indices)
+            BlockRequest::GetBlocks { nar_hash, indices } => {
+                let key = hex::encode(nar_hash);
+                self.serve_blocks(&key, indices)
             },
         }
     }
@@ -227,7 +217,7 @@ impl NarStore {
                     block_hashes: hashes.iter().map(|h| h.to_vec()).collect(),
                 })
             },
-            BlockRequest::GetBlocks { indices } => self.serve_blocks(nar_hash_hex, indices),
+            BlockRequest::GetBlocks { indices, .. } => self.serve_blocks(nar_hash_hex, indices),
         }
     }
 
@@ -252,16 +242,6 @@ impl NarStore {
         } else {
             Some(BlockResponse::Blocks { data: blks })
         }
-    }
-
-    fn serve_blocks_from_any(&self, indices: &[u32]) -> Option<BlockResponse> {
-        // Try each stored nar until we find one that has enough blocks
-        for (hash, entry) in &self.index {
-            if indices.iter().all(|&i| i < entry.block_info.block_count) {
-                return self.serve_blocks(hash, indices);
-            }
-        }
-        Some(BlockResponse::Error { message: "no matching nar for block indices".into() })
     }
 
     fn read_block_hashes(&self, nar_hash_hex: &str) -> anyhow::Result<Vec<[u8; 32]>> {
@@ -376,7 +356,13 @@ mod tests {
         store.save(&hash, &data).unwrap();
 
         let resp = store
-            .handle_request_for_hash(&hash, &BlockRequest::GetBlocks { indices: vec![0, 2] })
+            .handle_request_for_hash(
+                &hash,
+                &BlockRequest::GetBlocks {
+                    nar_hash: hex::decode(&hash).unwrap(),
+                    indices: vec![0, 2],
+                },
+            )
             .unwrap();
 
         match resp {

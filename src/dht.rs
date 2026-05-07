@@ -26,10 +26,23 @@ pub async fn get_providers(cache: &ProviderCache, hash_part: &str) -> Vec<libp2p
 
 pub fn extract_hash_bytes(hex_hash: &str) -> [u8; 32] {
     let hex = hex_hash.strip_prefix("sha256:").unwrap_or(hex_hash);
-    let bytes = hex::decode(hex).expect("valid hex hash");
-    let mut arr = [0u8; 32];
-    arr.copy_from_slice(&bytes[..32]);
-    arr
+    match hex::decode(hex) {
+        Ok(bytes) if bytes.len() >= 32 => {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes[..32]);
+            arr
+        },
+        _ => {
+            // The hash might not be a valid hex SHA-256 (e.g., a nix-base32 hash
+            // from a store path). Use a best-effort approach: zero-pad or hash it.
+            tracing::warn!("Invalid hex hash for DHT lookup: {}..", &hex_hash[..hex.len().min(16)]);
+            let mut arr = [0u8; 32];
+            let bytes = hex.as_bytes();
+            let len = bytes.len().min(32);
+            arr[..len].copy_from_slice(&bytes[..len]);
+            arr
+        },
+    }
 }
 
 pub fn handle_kad_event(cache: &ProviderCache, notify_tx: &NotifyTx, event: &KadEvent) {

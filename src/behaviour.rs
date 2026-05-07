@@ -3,7 +3,7 @@ use libp2p::{
     kad::{Behaviour as KadBehaviour, Config as KadConfig, Event as KadEvent, store::MemoryStore},
     mdns,
     request_response::{self, cbor},
-    swarm::NetworkBehaviour,
+    swarm::{NetworkBehaviour, behaviour::toggle::Toggle},
 };
 
 use crate::swarm::codec::{BlockRequest, BlockResponse};
@@ -13,7 +13,7 @@ use crate::swarm::codec::{BlockRequest, BlockResponse};
 pub struct GuixP2PBehaviour {
     pub kad: KadBehaviour<MemoryStore>,
     pub block_exchange: cbor::Behaviour<BlockRequest, BlockResponse>,
-    pub mdns: mdns::tokio::Behaviour,
+    pub mdns: Toggle<mdns::tokio::Behaviour>,
     pub identify: identify::Behaviour,
 }
 
@@ -63,12 +63,19 @@ pub fn create_swarm_behaviour(keypair: &libp2p::identity::Keypair) -> GuixP2PBeh
         request_response::Config::default(),
     );
 
-    let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), local_peer_id)
-        .expect("mdns setup should succeed");
+    let mdns = match mdns::tokio::Behaviour::new(mdns::Config::default(), local_peer_id) {
+        Ok(behaviour) => Some(behaviour),
+        Err(e) => {
+            // mDNS needs multicast socket permissions; containers often deny it.
+            tracing::warn!("mDNS disabled: {}", e);
+            None
+        },
+    }
+    .into();
 
     let identify = identify::Behaviour::new(
         identify::Config::new("/ipfs/0.1.0".into(), keypair.public())
-            .with_agent_version(format!("guix-p2p-substitute/{}", env!("CARGO_PKG_VERSION"))),
+            .with_agent_version(format!("guix-p2p/{}", env!("CARGO_PKG_VERSION"))),
     );
 
     GuixP2PBehaviour { kad, block_exchange, mdns, identify }

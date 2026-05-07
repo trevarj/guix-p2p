@@ -11,10 +11,11 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
     channel::{NotifyRx, NotifyTx, SwarmCommand, SwarmNotification},
-    config::Config,
+    config::{Config, SubstitutePolicy},
     connection::ConnectionManager,
     dashboard::{self, BuildRegistry, DashboardEvent, ObservedBuild},
     dht::ProviderCache,
+    http_client::HttpClientError,
     nar_store::NarStore,
     narinfo::NarinfoCache,
     reputation::ReputationTracker,
@@ -57,8 +58,13 @@ pub fn parse_command_line(line: &str) -> io::Result<DaemonCommand> {
 }
 
 pub enum ReplyWriter {
+    /// Write structured replies to fd 4 and trace messages to stdout.
     Fd4,
+    /// Collect all output into a buffer (no channel prefix, for direct use).
     Buffer(Vec<u8>),
+    /// Collect output with channel prefix framing for socket relay.
+    /// fd4: lines → fd 4, out: lines → stdout.
+    Socket { fd4_buf: Vec<u8>, out_buf: Vec<u8> },
 }
 
 impl ReplyWriter {
@@ -71,6 +77,11 @@ impl ReplyWriter {
         ReplyWriter::Buffer(Vec::new())
     }
 
+    pub fn socket() -> Self {
+        ReplyWriter::Socket { fd4_buf: Vec::new(), out_buf: Vec::new() }
+    }
+
+    /// Write a structured reply line (to fd 4 in direct mode, fd4: prefix in socket mode).
     pub fn write_line(&mut self, line: &str) -> io::Result<()> {
         match self {
             ReplyWriter::Fd4 => {
@@ -89,11 +100,89 @@ impl ReplyWriter {
                 buf.push(b'\n');
                 Ok(())
             },
+            ReplyWriter::Socket { fd4_buf, .. } => {
+                fd4_buf.extend_from_slice(b"fd4:");
+                fd4_buf.extend_from_slice(line.as_bytes());
+                fd4_buf.push(b'\n');
+                Ok(())
+            },
+        }
+    }
+
+    /// Write a trace output line (to stdout in direct mode, out: prefix in socket mode).
+    pub fn write_trace(&mut self, line: &str) -> io::Result<()> {
+        match self {
+            ReplyWriter::Fd4 => {
+                let mut buf = line.as_bytes().to_vec();
+                buf.push(b'\n');
+                unsafe {
+                    let n = libc::write(1, buf.as_ptr() as *const libc::c_void, buf.len());
+                    if n < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                }
+                Ok(())
+            },
+            ReplyWriter::Buffer(buf) => {
+                // In buffer mode, traces go to the same buffer (for testing)
+                buf.extend_from_slice(line.as_bytes());
+                buf.push(b'\n');
+                Ok(())
+            },
+            ReplyWriter::Socket { out_buf, .. } => {
+                out_buf.extend_from_slice(b"out:");
+                out_buf.extend_from_slice(line.as_bytes());
+                out_buf.push(b'\n');
+                Ok(())
+            },
         }
     }
 
     pub fn write_end(&mut self) -> io::Result<()> {
         self.write_line("")
+    }
+
+    /// Flush socket buffers to the writer. For Socket mode, writes fd4 then out.
+    pub async fn flush_socket(
+        &mut self,
+        writer: &mut (impl tokio::io::AsyncWrite + Unpin),
+    ) -> io::Result<()> {
+        use tokio::io::AsyncWriteExt;
+        match self {
+            ReplyWriter::Socket { fd4_buf, out_buf } => {
+                if !fd4_buf.is_empty() || !out_buf.is_empty() {
+                    // fd4 data first, then out data
+                    if !fd4_buf.is_empty() {
+                        writer.write_all(fd4_buf).await?;
+                        fd4_buf.clear();
+                    }
+                    if !out_buf.is_empty() {
+                        writer.write_all(out_buf).await?;
+                        out_buf.clear();
+                    }
+                    writer.flush().await?;
+                }
+                Ok(())
+            },
+            _ => Ok(()),
+        }
+    }
+
+    /// Check if there's any buffered data to flush (for Buffer and Socket modes).
+    pub fn has_data(&self) -> bool {
+        match self {
+            ReplyWriter::Buffer(buf) => !buf.is_empty(),
+            ReplyWriter::Socket { fd4_buf, out_buf } => !fd4_buf.is_empty() || !out_buf.is_empty(),
+            ReplyWriter::Fd4 => false,
+        }
+    }
+
+    /// Get the buffer contents (only for Buffer mode).
+    pub fn into_buffer(self) -> Option<Vec<u8>> {
+        match self {
+            ReplyWriter::Buffer(buf) => Some(buf),
+            _ => None,
+        }
     }
 }
 
@@ -180,10 +269,11 @@ pub async fn run_query_mode(
 
         match cmd {
             DaemonCommand::Have(paths) => {
-                handle_have(cache, query_tx, &mut reply, &paths).await;
+                handle_have(cache, query_tx, &mut reply, &paths, config.substitute_policy, None)
+                    .await;
             },
             DaemonCommand::Info(path) => {
-                handle_info(config, narinfo_cache, &mut reply, &path, client).await;
+                handle_info(config, narinfo_cache, &mut reply, &path, client, None).await;
             },
             DaemonCommand::Substitute { .. } => {},
         }
@@ -199,6 +289,8 @@ async fn handle_have(
     query_tx: &UnboundedSender<String>,
     reply: &mut ReplyWriter,
     paths: &[String],
+    policy: SubstitutePolicy,
+    event_tx: Option<&dashboard::EventBus>,
 ) {
     for path in paths {
         let hash_part = match extract_hash_part(path) {
@@ -209,13 +301,40 @@ async fn handle_have(
             },
         };
 
-        let _ = query_tx.send(hash_part.clone());
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        tracing::debug!("have query: {} (hash_part={})", path, hash_part);
 
-        if crate::dht::has_providers(cache, &hash_part).await
-            && let Err(e) = reply.write_line(path)
-        {
-            tracing::error!("have reply for {}: {}", path, e);
+        match policy {
+            SubstitutePolicy::HttpFirst | SubstitutePolicy::P2pFirst => {
+                // Always claim we have it; we can serve via HTTP fallback if
+                // no P2P providers exist.
+                tracing::info!("have: claiming {} (policy={:?})", path, policy);
+                if let Err(e) = reply.write_line(path) {
+                    tracing::error!("have reply for {}: {}", path, e);
+                }
+            },
+            SubstitutePolicy::P2pOnly => {
+                let _ = query_tx.send(hash_part.clone());
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                if crate::dht::has_providers(cache, &hash_part).await {
+                    tracing::info!("have: claiming {} (p2p-only, providers found)", path);
+                    if let Err(e) = reply.write_line(path) {
+                        tracing::error!("have reply for {}: {}", path, e);
+                    }
+                } else {
+                    tracing::info!("have: skipping {} (p2p-only, no providers)", path);
+                }
+            },
+        }
+
+        if let Some(tx) = event_tx {
+            let _ = tx.send(DashboardEvent::CatalogEntry {
+                hash_part: hash_part.clone(),
+                store_path: Some(path.clone()),
+                nar_size: None,
+                nar_hash: None,
+                p2p_available: false,
+            });
         }
     }
 
@@ -230,6 +349,7 @@ async fn handle_info(
     reply: &mut ReplyWriter,
     path: &str,
     client: &reqwest::Client,
+    event_tx: Option<&dashboard::EventBus>,
 ) {
     let hash_part = match extract_hash_part(path) {
         Ok(h) => h,
@@ -243,6 +363,15 @@ async fn handle_info(
 
     match crate::http_client::fetch_narinfo(config, &hash_part, cache, client).await {
         Ok(info) => {
+            if let Some(tx) = event_tx {
+                let _ = tx.send(DashboardEvent::CatalogEntry {
+                    hash_part: hash_part.clone(),
+                    store_path: Some(info.store_path.clone()),
+                    nar_size: Some(info.nar_size),
+                    nar_hash: Some(info.nar_hash.clone()),
+                    p2p_available: false,
+                });
+            }
             let _ = reply.write_line(&info.store_path);
             let _ = reply.write_line(info.deriver.as_deref().unwrap_or(""));
             let _ = reply.write_line(&info.references.len().to_string());
@@ -312,7 +441,10 @@ pub async fn run_substitute_mode(
     Ok(())
 }
 
-/// Full swarm download of a nar: narinfo → DHT providers → handshake → download → verify.
+/// Full substitute download according to the configured policy.
+/// - P2pOnly: swarm only, return not-found on failure
+/// - P2pFirst: try swarm, fall back to HTTP nar download
+/// - HttpFirst: try HTTP nar download, fall back to swarm
 #[allow(clippy::too_many_arguments)]
 async fn try_swarm_substitute(
     config: &Config,
@@ -383,78 +515,152 @@ async fn try_swarm_substitute(
         nar_size: Some(nar_size),
     });
 
-    tracing::info!(
-        hash = %nar_hash,
-        size = nar_size,
-        "Downloading nar via swarm"
-    );
-
-    // Step 1: request DHT providers
-    let dht_key = hex::encode(nar_hash_bytes);
-    let _ = cmd_tx.send(SwarmCommand::GetProviders { hash: dht_key.clone() });
-
-    let providers = wait_for_providers(notify_rx, &dht_key, config).await;
-
-    if providers.len() < config.min_providers {
-        tracing::info!(
-            hash = %nar_hash,
-            provider_count = providers.len(),
-            threshold = config.min_providers,
-            "Not enough swarm providers; replying not-found"
-        );
-        let _ = reply.write_line(&format!("not-found {}", path));
-        return;
-    }
-
-    tracing::info!("Found {} swarm providers for {}", providers.len(), nar_hash);
-
-    // Sort providers by reputation score (prefer reliable peers)
-    let mut providers = providers;
-    reputation.lock().unwrap().sort_by_score(&mut providers);
-
-    // Step 2: handshake with each provider to discover block availability
-    let handshakes = handshake_with_providers(cmd_tx, notify_rx, &providers, nar_hash_bytes).await;
-
-    if handshakes.is_empty() {
-        tracing::warn!("No successful handshakes; replying not-found");
-        let _ = reply.write_line(&format!("not-found {}", path));
-        return;
-    }
-
-    // Step 3: request blocks from peers
-    let dest_path = PathBuf::from(dest);
-    let mut download_block_info = BlockInfo::from_file_size(nar_size, config.block_size);
-
-    // Use block hashes from first peer's handshake, or compute empty placeholder
-    if let Some(first) = handshakes.first() {
-        download_block_info.set_hashes(first.block_hashes.clone());
-    }
-
-    let _ = event_tx.send(DashboardEvent::DownloadStarted {
-        nar_hash: nar_hash.clone(),
-        store_path: store_path.clone(),
-        nar_size,
+    let _ = event_tx.send(DashboardEvent::CatalogEntry {
+        hash_part: hash_part.clone(),
+        store_path: Some(store_path.clone()),
+        nar_size: Some(nar_size),
+        nar_hash: Some(nar_hash.clone()),
+        p2p_available: false,
     });
 
-    let download_start = std::time::Instant::now();
+    let result = match config.substitute_policy {
+        SubstitutePolicy::P2pOnly => {
+            let _ = reply.write_trace(&format_trace_started(
+                &store_path,
+                &format!("p2p://{}", hash_part),
+                nar_size,
+            ));
+            try_p2p_download(
+                config,
+                cmd_tx,
+                notify_rx,
+                &nar_hash,
+                &nar_hash_bytes,
+                &store_path,
+                nar_size,
+                &hash_part,
+                reputation,
+                event_tx,
+                client,
+                narinfo_cache,
+            )
+            .await
+        },
+        SubstitutePolicy::P2pFirst => {
+            let _ = reply.write_trace(&format_trace_started(
+                &store_path,
+                &format!("p2p://{}", hash_part),
+                nar_size,
+            ));
+            match try_p2p_download(
+                config,
+                cmd_tx,
+                notify_rx,
+                &nar_hash,
+                &nar_hash_bytes,
+                &store_path,
+                nar_size,
+                &hash_part,
+                reputation,
+                event_tx,
+                client,
+                narinfo_cache,
+            )
+            .await
+            {
+                Ok(nar_data) => Ok(nar_data),
+                Err(_) => {
+                    tracing::info!(
+                        hash = %nar_hash,
+                        "P2P failed, falling back to HTTP"
+                    );
+                    let _ = reply.write_trace(&format_trace_started(
+                        &store_path,
+                        "https://fallback",
+                        nar_size,
+                    ));
+                    try_http_download(config, &narinfo, client, event_tx, &store_path).await
+                },
+            }
+        },
+        SubstitutePolicy::HttpFirst => {
+            let _ =
+                reply.write_trace(&format_trace_started(&store_path, "https://fallback", nar_size));
+            match try_http_download(config, &narinfo, client, event_tx, &store_path).await {
+                Ok(nar_data) => Ok(nar_data),
+                Err(e) => {
+                    tracing::info!(
+                        hash = %nar_hash,
+                        error = %e,
+                        "HTTP failed, falling back to P2P"
+                    );
+                    let _ = reply.write_trace(&format_trace_started(
+                        &store_path,
+                        &format!("p2p://{}", hash_part),
+                        nar_size,
+                    ));
+                    try_p2p_download(
+                        config,
+                        cmd_tx,
+                        notify_rx,
+                        &nar_hash,
+                        &nar_hash_bytes,
+                        &store_path,
+                        nar_size,
+                        &hash_part,
+                        reputation,
+                        event_tx,
+                        client,
+                        narinfo_cache,
+                    )
+                    .await
+                },
+            }
+        },
+    };
 
-    match download_blocks_from_peers(
-        cmd_tx,
-        notify_rx,
-        &handshakes,
-        nar_size,
-        download_block_info,
-        &nar_hash,
-        config,
-    )
-    .await
-    {
-        Ok((nar_data, verified_hash)) => {
+    match result {
+        Ok(nar_data) => {
+            let dest_path = PathBuf::from(dest);
+            let size = nar_data.len() as u64;
+
+            // Verify nar hash against narinfo's expected hash
+            let hash = Sha256::digest(&nar_data);
+            let hash_hex = format!("sha256:{:x}", hash);
+            let expected_nar_hash = nar_hash.strip_prefix("sha256:").unwrap_or(&nar_hash);
+            let actual_nar_hash = hash_hex.strip_prefix("sha256:").unwrap_or(&hash_hex);
+
+            if !expected_nar_hash.eq_ignore_ascii_case(actual_nar_hash) {
+                tracing::error!(
+                    "Nar hash mismatch for {}: expected {}, got {}",
+                    store_path,
+                    expected_nar_hash,
+                    actual_nar_hash
+                );
+
+                // Delete the corrupted file
+                let _ = tokio::fs::remove_file(&dest_path).await;
+
+                let _ = event_tx.send(DashboardEvent::DownloadFailed {
+                    nar_hash: nar_hash.clone(),
+                    store_path: store_path.clone(),
+                    reason: format!(
+                        "hash mismatch: expected sha256:{}, got sha256:{}",
+                        expected_nar_hash, actual_nar_hash
+                    ),
+                });
+
+                let _ = reply.write_line(&format!(
+                    "hash-mismatch sha256 sha256:{} sha256:{}",
+                    expected_nar_hash, actual_nar_hash
+                ));
+                return;
+            }
+
             // Write verified nar to dest
             if let Err(e) = tokio::fs::write(&dest_path, &nar_data).await {
                 tracing::error!("Failed to write nar to {}: {}", dest_path.display(), e);
                 let _ = reply.write_line(&format!("not-found {}", path));
-
                 let _ = event_tx.send(DashboardEvent::DownloadFailed {
                     nar_hash: nar_hash.clone(),
                     store_path: store_path.clone(),
@@ -462,9 +668,6 @@ async fn try_swarm_substitute(
                 });
                 return;
             }
-
-            let size = nar_data.len() as u64;
-            let elapsed_ms = download_start.elapsed().as_millis() as u64;
 
             // Save nar to local store for re-seeding
             {
@@ -504,28 +707,136 @@ async fn try_swarm_substitute(
                 nar_hash: nar_hash.clone(),
                 store_path: store_path.clone(),
                 size,
-                elapsed_ms,
+                elapsed_ms: 0,
             });
 
-            println!(
-                "{}",
-                format_trace_succeeded(&store_path, &format!("p2p://{}", hash_part), size)
-            );
+            let _ = reply.write_trace(&format_trace_succeeded(
+                &store_path,
+                &format!("p2p://{}", hash_part),
+                size,
+            ));
 
-            let _ = reply.write_line(&format!("success {} {}", verified_hash, size));
-            tracing::info!("Swarm download succeeded for {}", store_path);
+            let _ = reply.write_line(&format!("success {} {}", hash_hex, size));
+            tracing::info!("Substitute download succeeded for {}", store_path);
         },
-        Err(e) => {
-            tracing::error!("Swarm download failed for {}: {}", store_path, e);
+        Err(reason) => {
+            tracing::error!("Substitute download failed for {}: {}", store_path, reason);
 
             let _ = event_tx.send(DashboardEvent::DownloadFailed {
                 nar_hash: nar_hash.clone(),
                 store_path: store_path.clone(),
-                reason: e.to_string(),
+                reason: reason.to_string(),
             });
 
             let _ = reply.write_line(&format!("not-found {}", path));
         },
+    }
+}
+
+/// Attempt P2P swarm download.
+#[allow(clippy::too_many_arguments)]
+async fn try_p2p_download(
+    config: &Config,
+    cmd_tx: &UnboundedSender<SwarmCommand>,
+    notify_rx: &mut NotifyRx,
+    nar_hash: &str,
+    nar_hash_bytes: &[u8; 32],
+    store_path: &str,
+    nar_size: u64,
+    _hash_part: &str,
+    reputation: &Arc<Mutex<ReputationTracker>>,
+    event_tx: &dashboard::EventBus,
+    _client: &reqwest::Client,
+    _narinfo_cache: &Arc<Mutex<NarinfoCache>>,
+) -> Result<Vec<u8>, String> {
+    tracing::info!(hash = %nar_hash, size = nar_size, "Attempting P2P download");
+
+    let _ = event_tx.send(DashboardEvent::DownloadStarted {
+        nar_hash: nar_hash.to_string(),
+        store_path: store_path.to_string(),
+        nar_size,
+    });
+
+    let dht_key = hex::encode(nar_hash_bytes);
+    let _ = cmd_tx.send(SwarmCommand::GetProviders { hash: dht_key.clone() });
+
+    let providers = wait_for_providers(notify_rx, &dht_key, config).await;
+
+    if providers.len() < config.min_providers {
+        return Err(format!(
+            "not enough P2P providers ({}/{})",
+            providers.len(),
+            config.min_providers
+        ));
+    }
+
+    tracing::info!("Found {} P2P providers for {}", providers.len(), nar_hash);
+
+    let mut providers = providers;
+    reputation.lock().unwrap().sort_by_score(&mut providers);
+
+    let handshakes = handshake_with_providers(cmd_tx, notify_rx, &providers, *nar_hash_bytes).await;
+
+    if handshakes.is_empty() {
+        return Err("no successful P2P handshakes".into());
+    }
+
+    let mut download_block_info = BlockInfo::from_file_size(nar_size, config.block_size);
+    if let Some(first) = handshakes.first() {
+        download_block_info.set_hashes(first.block_hashes.clone());
+    }
+
+    let download_start = std::time::Instant::now();
+
+    match download_blocks_from_peers(
+        cmd_tx,
+        notify_rx,
+        &handshakes,
+        nar_size,
+        download_block_info,
+        nar_hash,
+        config,
+    )
+    .await
+    {
+        Ok((nar_data, _verified_hash)) => {
+            let elapsed_ms = download_start.elapsed().as_millis() as u64;
+
+            let _ = event_tx.send(DashboardEvent::DownloadSucceeded {
+                nar_hash: nar_hash.to_string(),
+                store_path: store_path.to_string(),
+                size: nar_data.len() as u64,
+                elapsed_ms,
+            });
+
+            Ok(nar_data)
+        },
+        Err(e) => Err(format!("P2P swarm download failed: {}", e)),
+    }
+}
+
+/// Attempt HTTP nar download from substitute servers.
+async fn try_http_download(
+    config: &Config,
+    narinfo: &crate::narinfo::Narinfo,
+    client: &reqwest::Client,
+    _event_tx: &dashboard::EventBus,
+    store_path: &str,
+) -> Result<Vec<u8>, String> {
+    tracing::info!(store = %store_path, "Attempting HTTP nar download");
+
+    match crate::http_client::download_nar_http(config, narinfo, client).await {
+        Ok(nar_data) => {
+            tracing::info!(
+                "HTTP nar download succeeded for {} ({} bytes)",
+                store_path,
+                nar_data.len()
+            );
+            Ok(nar_data)
+        },
+        Err(HttpClientError::NotFound) => Err("HTTP nar not found on any substitute server".into()),
+        Err(HttpClientError::BadSignature) => Err("narinfo signature verification failed".into()),
+        Err(e) => Err(format!("HTTP nar download failed: {}", e)),
     }
 }
 
@@ -676,7 +987,7 @@ async fn download_blocks_from_peers(
 
         if !indices.is_empty() {
             let n = indices.len();
-            let request = BlockRequest::GetBlocks { indices };
+            let request = BlockRequest::GetBlocks { nar_hash: nar_hash_bytes(nar_hash), indices };
             tracing::debug!("Requested {} blocks from {}", n, hs.peer);
             let _ = cmd_tx.send(SwarmCommand::SendBlockRequest { peer: hs.peer, request });
         }
@@ -745,12 +1056,14 @@ async fn download_blocks_from_peers(
     Ok((nar, hash_hex))
 }
 
-#[allow(dead_code)]
+fn nar_hash_bytes(nar_hash: &str) -> Vec<u8> {
+    hex::decode(nar_hash.strip_prefix("sha256:").unwrap_or(nar_hash)).unwrap_or_default()
+}
+
 pub fn format_trace_started(store_path: &str, url: &str, size: u64) -> String {
     format!("@ download-started {} {} {}", store_path, url, size)
 }
 
-#[allow(dead_code)]
 pub fn format_trace_progress(store_path: &str, url: &str, total: u64, transferred: u64) -> String {
     format!("@ download-progress {} {} {} {}", store_path, url, total, transferred)
 }
@@ -785,6 +1098,7 @@ pub async fn run_daemon_mode(
             peer_id: local_peer_id.to_string(),
             event_bus: event_tx.clone(),
             nar_store: nar_store.clone(),
+            catalog: Arc::new(Mutex::new(HashMap::new())),
         };
         let port = config.dashboard_port;
         let bind = config.dashboard_bind.clone();
@@ -902,7 +1216,7 @@ async fn handle_socket_connection(
     client: &reqwest::Client,
     nar_store: &Arc<Mutex<NarStore>>,
 ) -> anyhow::Result<()> {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    use tokio::io::AsyncBufReadExt;
 
     let (socket_read, mut socket_write) = stream.into_split();
     let mut reader = tokio::io::BufReader::new(socket_read);
@@ -929,23 +1243,36 @@ async fn handle_socket_connection(
                 }
 
                 let cmd = parse_command_line(line.trim())?;
-                let mut reply = ReplyWriter::buffer();
+                let mut reply = ReplyWriter::socket();
 
                 match cmd {
                     DaemonCommand::Have(paths) => {
-                        handle_have(cache, query_tx, &mut reply, &paths).await;
+                        handle_have(
+                            cache,
+                            query_tx,
+                            &mut reply,
+                            &paths,
+                            config.substitute_policy,
+                            Some(event_tx),
+                        )
+                        .await;
                     },
                     DaemonCommand::Info(path) => {
-                        handle_info(config, narinfo_cache, &mut reply, &path, client).await;
+                        handle_info(
+                            config,
+                            narinfo_cache,
+                            &mut reply,
+                            &path,
+                            client,
+                            Some(event_tx),
+                        )
+                        .await;
                     },
                     DaemonCommand::Substitute { .. } => {},
                 }
 
-                if let ReplyWriter::Buffer(buf) = &reply
-                    && !buf.is_empty()
-                {
-                    socket_write.write_all(buf).await?;
-                    socket_write.flush().await?;
+                if reply.has_data() {
+                    reply.flush_socket(&mut socket_write).await?;
                 }
 
                 while notify_rx.try_recv().is_ok() {}
@@ -964,7 +1291,7 @@ async fn handle_socket_connection(
                 let cmd = parse_command_line(line.trim())?;
 
                 if let DaemonCommand::Substitute { path, dest } = cmd {
-                    let mut reply = ReplyWriter::buffer();
+                    let mut reply = ReplyWriter::socket();
 
                     try_swarm_substitute(
                         config,
@@ -983,11 +1310,8 @@ async fn handle_socket_connection(
                     )
                     .await;
 
-                    if let ReplyWriter::Buffer(buf) = &reply
-                        && !buf.is_empty()
-                    {
-                        socket_write.write_all(buf).await?;
-                        socket_write.flush().await?;
+                    if reply.has_data() {
+                        reply.flush_socket(&mut socket_write).await?;
                     }
                 }
             }

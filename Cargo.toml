@@ -3,7 +3,7 @@ members = [".", "e2e"]
 resolver = "2"
 
 [package]
-name = "guix-p2p-substitute"
+name = "guix-p2p"
 version = "0.1.0"
 edition = "2024"
 description = "P2P binary substitute distribution for GNU Guix"
@@ -29,6 +29,11 @@ futures = "0.3"
 libc = "0.2"
 thiserror = "2"
 axum = { version = "0.7", features = ["ws"] }
+toml = "0.8"
+flate2 = "1"
+zstd = "0.13"
+async-compression = { version = "0.4", features = ["tokio", "gzip", "zstd"] }
+tokio-util = { version = "0.7", features = ["io"] }
 
 [dev-dependencies]
 tempfile = "3"

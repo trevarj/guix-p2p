@@ -3,24 +3,24 @@
 #
 # Simulates what guix-daemon does:
 #   1. Creates a pipe for fd 4 (reply channel)
-#   2. Spawns guix-p2p-substitute --query (or --substitute)
+#   2. Spawns guix-p2p --query (or --substitute)
 #   3. Writes commands to stdin
 #   4. Reads replies from fd 4
 #   5. Reads trace output from stdout
 #
 # This tests the actual binary, not mocks. Requires a built binary
-# at target/debug/guix-p2p-substitute.
+# at target/debug/guix-p2p.
 
 set -eu
 
 SCRIPT_DIR="$(dirname "$0")"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BINARY="$PROJECT_DIR/target/debug/guix-p2p-substitute"
+BINARY="$PROJECT_DIR/target/debug/guix-p2p"
 PASSED=0
 FAILED=0
 
 if [ ! -x "$BINARY" ]; then
-    echo "Building guix-p2p-substitute..."
+    echo "Building guix-p2p..."
     (cd "$PROJECT_DIR" && cargo build) || {
         echo "FAIL: could not build binary"
         exit 1
