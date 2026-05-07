@@ -12,6 +12,13 @@ It starts a synthetic local network with two seeders, one downloader, and
 dashboards on ports `3031` through `3033`. It does not build a Guix system
 image and does not download `linux-libre`.
 
+Expected dashboard/API evidence:
+
+- each seeder dashboard shows one seeded nar under `/api/seeds`
+- the downloader dashboard shows two entries under `/api/builds`
+- the downloader catalog marks both synthetic nars `p2p_available = true`
+- logs show handshake, block request, block serving, and block receipt
+
 Environment overrides:
 
 - `GUIX_P2P_DEMO_SEEDERS`

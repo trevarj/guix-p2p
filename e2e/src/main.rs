@@ -338,6 +338,8 @@ async fn run_network(
         for (j, (hash, _)) in nars.iter().enumerate() {
             let seeder_pid = seeder_pids[j % seeder_pids.len()];
             let block_count = (nar_size).div_ceil(block_size) as u32;
+            let store_path = synthetic_store_path(hash);
+            record_synthetic_download_started(dl, hash, &store_path, nar_size as u64);
 
             tracing::info!("dl-{i} -> seeder-{j}: handshake for {}..", &hash[..16]);
             let _ = dl.cmd_tx.send(SwarmCommand::SendBlockRequest {
@@ -357,6 +359,7 @@ async fn run_network(
             });
 
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            record_synthetic_download_succeeded(dl, hash, &store_path, nar_size as u64);
         }
     }
 
@@ -375,6 +378,8 @@ async fn run_network(
 struct NodeHandle {
     peer_id: PeerId,
     cmd_tx: tokio::sync::mpsc::UnboundedSender<SwarmCommand>,
+    build_registry: BuildRegistry,
+    event_tx: dashboard::EventBus,
 }
 
 async fn launch_node(
@@ -484,7 +489,7 @@ async fn launch_node(
     // Keep temp dir alive
     std::mem::forget(_tmp_arc);
 
-    Ok((NodeHandle { peer_id: pid, cmd_tx }, addr_rx))
+    Ok((NodeHandle { peer_id: pid, cmd_tx, build_registry: build_reg, event_tx }, addr_rx))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -623,6 +628,61 @@ fn make_synthetic_nar(seed: u8, size: usize) -> Vec<u8> {
         *b = seed.wrapping_add((i % 251) as u8);
     }
     data
+}
+
+fn synthetic_store_path(hash: &str) -> String {
+    format!("/gnu/store/{}-synthetic-pkg", &hash[..32.min(hash.len())])
+}
+
+fn record_synthetic_download_started(
+    node: &NodeHandle,
+    hash: &str,
+    store_path: &str,
+    nar_size: u64,
+) {
+    node.build_registry.lock().unwrap().entry(hash.to_string()).or_insert_with(|| ObservedBuild {
+        nar_hash: hash.to_string(),
+        store_path: Some(store_path.to_string()),
+        nar_size: Some(nar_size),
+        references: vec![],
+        deriver: None,
+        narinfo_raw: None,
+        providers: vec![],
+        downloaded_at: None,
+        download_size: None,
+    });
+
+    let _ = node.event_tx.send(DashboardEvent::CatalogEntry {
+        hash_part: store_hash_part(store_path).unwrap_or_else(|| hash[..32.min(hash.len())].into()),
+        store_path: Some(store_path.to_string()),
+        nar_size: Some(nar_size),
+        nar_hash: Some(hash.to_string()),
+        p2p_available: true,
+    });
+    let _ = node.event_tx.send(DashboardEvent::DownloadStarted {
+        nar_hash: hash.to_string(),
+        store_path: store_path.to_string(),
+        nar_size,
+    });
+}
+
+fn record_synthetic_download_succeeded(
+    node: &NodeHandle,
+    hash: &str,
+    store_path: &str,
+    nar_size: u64,
+) {
+    if let Some(build) = node.build_registry.lock().unwrap().get_mut(hash) {
+        build.downloaded_at = Some(unix_timestamp_secs());
+        build.download_size = Some(nar_size);
+    }
+
+    let _ = node.event_tx.send(DashboardEvent::DownloadSucceeded {
+        nar_hash: hash.to_string(),
+        store_path: store_path.to_string(),
+        size: nar_size,
+        elapsed_ms: 700,
+    });
 }
 
 fn build_swarm(kp: &libp2p::identity::Keypair) -> anyhow::Result<libp2p::Swarm<GuixP2PBehaviour>> {
@@ -2136,6 +2196,13 @@ fn unix_timestamp() -> String {
         Ok(duration) => format!("{} seconds since 1970-01-01 UTC", duration.as_secs()),
         Err(_) => "unknown".to_string(),
     }
+}
+
+fn unix_timestamp_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
 }
 
 fn format_bytes(bytes: u64) -> String {
