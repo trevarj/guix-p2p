@@ -381,6 +381,9 @@ substitute protocol.
 
 ### Shepherd Service (Daemon Mode)
 
+For bootstrap-node operations, use the Shepherd-first guide in
+[`bootstrap-node.md`](bootstrap-node.md).
+
 ```scheme
 (define guix-p2p-daemon
   (make <service>
@@ -398,6 +401,8 @@ substitute protocol.
 
 Settings can be persisted in `$XDG_CONFIG_HOME/guix-p2p/config.toml`
 (or `~/.config/guix-p2p/config.toml`). CLI flags override file values.
+See [`configuration.md`](configuration.md) for every supported key, default,
+and CLI override.
 
 ```toml
 substitute_policy = "p2p-first"
@@ -474,6 +479,8 @@ locally-seeded nars in real time:
   after downloads.
 - The `/api/seeds` endpoint returns the full list of seeded nars with size,
   block count, and block size.
+- The dashboard server indexes catalog events internally, so `/api/catalog`
+  works for automation even when no browser WebSocket is connected.
 
 Dashboard events related to seeding:
 

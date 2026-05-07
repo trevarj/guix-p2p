@@ -2,99 +2,62 @@
 
 P2P binary substitute distribution for GNU Guix.
 
-Sources nars from a libp2p-powered Kademlia DHT + custom block-swarm network
-instead of HTTP. Zero changes to guix-daemon required.
+`guix-p2p` is a libp2p daemon and Guix substitute relay. It discovers nar
+providers through Kademlia, downloads nar blocks from peers, verifies the Guix
+nar hash, and can fall back to configured HTTP substitute servers when policy
+allows it.
 
 ## Quick Start
 
 ```sh
-# Build
+guix shell -m manifest.scm
 cargo build --release
 
-# Install wrapper (no upstream Guix patch needed)
-cp target/release/guix-p2p ~/.local/bin/
-cp scripts/guix-wrapper.sh ~/.local/bin/guix
-chmod +x ~/.local/bin/guix
-
-# Ensure ~/.local/bin is first in daemon's PATH, then restart guix-daemon
-# All substitute downloads now go through the P2P network
-```
-
-Or run the background daemon for persistent DHT participation:
-
-```sh
-guix-p2p --daemon \
+target/release/guix-p2p --daemon \
     --listen-addr /ip4/0.0.0.0/udp/6881/quic-v1 \
     --cache-dir /var/cache/guix-p2p \
-    --bootstrap-peers /ip4/p2p.example.org/udp/6881/quic-v1/p2p/12D3KooW...
+    --socket /var/cache/guix-p2p/guix-p2p.sock \
+    --dashboard
 ```
 
-## CLI
-
-```
-Usage: guix-p2p --query        # daemon --query mode (stdin protocol)
-       guix-p2p --substitute    # daemon --substitute mode (stdin protocol)
-       guix-p2p --daemon        # persistent background node
-
-Global flags:
-  --bootstrap-peers <CSV>   Comma-separated multiaddr list
-  --listen-addr <ADDR>      Multiaddr to listen on [default: /ip4/0.0.0.0/udp/6881/quic-v1]
-  --cache-dir <PATH>        Cache and identity directory
-  --substitute-urls <CSV>   HTTP narinfo sources for metadata fallback
-```
-
-## How It Works
-
-The guix-daemon spawns `guix substitute --query` and `guix substitute
---substitute` for every download. The `guix-wrapper.sh` script intercepts those
-invocations and forwards them to `guix-p2p`. All other guix commands
-(`guix build`, `guix install`, `guix system reconfigure`, `guix home
-reconfigure`, `guix shell`, etc.) pass through unchanged.
-
-No patches to Guix source are needed—the wrapper handles everything at the
-process level.
-
-```
-guix build hello
-  → guix-daemon spawns "guix substitute --query"
-    → wrapper intercepts
-      → guix-p2p --query
-        → DHT lookup for nar hash providers
-        → swarm download from peers
-        → fd 4 reply: "success sha256:... 12345"
-        → nar written to store
-```
-
-## Building
+Use the wrapper flow when a `guix-daemon` should route substitute queries
+through the daemon:
 
 ```sh
-# All commands run from project root (Cargo workspace)
-guix shell -m manifest.scm
-
-cargo build --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo fmt
+GUIX_P2P_SOCKET=/var/cache/guix-p2p/guix-p2p.sock \
+GUIX_P2P_BIN="$PWD/target/release/guix-p2p" \
+REAL_GUIX="$(command -v guix)" \
+scripts/guix-wrapper.sh build hello
 ```
 
-## E2E Container Smoke Test
+## Validation
+
+Run the real Guix smoke test:
 
 ```sh
-scripts/e2e-container-test.sh
+cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport tcp
 ```
 
-The script defaults to TCP loopback for container compatibility. Set
-`GUIX_P2P_E2E_TRANSPORT=quic` to exercise QUIC on hosts that allow UDP sockets.
+Run local controlled benchmarks:
+
+```sh
+cargo run -p guix-p2p-e2e -- benchmark --packages hello,git,emacs --iterations 3 --transport tcp
+```
+
+Benchmark CSV output is written under `target/guix-p2p-bench/`; the markdown
+report is written to `docs/benchmark-results.md`.
 
 ## Documentation
 
 | File | Topic |
 |------|-------|
-| [docs/architecture.md](docs/architecture.md) | Full architecture, data flow, activation |
-| [docs/implementation-plan.md](docs/implementation-plan.md) | Phased roadmap with task status |
+| [docs/architecture.md](docs/architecture.md) | Architecture, data flow, dashboard surfaces |
+| [docs/configuration.md](docs/configuration.md) | TOML keys, defaults, CLI overrides |
+| [docs/deployment.md](docs/deployment.md) | Daemon, relay, wrapper, and isolated Guix flow |
+| [docs/bootstrap-node.md](docs/bootstrap-node.md) | Shepherd-first bootstrap node operation |
+| [docs/benchmarks.md](docs/benchmarks.md) | Smoke and benchmark harness usage |
 | [docs/dht-protocol.md](docs/dht-protocol.md) | Kademlia DHT design |
 | [docs/swarm-protocol.md](docs/swarm-protocol.md) | Block exchange wire protocol |
-| [docs/e2e-demo-guide.md](docs/e2e-demo-guide.md) | Interactive 2-node demo guide |
 
 ## License
 

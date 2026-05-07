@@ -172,6 +172,8 @@ pub async fn serve(state: DashboardState, port: u16, bind: &str) {
     let addr: SocketAddr =
         format!("{}:{}", bind, port).parse().expect("invalid dashboard bind address");
 
+    spawn_catalog_indexer(state.clone());
+
     let app = Router::new()
         .route("/", get(index_html))
         .route("/api/status", get(api_status))
@@ -314,38 +316,7 @@ async fn handle_ws(mut socket: WebSocket, state: DashboardState) {
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
         };
 
-        if let DashboardEvent::CatalogEntry {
-            ref hash_part,
-            ref store_path,
-            nar_size,
-            ref nar_hash,
-            p2p_available,
-        } = event
-        {
-            let mut cat = state.catalog.lock().unwrap();
-            cat.entry(hash_part.clone())
-                .and_modify(|e: &mut CatalogItem| {
-                    if store_path.is_some() {
-                        e.store_path = store_path.clone();
-                    }
-                    if nar_size.is_some() {
-                        e.nar_size = nar_size;
-                    }
-                    if nar_hash.is_some() {
-                        e.nar_hash = nar_hash.clone();
-                    }
-                    if p2p_available {
-                        e.p2p_available = true;
-                    }
-                })
-                .or_insert_with(|| CatalogItem {
-                    hash_part: hash_part.clone(),
-                    store_path: store_path.clone(),
-                    nar_size,
-                    nar_hash: nar_hash.clone(),
-                    p2p_available,
-                });
-        }
+        apply_catalog_event(&state, &event);
 
         let json = match serde_json::to_string(&event) {
             Ok(j) => j,
@@ -355,6 +326,56 @@ async fn handle_ws(mut socket: WebSocket, state: DashboardState) {
         if socket.send(Message::Text(json)).await.is_err() {
             break;
         }
+    }
+}
+
+fn spawn_catalog_indexer(state: DashboardState) {
+    let mut rx = state.event_bus.subscribe();
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => apply_catalog_event(&state, &event),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::debug!("Dashboard catalog indexer lagged by {} events", n);
+                },
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+fn apply_catalog_event(state: &DashboardState, event: &DashboardEvent) {
+    if let DashboardEvent::CatalogEntry {
+        hash_part,
+        store_path,
+        nar_size,
+        nar_hash,
+        p2p_available,
+    } = event
+    {
+        let mut cat = state.catalog.lock().unwrap();
+        cat.entry(hash_part.clone())
+            .and_modify(|e: &mut CatalogItem| {
+                if store_path.is_some() {
+                    e.store_path = store_path.clone();
+                }
+                if nar_size.is_some() {
+                    e.nar_size = *nar_size;
+                }
+                if nar_hash.is_some() {
+                    e.nar_hash = nar_hash.clone();
+                }
+                if *p2p_available {
+                    e.p2p_available = true;
+                }
+            })
+            .or_insert_with(|| CatalogItem {
+                hash_part: hash_part.clone(),
+                store_path: store_path.clone(),
+                nar_size: *nar_size,
+                nar_hash: nar_hash.clone(),
+                p2p_available: *p2p_available,
+            });
     }
 }
 

@@ -375,6 +375,10 @@
   requested nar instead of relying on prior handshake state.
 - The E2E script defaults to TCP loopback. Set `GUIX_P2P_E2E_TRANSPORT=quic`
   to exercise QUIC where UDP sockets are available.
+- `guix-p2p-e2e container-smoke` is the canonical real-Guix validation path;
+  the shell script is a compatibility wrapper.
+- `guix-p2p-e2e benchmark` produces local controlled HTTP, p2p-only, and
+  p2p-first timing reports from real Guix nars.
 
 ### See Also
 

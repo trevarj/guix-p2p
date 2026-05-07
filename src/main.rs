@@ -33,7 +33,7 @@ struct Cli {
     bootstrap_peers: Option<String>,
 
     /// Address to listen on (multiaddr format)
-    #[arg(long, global = true, default_value = "/ip4/0.0.0.0/udp/6881/quic-v1")]
+    #[arg(long, global = true)]
     listen_addr: Option<String>,
 
     /// Directory for cache and identity storage
@@ -117,6 +117,7 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting guix-p2p");
     tracing::info!("Cache directory: {}", config.cache_dir.display());
+    tracing::info!("Substitute policy: {}", config.substitute_policy);
 
     match (cli.query, cli.substitute, &cli.socket) {
         (true, false, Some(sock)) => {

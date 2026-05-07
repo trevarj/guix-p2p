@@ -1,5 +1,11 @@
 # E2E Container Test Plan
 
+Current status: `guix-p2p-e2e container-smoke` is the canonical implementation.
+`scripts/e2e-container-test.sh` is a thin compatibility wrapper around that
+Rust harness. The harness now runs host-local isolated raw `guix-daemon`
+state, generated TOML config, captured logs, and dashboard API validation; the
+older `guix shell -CN` notes below are retained as design background.
+
 ## Goal
 
 Run multiple `guix shell -CN` containers, each with its own `guix-daemon` +
@@ -8,7 +14,7 @@ build hello` through guix-daemon, which uses the P2P substituter via the `GUIX`
 env var, and successfully downloads the nar from Node A via P2P.
 
 Policy: `p2p-only` (no HTTP fallback -- pure P2P). The checked-in
-orchestrator is `scripts/e2e-container-test.sh`.
+orchestrator is `cargo run -p guix-p2p-e2e -- container-smoke`.
 
 ## Container Approach
 

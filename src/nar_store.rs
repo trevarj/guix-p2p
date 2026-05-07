@@ -240,6 +240,11 @@ impl NarStore {
         if blks.is_empty() {
             Some(BlockResponse::Error { message: "no blocks available for this nar".into() })
         } else {
+            tracing::info!(
+                "serving {} block(s): hash={}..",
+                blks.len(),
+                &nar_hash_hex[..16.min(nar_hash_hex.len())],
+            );
             Some(BlockResponse::Blocks { data: blks })
         }
     }

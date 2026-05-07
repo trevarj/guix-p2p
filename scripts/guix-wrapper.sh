@@ -14,7 +14,8 @@
 
 set -eu
 
-REAL_GUIX="/run/current-system/profile/bin/guix"
+REAL_GUIX="${REAL_GUIX:-/run/current-system/profile/bin/guix}"
+GUIX_P2P="${GUIX_P2P_BIN:-guix-p2p}"
 SOCKET="${GUIX_P2P_SOCKET:-${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock}"
 
 case "${1-}" in
@@ -23,7 +24,7 @@ case "${1-}" in
         case "${1-}" in
             --query|--substitute)
                 if [ -S "$SOCKET" ]; then
-                    exec guix-p2p "$@" --socket "$SOCKET"
+                    exec "$GUIX_P2P" "$@" --socket "$SOCKET"
                 else
                     exec "$REAL_GUIX" substitute "$@"
                 fi

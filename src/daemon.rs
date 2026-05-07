@@ -269,8 +269,18 @@ pub async fn run_query_mode(
 
         match cmd {
             DaemonCommand::Have(paths) => {
-                handle_have(cache, query_tx, &mut reply, &paths, config.substitute_policy, None)
-                    .await;
+                handle_have(
+                    cache,
+                    query_tx,
+                    &mut reply,
+                    &paths,
+                    config,
+                    &mut notify_rx,
+                    narinfo_cache,
+                    client,
+                    None,
+                )
+                .await;
             },
             DaemonCommand::Info(path) => {
                 handle_info(config, narinfo_cache, &mut reply, &path, client, None).await;
@@ -284,12 +294,16 @@ pub async fn run_query_mode(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_have(
     cache: &ProviderCache,
     query_tx: &UnboundedSender<String>,
     reply: &mut ReplyWriter,
     paths: &[String],
-    policy: SubstitutePolicy,
+    config: &Config,
+    notify_rx: &mut NotifyRx,
+    narinfo_cache: &Arc<Mutex<NarinfoCache>>,
+    client: &reqwest::Client,
     event_tx: Option<&dashboard::EventBus>,
 ) {
     for path in paths {
@@ -303,37 +317,85 @@ async fn handle_have(
 
         tracing::debug!("have query: {} (hash_part={})", path, hash_part);
 
-        match policy {
+        match config.substitute_policy {
             SubstitutePolicy::HttpFirst | SubstitutePolicy::P2pFirst => {
                 // Always claim we have it; we can serve via HTTP fallback if
                 // no P2P providers exist.
-                tracing::info!("have: claiming {} (policy={:?})", path, policy);
+                tracing::info!("have: claiming {} (policy={:?})", path, config.substitute_policy);
                 if let Err(e) = reply.write_line(path) {
                     tracing::error!("have reply for {}: {}", path, e);
                 }
             },
             SubstitutePolicy::P2pOnly => {
-                let _ = query_tx.send(hash_part.clone());
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                let narinfo = match crate::http_client::fetch_narinfo(
+                    config,
+                    &hash_part,
+                    narinfo_cache,
+                    client,
+                )
+                .await
+                {
+                    Ok(info) => info,
+                    Err(e) => {
+                        tracing::info!(
+                            "have: skipping {} (p2p-only, narinfo unavailable: {})",
+                            path,
+                            e
+                        );
+                        continue;
+                    },
+                };
 
-                if crate::dht::has_providers(cache, &hash_part).await {
-                    tracing::info!("have: claiming {} (p2p-only, providers found)", path);
+                let nar_hash_bytes = extract_nar_hash_bytes(&narinfo.nar_hash);
+                let dht_key = hex::encode(nar_hash_bytes);
+                let _ = query_tx.send(dht_key.clone());
+                let query_timeout =
+                    tokio::time::Duration::from_secs(config.request_timeout_secs.min(5));
+                let providers =
+                    wait_for_providers_for_duration(notify_rx, &dht_key, query_timeout).await;
+                let p2p_available = providers.len() >= config.min_providers;
+
+                if p2p_available {
+                    tracing::info!(
+                        "have: claiming {} (p2p-only, {}/{}) providers found",
+                        path,
+                        providers.len(),
+                        config.min_providers
+                    );
                     if let Err(e) = reply.write_line(path) {
                         tracing::error!("have reply for {}: {}", path, e);
                     }
                 } else {
-                    tracing::info!("have: skipping {} (p2p-only, no providers)", path);
+                    tracing::info!(
+                        "have: skipping {} (p2p-only, only {}/{}) providers found",
+                        path,
+                        providers.len(),
+                        config.min_providers
+                    );
+                }
+
+                if let Some(tx) = event_tx {
+                    let _ = tx.send(DashboardEvent::CatalogEntry {
+                        hash_part: hash_part.clone(),
+                        store_path: Some(narinfo.store_path.clone()),
+                        nar_size: Some(narinfo.nar_size),
+                        nar_hash: Some(narinfo.nar_hash.clone()),
+                        p2p_available,
+                    });
                 }
             },
         }
 
-        if let Some(tx) = event_tx {
+        if let Some(tx) = event_tx
+            && config.substitute_policy != SubstitutePolicy::P2pOnly
+        {
+            let p2p_available = crate::dht::has_providers(cache, &hash_part).await;
             let _ = tx.send(DashboardEvent::CatalogEntry {
                 hash_part: hash_part.clone(),
                 store_path: Some(path.clone()),
                 nar_size: None,
                 nar_hash: None,
-                p2p_available: false,
+                p2p_available,
             });
         }
     }
@@ -485,6 +547,12 @@ async fn try_swarm_substitute(
     let nar_hash = narinfo.nar_hash.clone();
     let nar_hash_bytes = extract_nar_hash_bytes(&nar_hash);
 
+    tracing::info!(
+        policy = %config.substitute_policy,
+        store = %store_path,
+        "handling substitute request"
+    );
+
     // Populate build registry from observed narinfo
     {
         let mut reg = build_registry.lock().unwrap();
@@ -525,6 +593,7 @@ async fn try_swarm_substitute(
 
     let result = match config.substitute_policy {
         SubstitutePolicy::P2pOnly => {
+            tracing::info!("p2p-only policy active; HTTP nar fallback disabled");
             let _ = reply.write_trace(&format_trace_started(
                 &store_path,
                 &format!("p2p://{}", hash_part),
@@ -846,8 +915,20 @@ async fn wait_for_providers(
     dht_key: &str,
     config: &Config,
 ) -> Vec<PeerId> {
-    let deadline =
-        tokio::time::Instant::now() + tokio::time::Duration::from_secs(config.request_timeout_secs);
+    wait_for_providers_for_duration(
+        notify_rx,
+        dht_key,
+        tokio::time::Duration::from_secs(config.request_timeout_secs),
+    )
+    .await
+}
+
+async fn wait_for_providers_for_duration(
+    notify_rx: &mut NotifyRx,
+    dht_key: &str,
+    timeout: tokio::time::Duration,
+) -> Vec<PeerId> {
+    let deadline = tokio::time::Instant::now() + timeout;
 
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -1252,7 +1333,10 @@ async fn handle_socket_connection(
                             query_tx,
                             &mut reply,
                             &paths,
-                            config.substitute_policy,
+                            config,
+                            &mut notify_rx,
+                            narinfo_cache,
+                            client,
                             Some(event_tx),
                         )
                         .await;
