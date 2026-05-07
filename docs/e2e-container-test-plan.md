@@ -2,9 +2,10 @@
 
 Current status: `guix-p2p-e2e container-smoke` is the canonical implementation.
 `scripts/e2e-container-test.sh` is a thin compatibility wrapper around that
-Rust harness. The harness now runs host-local isolated raw `guix-daemon`
-state, generated TOML config, captured logs, and dashboard API validation; the
-older `guix shell -CN` notes below are retained as design background.
+Rust harness. The harness runs Node A, Node B, Node B's raw `guix-daemon`, and
+the client `guix build` through `guix shell -CN` containers with generated TOML
+config, captured logs, and dashboard API validation. On hosts with a read-only
+store, use the disposable VM in `docs/e2e-vm.md`.
 
 ## Goal
 
@@ -18,17 +19,24 @@ orchestrator is `cargo run -p guix-p2p-e2e -- container-smoke`.
 
 ## Container Approach
 
-**`guix shell -CN`** -- lightweight containers sharing the host network
-namespace (`-N`) with filesystem isolation (`-C`).
+**`guix shell -CN`** -- lightweight containers with filesystem isolation (`-C`)
+and host network access (`-N`).
 
 - Shared network: all containers reach each other on `127.0.0.1` via different
   TCP ports by default. Set `GUIX_P2P_E2E_TRANSPORT=quic` to test QUIC UDP.
-- Filesystem isolation: separate root, but we selectively share needed paths.
+- Filesystem isolation: separate root, but the harness shares the project
+  checkout, generated E2E base directory, and writable `/gnu/store`.
 - No root needed. Fast startup. Easy cleanup.
+
+The dashboard-first prototype boots a full qcow2 Guix image with
+`scripts/e2e-vm.sh run`, shares this checkout into the guest, and runs
+`container-smoke --dashboard-bind 0.0.0.0 --hold` there. This avoids
+`guix system vm`, which shares the host store and can inherit a read-only
+`/gnu/store`.
 
 ## Store Strategy: Separate DB, Shared Store
 
-The host's `/gnu/store` is shared into containers (writable, default). Each
+The host's `/gnu/store` is shared into containers as writable. Each
 container has its own `GUIX_STATE_DIRECTORY` with a **separate empty DB**. The
 container's guix-daemon doesn't know any packages are valid, even if they
 exist on disk in `/gnu/store`. When `guix build hello` runs, the daemon sees
@@ -39,6 +47,10 @@ hello isn't valid in its DB and asks the substituter to provide it.
 | `/gnu/store` | Shared from host (writable) | guix-daemon needs to write nar imports; the store itself is fine to share |
 | `/var/guix` (state) | Per-node `GUIX_STATE_DIRECTORY` | Separate DBs, GC roots, temp roots per node |
 | `/etc/guix` (config) | Per-node `GUIX_CONFIGURATION_DIRECTORY` | Separate ACL; copied from host at setup |
+
+The harness preflights `guix shell -CN --writable-root --share=/gnu/store`
+before starting nodes. If `/gnu/store` is read-only on the host or cannot be
+shared writable into the container, the test stops immediately.
 
 ### Why not read-only store?
 

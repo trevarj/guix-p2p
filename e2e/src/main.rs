@@ -90,9 +90,15 @@ enum Commands {
         /// Node B dashboard port
         #[arg(long, default_value_t = 3032)]
         node_b_dashboard_port: u16,
+        /// Bind address for Node A and Node B dashboards
+        #[arg(long, default_value = "127.0.0.1")]
+        dashboard_bind: String,
         /// Existing guix-p2p binary to use instead of target/release/guix-p2p
         #[arg(long)]
         guix_p2p_bin: Option<PathBuf>,
+        /// Keep daemons and dashboards running after validation until Ctrl-C
+        #[arg(long)]
+        hold: bool,
         /// Keep generated state under --base after completion
         #[arg(long)]
         keep_temp: bool,
@@ -202,7 +208,9 @@ async fn main() -> anyhow::Result<()> {
             node_b_port,
             node_a_dashboard_port,
             node_b_dashboard_port,
+            dashboard_bind,
             guix_p2p_bin,
+            hold,
             keep_temp,
         } => {
             run_container_smoke(ContainerSmokeOptions {
@@ -213,7 +221,9 @@ async fn main() -> anyhow::Result<()> {
                 node_b_port,
                 node_a_dashboard_port,
                 node_b_dashboard_port,
+                dashboard_bind,
                 guix_p2p_bin,
+                hold,
                 keep_temp,
             })
             .await
@@ -882,7 +892,9 @@ struct ContainerSmokeOptions {
     node_b_port: u16,
     node_a_dashboard_port: u16,
     node_b_dashboard_port: u16,
+    dashboard_bind: String,
     guix_p2p_bin: Option<PathBuf>,
+    hold: bool,
     keep_temp: bool,
 }
 
@@ -913,8 +925,10 @@ struct P2pBuildSpec<'a> {
     node_b_port: u16,
     node_a_dashboard_port: u16,
     node_b_dashboard_port: u16,
+    dashboard_bind: &'a str,
     node_b_policy: &'a str,
     strict_p2p_evidence: bool,
+    hold_after_success: bool,
     tools: &'a HarnessTools,
 }
 
@@ -967,6 +981,7 @@ impl ProcessSet {
             .open(log_path)
             .with_context(|| format!("failed to open log {}", log_path.display()))?;
         let stderr = log.try_clone().context("failed to clone log file")?;
+        tracing::debug!("spawning {label}: {:?}", command);
         let child = command
             .stdout(std::process::Stdio::from(log))
             .stderr(std::process::Stdio::from(stderr))
@@ -996,9 +1011,10 @@ impl Drop for ProcessSet {
 
 async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> {
     let tools = prepare_harness_tools(opts.guix_p2p_bin.as_deref())?;
-    ensure_guix_store_writable()?;
-    reset_dir(&opts.base)?;
-    std::fs::create_dir_all(opts.base.join("logs"))?;
+    let base = absolutize_path(&project_root(), &opts.base);
+    reset_dir(&base)?;
+    std::fs::create_dir_all(base.join("logs"))?;
+    ensure_container_guix_store_writable(&tools, &base)?;
 
     tracing::info!("resolving Guix package {}", opts.package);
     let store_path = resolve_package(&tools.guix, &opts.package)?;
@@ -1008,7 +1024,7 @@ async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> 
     tracing::info!("nar hash: {}", nar_hash);
 
     let outcome = run_p2p_build(P2pBuildSpec {
-        base: &opts.base,
+        base: &base,
         package: &opts.package,
         store_path: &store_path,
         nar_hash: &nar_hash,
@@ -1017,20 +1033,35 @@ async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> 
         node_b_port: opts.node_b_port,
         node_a_dashboard_port: opts.node_a_dashboard_port,
         node_b_dashboard_port: opts.node_b_dashboard_port,
+        dashboard_bind: &opts.dashboard_bind,
         node_b_policy: "p2p-only",
         strict_p2p_evidence: true,
+        hold_after_success: opts.hold,
         tools: &tools,
-    })?;
+    })
+    .await?;
 
     tracing::info!(
         "container smoke passed: package={} elapsed={}ms p2p_evidence={} logs={}",
         opts.package,
         outcome.elapsed_ms,
         outcome.p2p_evidence,
-        opts.base.join("logs").display()
+        base.join("logs").display()
+    );
+    tracing::info!("seed store path: {}", store_path);
+    tracing::info!("nar hash: {}", nar_hash);
+    tracing::info!(
+        "node A dashboard: http://{}:{}",
+        opts.dashboard_bind,
+        opts.node_a_dashboard_port
+    );
+    tracing::info!(
+        "node B dashboard: http://{}:{}",
+        opts.dashboard_bind,
+        opts.node_b_dashboard_port
     );
     if opts.keep_temp {
-        tracing::info!("kept generated state under {}", opts.base.display());
+        tracing::info!("kept generated state under {}", base.display());
     }
     Ok(())
 }
@@ -1047,11 +1078,11 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
     }
 
     let tools = prepare_harness_tools(opts.guix_p2p_bin.as_deref())?;
-    ensure_guix_store_writable()?;
     let base = absolutize_path(&project_root(), &opts.base);
     std::fs::create_dir_all(&base)?;
     let tmp_root = base.join("tmp");
     reset_dir(&tmp_root)?;
+    ensure_container_guix_store_writable(&tools, &tmp_root)?;
 
     let mut packages = Vec::new();
     for package in &opts.packages {
@@ -1105,10 +1136,13 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                             node_b_port,
                             node_a_dashboard_port,
                             node_b_dashboard_port,
+                            dashboard_bind: "127.0.0.1",
                             node_b_policy: policy,
                             strict_p2p_evidence: *mode == BenchmarkMode::P2pOnly,
+                            hold_after_success: false,
                             tools: &tools,
                         })
+                        .await
                         .map(|outcome| (outcome.elapsed_ms, outcome.p2p_evidence, outcome.nar_size))
                     },
                 };
@@ -1207,7 +1241,49 @@ fn build_release_binary(cargo: &std::path::Path) -> anyhow::Result<()> {
     checked_status(command, "cargo build --release")
 }
 
-fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome> {
+fn guix_container_command(tools: &HarnessTools, base: &std::path::Path) -> std::process::Command {
+    let mut command = std::process::Command::new(&tools.guix);
+    command
+        .arg("shell")
+        .arg("-C")
+        .arg("-N")
+        .arg("--writable-root")
+        .arg(format!("--share={}", project_root().display()))
+        .arg(format!("--share={}", base.display()))
+        .arg("--share=/gnu/store")
+        .arg("--symlink=/bin/sh=bin/sh");
+
+    if std::path::Path::new("/etc/guix").exists() {
+        command.arg("--expose=/etc/guix");
+    }
+    if std::path::Path::new("/var/guix").exists() {
+        command.arg("--expose=/var/guix");
+    }
+
+    command.arg("bash-minimal").arg("coreutils").arg("--");
+    command
+}
+
+fn ensure_container_guix_store_writable(
+    tools: &HarnessTools,
+    base: &std::path::Path,
+) -> anyhow::Result<()> {
+    let mut command = guix_container_command(tools, base);
+    command.args([
+        "/bin/sh",
+        "-c",
+        "test -w /gnu/store || { echo '/gnu/store is not writable inside guix shell -CN' >&2; \
+         exit 1; }",
+    ]);
+    checked_status(command, "guix shell -CN writable /gnu/store preflight").map_err(|e| {
+        anyhow::anyhow!(
+            "Guix container E2E requires /gnu/store to be writable inside `guix shell -CN`. The \
+             container preflight failed: {e}"
+        )
+    })
+}
+
+async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome> {
     let logs_dir = spec.base.join("logs");
     std::fs::create_dir_all(&logs_dir)?;
 
@@ -1238,6 +1314,7 @@ fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome> {
         substitute_policy: "p2p-only",
         min_providers: 1,
         dashboard_port: spec.node_a_dashboard_port,
+        dashboard_bind: spec.dashboard_bind,
         bootstrap_peers: None,
         seed_paths: &[spec.store_path],
     })?;
@@ -1249,6 +1326,7 @@ fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome> {
         substitute_policy: spec.node_b_policy,
         min_providers: 1,
         dashboard_port: spec.node_b_dashboard_port,
+        dashboard_bind: spec.dashboard_bind,
         bootstrap_peers: None,
         seed_paths: &[],
     })?;
@@ -1257,8 +1335,9 @@ fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome> {
 
     let mut processes = ProcessSet::default();
 
-    let mut node_a_cmd = std::process::Command::new(&spec.tools.guix_p2p);
+    let mut node_a_cmd = guix_container_command(spec.tools, spec.base);
     node_a_cmd
+        .arg(&spec.tools.guix_p2p)
         .arg("--daemon")
         .arg("--listen-addr")
         .arg(&node_a_addr)
@@ -1269,10 +1348,13 @@ fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome> {
         .arg("--dashboard")
         .arg("--dashboard-port")
         .arg(spec.node_a_dashboard_port.to_string())
+        .arg("--dashboard-bind")
+        .arg(spec.dashboard_bind)
         .arg("--policy")
         .arg("p2p-only")
         .arg("--seed")
         .arg(spec.store_path)
+        .env("HOME", &node_a_dir)
         .env("XDG_CONFIG_HOME", &node_a_config_home)
         .env("RUST_LOG", "guix_p2p=trace,info");
     processes.spawn_logged("node-a", &mut node_a_cmd, &logs_dir.join("node-a.log"))?;
@@ -1291,12 +1373,14 @@ fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome> {
         substitute_policy: spec.node_b_policy,
         min_providers: 1,
         dashboard_port: spec.node_b_dashboard_port,
+        dashboard_bind: spec.dashboard_bind,
         bootstrap_peers: Some(&bootstrap),
         seed_paths: &[],
     })?;
 
-    let mut node_b_cmd = std::process::Command::new(&spec.tools.guix_p2p);
+    let mut node_b_cmd = guix_container_command(spec.tools, spec.base);
     node_b_cmd
+        .arg(&spec.tools.guix_p2p)
         .arg("--daemon")
         .arg("--listen-addr")
         .arg(&node_b_addr)
@@ -1307,10 +1391,13 @@ fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome> {
         .arg("--dashboard")
         .arg("--dashboard-port")
         .arg(spec.node_b_dashboard_port.to_string())
+        .arg("--dashboard-bind")
+        .arg(spec.dashboard_bind)
         .arg("--policy")
         .arg(spec.node_b_policy)
         .arg("--bootstrap-peers")
         .arg(&bootstrap)
+        .env("HOME", &node_b_dir)
         .env("XDG_CONFIG_HOME", &node_b_config_home)
         .env("RUST_LOG", "guix_p2p=trace,info");
     processes.spawn_logged("node-b", &mut node_b_cmd, &logs_dir.join("node-b.log"))?;
@@ -1318,11 +1405,13 @@ fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome> {
     wait_unix_socket(&node_b_socket, "node B relay socket")?;
 
     let guix_state = prepare_guix_daemon_state(&node_b_dir)?;
-    let mut daemon_cmd = std::process::Command::new(&spec.tools.raw_guix_daemon);
+    let mut daemon_cmd = guix_container_command(spec.tools, spec.base);
     daemon_cmd
+        .arg(&spec.tools.raw_guix_daemon)
         .arg("--disable-chroot")
         .arg("--max-jobs=0")
         .arg(format!("--listen={}", daemon_socket.display()))
+        .env("HOME", &node_b_dir)
         .env("GUIX", &wrapper_path)
         .env("GUIX_STATE_DIRECTORY", &guix_state.state_dir)
         .env("GUIX_CONFIGURATION_DIRECTORY", &guix_state.config_dir);
@@ -1330,7 +1419,8 @@ fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome> {
     wait_unix_socket(&daemon_socket, "isolated guix-daemon socket")?;
 
     let elapsed_ms = run_guix_build_logged(
-        &spec.tools.guix,
+        spec.tools,
+        spec.base,
         spec.package,
         &daemon_socket,
         &logs_dir.join("build.log"),
@@ -1381,6 +1471,22 @@ fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome> {
         }
     }
 
+    if spec.hold_after_success {
+        tracing::info!("strict P2P smoke proof passed; holding daemons until Ctrl-C");
+        tracing::info!(
+            "node A dashboard: http://{}:{}",
+            spec.dashboard_bind,
+            spec.node_a_dashboard_port
+        );
+        tracing::info!(
+            "node B dashboard: http://{}:{}",
+            spec.dashboard_bind,
+            spec.node_b_dashboard_port
+        );
+        tokio::signal::ctrl_c().await.context("failed to wait for Ctrl-C")?;
+        tracing::info!("Ctrl-C received; stopping smoke daemons");
+    }
+
     drop(processes);
 
     Ok(P2pBuildOutcome { elapsed_ms, p2p_evidence, nar_size })
@@ -1397,18 +1503,25 @@ fn run_http_benchmark(
     let guix_state = prepare_guix_daemon_state(run_dir)?;
     let mut processes = ProcessSet::default();
 
-    let mut daemon_cmd = std::process::Command::new(&tools.raw_guix_daemon);
+    let mut daemon_cmd = guix_container_command(tools, run_dir);
     daemon_cmd
+        .arg(&tools.raw_guix_daemon)
         .arg("--disable-chroot")
         .arg("--max-jobs=0")
         .arg(format!("--listen={}", daemon_socket.display()))
+        .env("HOME", run_dir)
         .env("GUIX", &tools.real_guix)
         .env("GUIX_STATE_DIRECTORY", &guix_state.state_dir)
         .env("GUIX_CONFIGURATION_DIRECTORY", &guix_state.config_dir);
     processes.spawn_logged("guix-daemon", &mut daemon_cmd, &logs_dir.join("guix-daemon.log"))?;
     wait_unix_socket(&daemon_socket, "isolated guix-daemon socket")?;
-    let elapsed_ms =
-        run_guix_build_logged(&tools.guix, package, &daemon_socket, &logs_dir.join("build.log"))?;
+    let elapsed_ms = run_guix_build_logged(
+        tools,
+        run_dir,
+        package,
+        &daemon_socket,
+        &logs_dir.join("build.log"),
+    )?;
     drop(processes);
     Ok(elapsed_ms)
 }
@@ -1421,6 +1534,7 @@ struct NodeConfigSpec<'a> {
     substitute_policy: &'a str,
     min_providers: usize,
     dashboard_port: u16,
+    dashboard_bind: &'a str,
     bootstrap_peers: Option<&'a str>,
     seed_paths: &'a [&'a str],
 }
@@ -1441,7 +1555,7 @@ fn write_node_config(spec: NodeConfigSpec<'_>) -> anyhow::Result<()> {
     toml.push_str("stall_timeout_secs = 30\n");
     toml.push_str("dashboard_enabled = true\n");
     toml.push_str(&format!("dashboard_port = {}\n", spec.dashboard_port));
-    toml.push_str("dashboard_bind = \"127.0.0.1\"\n");
+    toml.push_str(&format!("dashboard_bind = {}\n", toml_string(spec.dashboard_bind)));
     toml.push_str("substitute_urls = \"https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org\"\n");
     if let Some(peers) = spec.bootstrap_peers {
         toml.push_str(&format!("bootstrap_peers = {}\n", toml_string(peers)));
@@ -1526,7 +1640,8 @@ esac
 }
 
 fn run_guix_build_logged(
-    guix: &std::path::Path,
+    tools: &HarnessTools,
+    base: &std::path::Path,
     package: &str,
     daemon_socket: &std::path::Path,
     log_path: &std::path::Path,
@@ -1534,10 +1649,10 @@ fn run_guix_build_logged(
     let log = std::fs::OpenOptions::new().create(true).append(true).open(log_path)?;
     let stderr = log.try_clone()?;
     let started = std::time::Instant::now();
-    let status = std::process::Command::new(guix)
-        .arg("build")
-        .arg(package)
-        .env("GUIX_DAEMON_SOCKET", daemon_socket)
+    let mut command = guix_container_command(tools, base);
+    command.arg(&tools.guix).arg("build").arg(package).env("GUIX_DAEMON_SOCKET", daemon_socket);
+    tracing::debug!("running build command: {:?}", command);
+    let status = command
         .stdout(std::process::Stdio::from(log))
         .stderr(std::process::Stdio::from(stderr))
         .status()
@@ -1731,36 +1846,6 @@ fn resolve_raw_guix_daemon() -> anyhow::Result<PathBuf> {
         .into_iter()
         .next()
         .ok_or_else(|| anyhow::anyhow!("could not find raw ELF guix-daemon under /gnu/store"))
-}
-
-fn ensure_guix_store_writable() -> anyhow::Result<()> {
-    let store = std::path::Path::new("/gnu/store");
-    if !store.is_dir() {
-        anyhow::bail!("/gnu/store does not exist");
-    }
-
-    if guix_store_mount_is_read_only() {
-        anyhow::bail!(
-            "isolated raw guix-daemon cannot import substitutes because /gnu/store is not \
-             writable by this process: {}. Run the harness where the test daemon can write the \
-             store, or provide a container/VM with a writable Guix store.",
-            "/gnu/store is mounted read-only"
-        );
-    }
-
-    Ok(())
-}
-
-fn guix_store_mount_is_read_only() -> bool {
-    let Ok(mounts) = std::fs::read_to_string("/proc/mounts") else {
-        return false;
-    };
-    mounts.lines().any(|line| {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        fields.len() >= 4
-            && fields[1] == "/gnu/store"
-            && fields[3].split(',').any(|opt| opt == "ro")
-    })
 }
 
 fn is_elf(path: &std::path::Path) -> bool {

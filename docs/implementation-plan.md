@@ -379,6 +379,13 @@
   the shell script is a compatibility wrapper.
 - `guix-p2p-e2e benchmark` produces local controlled HTTP, p2p-only, and
   p2p-first timing reports from real Guix nars.
+- The real-Guix validation path now runs the peer daemons, raw `guix-daemon`,
+  and client build through `guix shell -CN` containers. Writable `/gnu/store`
+  inside the test container is a hard prerequisite.
+- Dashboard-first local proof now uses `scripts/e2e-vm.sh run` to boot a
+  disposable qcow2 Guix VM, share the checkout, and run
+  `container-smoke --dashboard-bind 0.0.0.0 --hold` with a writable guest
+  store.
 
 ### See Also
 

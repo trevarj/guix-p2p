@@ -42,6 +42,12 @@ Run the real Guix smoke test:
 cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport tcp
 ```
 
+For the dashboard-first local prototype, boot the disposable Guix VM:
+
+```sh
+scripts/e2e-vm.sh run
+```
+
 Run local controlled benchmarks:
 
 ```sh
@@ -59,6 +65,7 @@ report is written to `docs/benchmark-results.md`.
 | [docs/configuration.md](docs/configuration.md) | TOML keys, defaults, CLI overrides |
 | [docs/deployment.md](docs/deployment.md) | Daemon, relay, wrapper, and isolated Guix flow |
 | [docs/bootstrap-node.md](docs/bootstrap-node.md) | Shepherd-first bootstrap node operation |
+| [docs/e2e-vm.md](docs/e2e-vm.md) | Disposable VM for the real smoke proof |
 | [docs/benchmarks.md](docs/benchmarks.md) | Smoke and benchmark harness usage |
 | [docs/dht-protocol.md](docs/dht-protocol.md) | Kademlia DHT design |
 | [docs/swarm-protocol.md](docs/swarm-protocol.md) | Block exchange wire protocol |

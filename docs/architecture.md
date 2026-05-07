@@ -418,6 +418,13 @@ acl_path = "/etc/guix/acl"
 seed_paths = ["/gnu/store/abc-foo", "/gnu/store/def-bar"]
 ```
 
+### E2E Harness Flags
+
+The `guix-p2p-e2e container-smoke` harness has its own CLI surface for local
+proofs. It supports `--dashboard-bind` for VM port forwarding and `--hold` to
+keep validated smoke-test dashboards running until Ctrl-C. These flags do not
+change production daemon configuration.
+
 ### Future: Upstream Guile Patch
 
 If upstream merges a patch to `guix/scripts/substitute.scm`, the PATH

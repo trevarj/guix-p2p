@@ -6,6 +6,17 @@
 cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport tcp
 ```
 
+For a dashboard-first demo that keeps the validated nodes running:
+
+```sh
+cargo run -p guix-p2p-e2e -- container-smoke \
+  --package hello \
+  --transport tcp \
+  --dashboard-bind 0.0.0.0 \
+  --hold \
+  --keep-temp
+```
+
 Defaults:
 
 - package: `hello`
@@ -13,6 +24,7 @@ Defaults:
 - base: `/tmp/guix-p2p-e2e`
 - Node A dashboard: `3031`
 - Node B dashboard: `3032`
+- dashboard bind: `127.0.0.1`
 
 Use QUIC on hosts that allow UDP:
 
@@ -25,11 +37,13 @@ The harness:
 - builds or locates `target/release/guix-p2p`
 - resolves a real store path with `guix build <package>`
 - resolves the raw ELF `guix-daemon`
-- starts Node A with the resolved store path seeded
-- starts Node B with `substitute_policy = "p2p-only"` and `min_providers = 1`
-- starts an isolated raw `guix-daemon` with `GUIX` pointing at a generated wrapper
-- runs `guix build <package>` through Node B's daemon socket
+- preflights `guix shell -CN` with writable `/gnu/store`
+- starts Node A in a Guix container with the resolved store path seeded
+- starts Node B in a separate Guix container with `substitute_policy = "p2p-only"` and `min_providers = 1`
+- starts an isolated raw `guix-daemon` in Node B's Guix container with `GUIX` pointing at a generated wrapper
+- runs `guix build <package>` in a Guix container through Node B's daemon socket
 - captures logs under `$BASE/logs/`
+- with `--hold`, keeps daemons and dashboards alive after validation until Ctrl-C
 
 Acceptance checks:
 
@@ -55,6 +69,22 @@ Environment variables retained by the wrapper:
 - `GUIX_P2P_E2E_NODE_B_PORT`
 - `GUIX_P2P_E2E_NODE_A_DASH`
 - `GUIX_P2P_E2E_NODE_B_DASH`
+- `GUIX_P2P_E2E_DASHBOARD_BIND`
+- `GUIX_P2P_E2E_HOLD`
+
+## Disposable VM
+
+On hosts where `/gnu/store` is read-only, use the disposable Guix VM runner:
+
+```sh
+scripts/e2e-vm.sh run
+```
+
+The runner builds a qcow2 image, boots a writable copy under QEMU, shares the
+checkout into the guest, forwards dashboard ports `3031` and `3032`, and runs
+the same `container-smoke --hold` command inside the VM.
+
+See [e2e-vm.md](e2e-vm.md) for the full flow.
 
 ## Benchmark
 
@@ -85,3 +115,10 @@ nar sizes when observed from dashboard seed data, per-run elapsed time,
 medians, and whether P2P block-serving evidence was observed.
 
 Per-run temp directories are removed unless `--keep-temp` is passed.
+
+The smoke and benchmark harnesses require the test container to be able to
+write `/gnu/store`, because raw `guix-daemon` imports substituted nars into
+the store even with `--max-jobs=0`. If the host exposes `/gnu/store` read-only,
+the harness fails at preflight before starting nodes. The disposable VM is the
+recommended environment for the dashboard-first smoke proof. Benchmarks should
+be run after the smoke proof passes there.
