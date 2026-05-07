@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/guix-p2p-wordmark.svg" alt="guix-p2p logo" width="360">
+</p>
+
 # guix-p2p
 
 P2P binary substitute distribution for GNU Guix.
