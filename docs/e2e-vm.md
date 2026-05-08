@@ -18,7 +18,16 @@ scripts/e2e-vm.sh run
 ```
 
 This builds `guix/e2e-vm.scm`, copies the image to
-`target/guix-p2p-vm/e2e-vm.qcow2`, and boots it with QEMU.
+`target/guix-p2p-vm/e2e-vm.qcow2`, and boots it headlessly with QEMU on the
+serial console.
+
+The writable qcow2 is disposable. If the Guix image symlink changes, the
+script refreshes the writable disk before booting so stale GRUB or kernel
+configuration is not reused.
+
+The checkout is shared into the guest with QEMU virtio-9p under the
+`guix_p2p` mount tag. The guest waits for that tag before starting the smoke
+proof.
 
 Dashboard ports are forwarded to the host:
 
@@ -84,3 +93,20 @@ Environment overrides:
 
 The runner uses KVM when `/dev/kvm` is available and falls back to slower TCG
 otherwise.
+
+## Troubleshooting
+
+If QEMU stops at `Welcome to GRUB!`, rebuild and boot the serial-configured
+image:
+
+```sh
+scripts/e2e-vm.sh run
+```
+
+If an old QEMU process still holds the qcow2 lock, stop that process and rerun
+the command.
+
+If the guest logs `9pnet_virtio: no channels available for device guix_p2p`,
+GRUB and Linux boot are working, but the checkout share is not mounted. Check
+that the local QEMU has `virtio-9p-pci` support and keep the VM boot command's
+`-fsdev` and `-device virtio-9p-pci` arguments together.

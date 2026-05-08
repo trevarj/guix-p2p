@@ -34,9 +34,34 @@
        (define base "/tmp/guix-p2p-e2e")
        (define profile "/run/current-system/profile/bin/")
 
+       (define (wait-for-9p-tag)
+         (let ((probe
+                (string-append
+                 "for f in /sys/bus/virtio/devices/*/mount_tag; do "
+                 "[ -e \"$f\" ] && [ \"$(cat \"$f\")\" = guix_p2p ] && exit 0; "
+                 "done; exit 1")))
+           (let loop ((remaining 30))
+             (cond
+              ((try-run (string-append profile "sh") "-c" probe) #t)
+              ((zero? remaining)
+               (format (current-error-port)
+                       "timed out waiting for virtio 9p tag guix_p2p~%")
+               (try-run (string-append profile "sh") "-c"
+                        (string-append
+                         "for f in /sys/bus/virtio/devices/*/mount_tag; do "
+                         "[ -e \"$f\" ] && printf '%s: ' \"$f\" && cat \"$f\"; "
+                         "done"))
+               (exit 1))
+              (else
+               (try-run (string-append profile "sleep") "1")
+               (loop (- remaining 1)))))))
+
        (run (string-append profile "mkdir") "-p" repo target)
+       (try-run (string-append profile "sh") "-c"
+                "modprobe 9pnet_virtio 2>/dev/null || true")
+       (wait-for-9p-tag)
        (unless (try-run (string-append profile "mount")
-                        "-t" "9p" "-o" "trans=virtio,version=9p2000.L"
+                        "-t" "9p" "-o" "trans=virtio,cache=loose"
                         "guix_p2p" repo)
          (format (current-error-port)
                  "failed to mount shared checkout tag guix_p2p at ~a~%" repo)
@@ -78,7 +103,16 @@
   (bootloader
    (bootloader-configuration
     (bootloader grub-bootloader)
-    (targets '("/dev/vda"))))
+    (targets '("/dev/vda"))
+    (timeout 1)
+    (terminal-outputs '(serial))
+    (terminal-inputs '(serial))
+    (serial-unit 0)
+    (serial-speed 115200)))
+  (kernel-arguments '("console=ttyS0,115200n8"))
+  (initrd-modules
+   (append '("virtio" "virtio_pci" "9p" "9pnet" "9pnet_virtio")
+           %base-initrd-modules))
   (file-systems
    (cons (file-system
            (mount-point "/")

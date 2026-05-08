@@ -7,6 +7,7 @@ PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 VM_DIR="${GUIX_P2P_E2E_VM_DIR:-$PROJECT_DIR/target/guix-p2p-vm}"
 IMAGE_ROOT="$VM_DIR/e2e-vm-image"
 DISK="$VM_DIR/e2e-vm.qcow2"
+DISK_SOURCE="$VM_DIR/e2e-vm.qcow2.source"
 IMAGE_SIZE="${GUIX_P2P_E2E_VM_SIZE:-20G}"
 MEMORY="${GUIX_P2P_E2E_VM_MEMORY:-4096}"
 CPUS="${GUIX_P2P_E2E_VM_CPUS:-2}"
@@ -44,6 +45,7 @@ need_qemu() {
 
 build_image() {
     mkdir -p "$VM_DIR"
+    rm -f "$IMAGE_ROOT"
     guix system image \
         -t qcow2 \
         --image-size="$IMAGE_SIZE" \
@@ -55,9 +57,21 @@ prepare_disk() {
     if [ ! -e "$IMAGE_ROOT" ]; then
         build_image
     fi
-    if [ ! -e "$DISK" ]; then
-        cp "$(readlink -f "$IMAGE_ROOT")" "$DISK"
+
+    image_source="$(readlink -f "$IMAGE_ROOT")"
+    disk_source=""
+    if [ -e "$DISK_SOURCE" ]; then
+        disk_source="$(cat "$DISK_SOURCE")"
+    fi
+
+    if [ ! -e "$DISK" ] || [ "$disk_source" != "$image_source" ]; then
+        if [ -e "$DISK" ]; then
+            echo "refreshing writable VM disk from updated image" >&2
+        fi
+        cp "$image_source" "$DISK.tmp"
+        mv "$DISK.tmp" "$DISK"
         chmod 600 "$DISK"
+        printf '%s\n' "$image_source" >"$DISK_SOURCE"
     fi
 }
 
@@ -83,9 +97,11 @@ boot_vm() {
         -accel "$accel" \
         -drive "file=$DISK,if=virtio,format=qcow2" \
         -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:3031-:3031,hostfwd=tcp:127.0.0.1:3032-:3032,hostfwd=tcp:127.0.0.1:2222-:22 \
-        -virtfs "local,path=$PROJECT_DIR,mount_tag=guix_p2p,security_model=mapped-xattr,id=guix_p2p" \
-        -nographic \
-        -serial mon:stdio
+        -fsdev "local,id=guix_p2p_share,path=$PROJECT_DIR,security_model=none" \
+        -device "virtio-9p-pci,fsdev=guix_p2p_share,mount_tag=guix_p2p" \
+        -display none \
+        -serial stdio \
+        -monitor none
 }
 
 clean_vm() {
