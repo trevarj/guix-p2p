@@ -57,26 +57,10 @@
                 (status (close-pipe port)))
            (zero? status)))
 
-       (define target "/tmp/guix-p2p-target")
-       (define base "/tmp/guix-p2p-e2e")
        (define payload "/mnt/guix-p2p-bin")
-       (define payload-device "/dev/disk/by-label/guix-p2p-bin")
        (define profile "/run/current-system/profile/bin/")
 
-       (run (string-append profile "mkdir") "-p" target payload)
-
-       (let loop ((remaining 30))
-         (cond
-          ((try-run (string-append profile "test") "-e" payload-device) #t)
-          ((zero? remaining)
-           (emit-line "timed out waiting for guix-p2p payload disk")
-           (try-run (string-append profile "ls") "-l" "/dev/disk/by-label")
-           (exit 1))
-          (else
-           (try-run (string-append profile "sleep") "1")
-           (loop (- remaining 1)))))
-
-       (run (string-append profile "mount") "-o" "ro" payload-device payload)
+       (run (string-append profile "mkdir") "-p" payload)
 
        ;; This VM is a disposable test image. The raw test guix-daemon imports
        ;; substituted nars into /gnu/store, so the harness must be able to write.
@@ -86,19 +70,9 @@
                  "/gnu/store is not writable in the disposable E2E VM~%")
          (exit 1))
 
-       (setenv "CARGO_TARGET_DIR" target)
-       (setenv "GUIX_P2P_E2E_BASE" base)
-       (setenv "LD_LIBRARY_PATH" (string-append payload "/lib"))
-       (setenv "GUIX_P2P_E2E_NO_GUIX_SHELL" "1")
-       (setenv "GUIX_P2P_E2E_REMOVE_SEED_AFTER_NODE_A" "1")
-       (run (string-append payload "/bin/guix-p2p-e2e") "container-smoke"
-            "--package" #$(raw-derivation-file hello)
-            "--store-path" #$hello
-            "--transport" "tcp"
-            "--guix-p2p-bin" (string-append payload "/bin/guix-p2p")
-            "--dashboard-bind" "0.0.0.0"
-            "--hold"
-            "--keep-temp"))))
+       (setenv "GUIX_P2P_E2E_PACKAGE" #$(raw-derivation-file hello))
+       (setenv "GUIX_P2P_E2E_STORE_PATH" #$hello)
+       (run (string-append payload "/run-e2e-service.sh")))))
 
 (define guix-p2p-e2e-service
   (shepherd-service

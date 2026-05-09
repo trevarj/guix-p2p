@@ -5,6 +5,8 @@
              (gnu packages crypto)
              (gnu packages linux)
              (gnu packages llvm)
+             (gnu packages libunwind)
+             (gnu packages musl)
              (gnu packages node)
              (gnu packages rust)
              (gnu packages tls)
@@ -23,6 +25,8 @@
   gnu-make
   clang-toolchain-21
   binutils
+  libunwind
+  musl
   pkg-config
 
   ;; Rustup
