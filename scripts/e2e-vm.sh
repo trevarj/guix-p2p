@@ -5,7 +5,10 @@ set -eu
 
 PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 VM_DIR="${GUIX_P2P_E2E_VM_DIR:-$PROJECT_DIR/target/guix-p2p-vm}"
-IMAGE_ROOT="$VM_DIR/e2e-vm-image"
+OFFICIAL_IMAGE_URL="${GUIX_P2P_E2E_BASE_IMAGE_URL:-https://ftp.gnu.org/gnu/guix/guix-system-vm-image-1.4.0.x86_64-linux.qcow2}"
+OFFICIAL_IMAGE="$VM_DIR/$(basename "$OFFICIAL_IMAGE_URL")"
+IMAGE_SOURCE="${GUIX_P2P_E2E_IMAGE_SOURCE:-official}"
+LOCAL_IMAGE_ROOT="$VM_DIR/e2e-vm-image"
 DISK="$VM_DIR/e2e-vm.qcow2"
 DISK_SOURCE="$VM_DIR/e2e-vm.qcow2.source"
 PAYLOAD="$VM_DIR/e2e-payload.ext4"
@@ -25,16 +28,20 @@ usage() {
 Usage: scripts/e2e-vm.sh COMMAND
 
 Commands:
-  image   Build the disposable Guix qcow2 image
+  image   Ensure the base Guix qcow2 image is available
+  image-local  Build the local service-baked Guix qcow2 image
   payload Build the binary payload disk
   boot    Boot a writable copy of the image under QEMU
-  run     Build the image, then boot it
+  run     Ensure the image, then boot it
   clean   Remove generated VM state under target/guix-p2p-vm
 
-This is the strict real-Guix proof path and can download linux-libre while
-building the image. For a fast dashboard demo, run scripts/e2e-fast-demo.sh.
+This is the strict real-Guix proof path. By default it fetches the official
+Guix VM image and attaches a small payload disk with the guix-p2p binaries.
+For a fast dashboard demo, run scripts/e2e-fast-demo.sh.
 
 Environment:
+  GUIX_P2P_E2E_BASE_IMAGE_URL  Guix qcow2 URL
+  GUIX_P2P_E2E_IMAGE_SOURCE    official or local, default official
   GUIX_P2P_E2E_VM_SIZE    Image size, default 20G
   GUIX_P2P_E2E_VM_MEMORY  QEMU memory in MB, default 4096
   GUIX_P2P_E2E_VM_CPUS    QEMU CPU count, default 2
@@ -45,15 +52,17 @@ EOF
 
 need_runtime_tools() {
     if command -v qemu-system-x86_64 >/dev/null 2>&1 &&
+        command -v qemu-img >/dev/null 2>&1 &&
         command -v mkfs.ext4 >/dev/null 2>&1 &&
-        command -v patchelf >/dev/null 2>&1; then
+        command -v patchelf >/dev/null 2>&1 &&
+        { command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; }; then
         return 0
     fi
     if [ "${GUIX_P2P_E2E_VM_TOOLS_READY:-0}" = 1 ]; then
-        echo "qemu-system-x86_64, mkfs.ext4, and patchelf are required on PATH" >&2
+        echo "qemu-system-x86_64, qemu-img, mkfs.ext4, patchelf, and curl or wget are required on PATH" >&2
         exit 1
     fi
-    GUIX_P2P_E2E_VM_TOOLS_READY=1 exec guix shell qemu e2fsprogs patchelf -- "$0" "$@"
+    GUIX_P2P_E2E_VM_TOOLS_READY=1 exec guix shell qemu e2fsprogs patchelf curl -- "$0" "$@"
 }
 
 need_payload_tools() {
@@ -106,6 +115,34 @@ build_binaries() {
             --set-rpath "/mnt/guix-p2p-bin/lib" \
             "$binary"
     done
+
+    cat >"$PAYLOAD_ROOT/run-e2e-service.sh" <<'EOF'
+#!/run/current-system/profile/bin/sh
+set -eu
+
+PAYLOAD=/mnt/guix-p2p-bin
+
+mkdir -p "$PAYLOAD"
+if ! mountpoint -q "$PAYLOAD"; then
+    mount -o ro LABEL=guix-p2p-bin "$PAYLOAD"
+fi
+
+mount -o remount,rw /gnu/store 2>/dev/null || true
+
+export LD_LIBRARY_PATH="$PAYLOAD/lib"
+export GUIX_P2P_E2E_BASE=/tmp/guix-p2p-e2e
+export GUIX_P2P_E2E_NO_GUIX_SHELL=1
+export GUIX_P2P_E2E_REMOVE_SEED_AFTER_NODE_A=1
+
+exec "$PAYLOAD/bin/guix-p2p-e2e" container-smoke \
+    --package "${GUIX_P2P_E2E_PACKAGE:-hello}" \
+    --transport "${GUIX_P2P_E2E_TRANSPORT:-tcp}" \
+    --guix-p2p-bin "$PAYLOAD/bin/guix-p2p" \
+    --dashboard-bind 0.0.0.0 \
+    --hold \
+    --keep-temp
+EOF
+    chmod 755 "$PAYLOAD_ROOT/run-e2e-service.sh"
 }
 
 build_payload() {
@@ -116,12 +153,31 @@ build_payload() {
     chmod 600 "$PAYLOAD"
 }
 
-build_image_once() {
-    rm -f "$IMAGE_ROOT"
+fetch_official_image() {
+    mkdir -p "$VM_DIR"
+    if [ -s "$OFFICIAL_IMAGE" ]; then
+        return 0
+    fi
+
+    echo "fetching Guix VM image: $OFFICIAL_IMAGE_URL" >&2
+    if command -v curl >/dev/null 2>&1; then
+        curl -fL -C - -o "$OFFICIAL_IMAGE.tmp" "$OFFICIAL_IMAGE_URL"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -c -O "$OFFICIAL_IMAGE.tmp" "$OFFICIAL_IMAGE_URL"
+    else
+        echo "curl or wget is required to fetch $OFFICIAL_IMAGE_URL" >&2
+        exit 1
+    fi
+    mv "$OFFICIAL_IMAGE.tmp" "$OFFICIAL_IMAGE"
+    chmod 444 "$OFFICIAL_IMAGE"
+}
+
+build_local_image_once() {
+    rm -f "$LOCAL_IMAGE_ROOT"
     guix system image \
         -t qcow2 \
         --image-size="$IMAGE_SIZE" \
-        -r "$IMAGE_ROOT" \
+        -r "$LOCAL_IMAGE_ROOT" \
         "$PROJECT_DIR/guix/e2e-vm.scm"
 }
 
@@ -129,13 +185,13 @@ extract_invalid_store_path() {
     sed -n 's|.*\(/gnu/store/[^'"'"'` ]*\).*is not valid.*|\1|p' "$1" | tail -n 1
 }
 
-build_image() {
+build_local_image() {
     mkdir -p "$VM_DIR"
 
     attempt=1
     while [ "$attempt" -le "$IMAGE_REPAIR_ATTEMPTS" ]; do
         log="$VM_DIR/image-build-$attempt.log"
-        if build_image_once >"$log" 2>&1; then
+        if build_local_image_once >"$log" 2>&1; then
             cat "$log"
             rm -f "$log"
             return 0
@@ -157,12 +213,43 @@ build_image() {
     return 1
 }
 
-prepare_disk() {
-    if [ ! -e "$IMAGE_ROOT" ]; then
-        build_image
-    fi
+ensure_image() {
+    case "$IMAGE_SOURCE" in
+        official)
+            fetch_official_image
+            ;;
+        local)
+            build_local_image
+            ;;
+        *)
+            echo "unknown GUIX_P2P_E2E_IMAGE_SOURCE: $IMAGE_SOURCE" >&2
+            echo "expected official or local" >&2
+            exit 2
+            ;;
+    esac
+}
 
-    image_source="$(readlink -f "$IMAGE_ROOT")"
+image_source_path() {
+    case "$IMAGE_SOURCE" in
+        official)
+            fetch_official_image
+            readlink -f "$OFFICIAL_IMAGE"
+            ;;
+        local)
+            if [ ! -e "$LOCAL_IMAGE_ROOT" ]; then
+                build_local_image
+            fi
+            readlink -f "$LOCAL_IMAGE_ROOT"
+            ;;
+        *)
+            echo "unknown GUIX_P2P_E2E_IMAGE_SOURCE: $IMAGE_SOURCE" >&2
+            exit 2
+            ;;
+    esac
+}
+
+prepare_disk() {
+    image_source="$(image_source_path)"
     disk_source=""
     if [ -e "$DISK_SOURCE" ]; then
         disk_source="$(cat "$DISK_SOURCE")"
@@ -172,7 +259,8 @@ prepare_disk() {
         if [ -e "$DISK" ]; then
             echo "refreshing writable VM disk from updated image" >&2
         fi
-        cp "$image_source" "$DISK.tmp"
+        rm -f "$DISK.tmp"
+        qemu-img create -f qcow2 -F qcow2 -b "$image_source" "$DISK.tmp" >/dev/null
         mv "$DISK.tmp" "$DISK"
         chmod 600 "$DISK"
         printf '%s\n' "$image_source" >"$DISK_SOURCE"
@@ -194,6 +282,7 @@ boot_vm() {
     echo "dashboard ports forwarded:"
     echo "  node A: http://127.0.0.1:3031"
     echo "  node B: http://127.0.0.1:3032"
+    echo "payload runner inside guest: /mnt/guix-p2p-bin/run-e2e-service.sh"
     echo "VM log inside guest: /var/log/guix-p2p-e2e.log"
 
     exec qemu-system-x86_64 \
@@ -214,7 +303,12 @@ clean_vm() {
 
 case "${1:-}" in
     image)
-        build_image
+        need_runtime_tools image
+        ensure_image
+        ;;
+    image-local)
+        IMAGE_SOURCE=local
+        build_local_image
         ;;
     payload)
         need_payload_tools payload
@@ -225,7 +319,7 @@ case "${1:-}" in
         ;;
     run)
         need_runtime_tools run
-        build_image
+        ensure_image
         boot_vm
         ;;
     clean)

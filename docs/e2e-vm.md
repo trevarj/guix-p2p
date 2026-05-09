@@ -4,8 +4,8 @@ Use this when the host exposes `/gnu/store` read-only. The real smoke proof
 needs a raw `guix-daemon` to import substituted nars, so the test runs in a
 throwaway Guix System qcow2 image with its own writable store.
 
-This is the slow strict-proof path. The first image build can download
-`linux-libre`. For a quick dashboard demo, use:
+By default this path downloads the official Guix System VM image if it is not
+already cached under `target/guix-p2p-vm/`. For a quick dashboard demo, use:
 
 ```sh
 scripts/e2e-fast-demo.sh
@@ -17,9 +17,9 @@ scripts/e2e-fast-demo.sh
 scripts/e2e-vm.sh run
 ```
 
-This builds `guix/e2e-vm.scm`, copies the image to
-`target/guix-p2p-vm/e2e-vm.qcow2`, and boots it headlessly with QEMU on the
-serial console.
+This fetches the official Guix qcow2 image if needed, creates a small writable
+qcow2 overlay at `target/guix-p2p-vm/e2e-vm.qcow2`, builds the binary payload
+disk, and boots headlessly with QEMU on the serial console.
 
 The writable qcow2 is disposable. If the Guix image symlink changes, the
 script refreshes the writable disk before booting so stale GRUB or kernel
@@ -33,14 +33,14 @@ The payload step patches the binaries' ELF interpreter and rpath to use
 `/mnt/guix-p2p-bin/lib`, so the guest does not need the host's Rust toolchain
 or library store paths.
 
-Use `scripts/e2e-vm.sh image` to build the reusable base image. Use
+Use `scripts/e2e-vm.sh image` to fetch the reusable official base image. Use
 `scripts/e2e-vm.sh boot` to rebuild the binary payload disk and boot an
-existing image, or `scripts/e2e-vm.sh run` to rebuild both.
+existing image, or `scripts/e2e-vm.sh run` to ensure both are present and boot.
 
-During image creation, Guix may report invalid `/gnu/store/...` references if
-the host store has dangling closure items. The script treats those as repairable:
-it restores the reported path with `guix build` and retries the image build up
-to `GUIX_P2P_E2E_IMAGE_REPAIR_ATTEMPTS` times.
+The local service-baked image builder is still available with
+`GUIX_P2P_E2E_IMAGE_SOURCE=local scripts/e2e-vm.sh image-local`, but it can
+pull through a large Guix bootstrap closure. The official image path avoids
+that local image build.
 
 Dashboard ports are forwarded to the host:
 
@@ -64,6 +64,12 @@ CARGO_TARGET_DIR=/tmp/guix-p2p-target \
     --hold \
     --keep-temp
 ```
+
+The payload also includes `/mnt/guix-p2p-bin/run-e2e-service.sh`, which mounts
+the payload if needed and starts the smoke harness with the transferred
+binaries. The official Guix image does not contain the project Shepherd service
+ahead of time, so the next automation step is to trigger this runner inside the
+guest after boot, preferably through SSH on the forwarded port `2222`.
 
 Inside this disposable VM, `GUIX_P2P_E2E_NO_GUIX_SHELL=1` makes the harness
 run the peer and daemon processes directly instead of nesting another `guix
@@ -114,6 +120,7 @@ Harness state and per-process logs:
 
 ```sh
 scripts/e2e-vm.sh image
+scripts/e2e-vm.sh image-local
 scripts/e2e-vm.sh payload
 scripts/e2e-vm.sh boot
 scripts/e2e-vm.sh run
@@ -122,6 +129,8 @@ scripts/e2e-vm.sh clean
 
 Environment overrides:
 
+- `GUIX_P2P_E2E_BASE_IMAGE_URL`: Guix qcow2 URL.
+- `GUIX_P2P_E2E_IMAGE_SOURCE`: `official` or `local`, default `official`.
 - `GUIX_P2P_E2E_VM_SIZE`: image size, default `20G`.
 - `GUIX_P2P_E2E_VM_MEMORY`: QEMU memory in MB, default `4096`.
 - `GUIX_P2P_E2E_VM_CPUS`: QEMU CPU count, default `2`.
