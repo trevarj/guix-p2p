@@ -5,7 +5,7 @@ set -eu
 
 PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 VM_DIR="${GUIX_P2P_E2E_VM_DIR:-$PROJECT_DIR/target/guix-p2p-vm}"
-OFFICIAL_IMAGE_URL="${GUIX_P2P_E2E_BASE_IMAGE_URL:-https://ftp.gnu.org/gnu/guix/guix-system-vm-image-1.4.0.x86_64-linux.qcow2}"
+OFFICIAL_IMAGE_URL="${GUIX_P2P_E2E_BASE_IMAGE_URL:-https://ftp.gnu.org/gnu/guix/guix-system-vm-image-1.5.0.x86_64-linux.qcow2}"
 OFFICIAL_IMAGE="$VM_DIR/$(basename "$OFFICIAL_IMAGE_URL")"
 IMAGE_SOURCE="${GUIX_P2P_E2E_IMAGE_SOURCE:-official}"
 LOCAL_IMAGE_ROOT="$VM_DIR/e2e-vm-image"

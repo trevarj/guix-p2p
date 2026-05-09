@@ -129,7 +129,7 @@ scripts/e2e-vm.sh clean
 
 Environment overrides:
 
-- `GUIX_P2P_E2E_BASE_IMAGE_URL`: Guix qcow2 URL.
+- `GUIX_P2P_E2E_BASE_IMAGE_URL`: Guix qcow2 URL, default Guix 1.5.0 x86_64.
 - `GUIX_P2P_E2E_IMAGE_SOURCE`: `official` or `local`, default `official`.
 - `GUIX_P2P_E2E_VM_SIZE`: image size, default `20G`.
 - `GUIX_P2P_E2E_VM_MEMORY`: QEMU memory in MB, default `4096`.
