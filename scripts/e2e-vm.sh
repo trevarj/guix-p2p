@@ -16,6 +16,7 @@ GUIX_P2P_E2E_BIN="$BINARY_DIR/guix-p2p-e2e"
 LIB_DIR="$PAYLOAD_ROOT/lib"
 PAYLOAD_SIZE_MB="${GUIX_P2P_E2E_PAYLOAD_SIZE_MB:-128}"
 IMAGE_SIZE="${GUIX_P2P_E2E_VM_SIZE:-20G}"
+IMAGE_REPAIR_ATTEMPTS="${GUIX_P2P_E2E_IMAGE_REPAIR_ATTEMPTS:-20}"
 MEMORY="${GUIX_P2P_E2E_VM_MEMORY:-4096}"
 CPUS="${GUIX_P2P_E2E_VM_CPUS:-2}"
 
@@ -38,6 +39,7 @@ Environment:
   GUIX_P2P_E2E_VM_MEMORY  QEMU memory in MB, default 4096
   GUIX_P2P_E2E_VM_CPUS    QEMU CPU count, default 2
   GUIX_P2P_E2E_PAYLOAD_SIZE_MB  Payload disk size, default 128
+  GUIX_P2P_E2E_IMAGE_REPAIR_ATTEMPTS  Missing store path retries, default 20
 EOF
 }
 
@@ -114,14 +116,45 @@ build_payload() {
     chmod 600 "$PAYLOAD"
 }
 
-build_image() {
-    mkdir -p "$VM_DIR"
+build_image_once() {
     rm -f "$IMAGE_ROOT"
     guix system image \
         -t qcow2 \
         --image-size="$IMAGE_SIZE" \
         -r "$IMAGE_ROOT" \
         "$PROJECT_DIR/guix/e2e-vm.scm"
+}
+
+extract_invalid_store_path() {
+    sed -n 's|.*\(/gnu/store/[^'"'"'` ]*\).*is not valid.*|\1|p' "$1" | tail -n 1
+}
+
+build_image() {
+    mkdir -p "$VM_DIR"
+
+    attempt=1
+    while [ "$attempt" -le "$IMAGE_REPAIR_ATTEMPTS" ]; do
+        log="$VM_DIR/image-build-$attempt.log"
+        if build_image_once >"$log" 2>&1; then
+            cat "$log"
+            rm -f "$log"
+            return 0
+        fi
+
+        cat "$log"
+        missing="$(extract_invalid_store_path "$log")"
+        if [ -z "$missing" ]; then
+            echo "image build failed without a repairable missing store path; log: $log" >&2
+            return 1
+        fi
+
+        echo "restoring missing store path before retry: $missing" >&2
+        guix build "$missing"
+        attempt=$((attempt + 1))
+    done
+
+    echo "image build still failed after $IMAGE_REPAIR_ATTEMPTS missing-path repair attempts" >&2
+    return 1
 }
 
 prepare_disk() {

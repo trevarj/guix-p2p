@@ -37,6 +37,11 @@ Use `scripts/e2e-vm.sh image` to build the reusable base image. Use
 `scripts/e2e-vm.sh boot` to rebuild the binary payload disk and boot an
 existing image, or `scripts/e2e-vm.sh run` to rebuild both.
 
+During image creation, Guix may report invalid `/gnu/store/...` references if
+the host store has dangling closure items. The script treats those as repairable:
+it restores the reported path with `guix build` and retries the image build up
+to `GUIX_P2P_E2E_IMAGE_REPAIR_ATTEMPTS` times.
+
 Dashboard ports are forwarded to the host:
 
 - Node A: `http://127.0.0.1:3031`
@@ -121,6 +126,7 @@ Environment overrides:
 - `GUIX_P2P_E2E_VM_MEMORY`: QEMU memory in MB, default `4096`.
 - `GUIX_P2P_E2E_VM_CPUS`: QEMU CPU count, default `2`.
 - `GUIX_P2P_E2E_PAYLOAD_SIZE_MB`: binary payload disk size, default `128`.
+- `GUIX_P2P_E2E_IMAGE_REPAIR_ATTEMPTS`: missing store path retries, default `20`.
 
 The runner uses KVM when `/dev/kvm` is available and falls back to slower TCG
 otherwise.
