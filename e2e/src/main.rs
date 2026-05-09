@@ -4,7 +4,7 @@ use anyhow::Context;
 use clap::{Parser, ValueEnum};
 use futures::StreamExt;
 use guix_p2p::{
-    behaviour::{GuixP2PBehaviour, GuixP2PEvent, create_swarm_behaviour},
+    behaviour::{GuixP2PBehaviour, GuixP2PEvent, create_swarm_behaviour_without_mdns},
     channel::SwarmCommand,
     connection::{ConnectionConfig, ConnectionManager},
     dashboard::{self, BuildRegistry, DashboardEvent, ObservedBuild},
@@ -72,6 +72,9 @@ enum Commands {
         /// Guix package to build through the isolated daemon
         #[arg(long, default_value = "hello")]
         package: String,
+        /// Pre-resolved /gnu/store path to seed instead of resolving the package first
+        #[arg(long)]
+        store_path: Option<String>,
         /// P2P transport for the two local nodes
         #[arg(long, value_enum, default_value_t = HarnessTransport::Tcp)]
         transport: HarnessTransport,
@@ -202,6 +205,7 @@ async fn main() -> anyhow::Result<()> {
         },
         Commands::ContainerSmoke {
             package,
+            store_path,
             transport,
             base,
             node_a_port,
@@ -215,6 +219,7 @@ async fn main() -> anyhow::Result<()> {
         } => {
             run_container_smoke(ContainerSmokeOptions {
                 package,
+                store_path,
                 transport,
                 base,
                 node_a_port,
@@ -692,8 +697,7 @@ fn build_swarm(kp: &libp2p::identity::Keypair) -> anyhow::Result<libp2p::Swarm<G
         .with_tokio()
         .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
         .with_quic_config(|_| cfg)
-        .with_dns()?
-        .with_behaviour(|kp| Ok(create_swarm_behaviour(kp)))?
+        .with_behaviour(|kp| Ok(create_swarm_behaviour_without_mdns(kp)))?
         .build())
 }
 
@@ -946,6 +950,7 @@ async fn run_seed(
 
 struct ContainerSmokeOptions {
     package: String,
+    store_path: Option<String>,
     transport: HarnessTransport,
     base: PathBuf,
     node_a_port: u16,
@@ -973,6 +978,7 @@ struct HarnessTools {
     real_guix: PathBuf,
     raw_guix_daemon: PathBuf,
     guix_p2p: PathBuf,
+    shell: PathBuf,
 }
 
 struct P2pBuildSpec<'a> {
@@ -1076,8 +1082,18 @@ async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> 
     std::fs::create_dir_all(base.join("logs"))?;
     ensure_container_guix_store_writable(&tools, &base)?;
 
-    tracing::info!("resolving Guix package {}", opts.package);
-    let store_path = resolve_package(&tools.guix, &opts.package)?;
+    let store_path = match opts.store_path {
+        Some(path) => {
+            if !std::path::Path::new(&path).exists() {
+                anyhow::bail!("--store-path does not exist: {path}");
+            }
+            path
+        },
+        None => {
+            tracing::info!("resolving Guix package {}", opts.package);
+            resolve_package(&tools.guix, &opts.package)?
+        },
+    };
     let nar_hash = compute_nar_hash(&tools.guix, &store_path)?;
 
     tracing::info!("seed store path: {}", store_path);
@@ -1278,13 +1294,18 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
 }
 
 fn prepare_harness_tools(guix_p2p_bin: Option<&std::path::Path>) -> anyhow::Result<HarnessTools> {
-    let cargo = find_on_path("cargo").context("missing required command: cargo")?;
     let guix = find_on_path("guix").context("missing required command: guix")?;
+    let shell = find_on_path("sh")
+        .or_else(|| {
+            canonicalize_existing(std::path::Path::new("/run/current-system/profile/bin/sh")).ok()
+        })
+        .context("missing required command: sh")?;
     let real_guix = canonicalize_existing(&guix)?;
     let raw_guix_daemon = resolve_raw_guix_daemon()?;
     let guix_p2p = match guix_p2p_bin {
         Some(path) => canonicalize_existing(path)?,
         None => {
+            let cargo = find_on_path("cargo").context("missing required command: cargo")?;
             build_release_binary(&cargo)?;
             project_root().join("target/release/guix-p2p")
         },
@@ -1292,7 +1313,7 @@ fn prepare_harness_tools(guix_p2p_bin: Option<&std::path::Path>) -> anyhow::Resu
     if !guix_p2p.is_file() {
         anyhow::bail!("guix-p2p binary not found at {}", guix_p2p.display());
     }
-    Ok(HarnessTools { guix, real_guix, raw_guix_daemon, guix_p2p })
+    Ok(HarnessTools { guix, real_guix, raw_guix_daemon, guix_p2p, shell })
 }
 
 fn build_release_binary(cargo: &std::path::Path) -> anyhow::Result<()> {
@@ -1302,16 +1323,29 @@ fn build_release_binary(cargo: &std::path::Path) -> anyhow::Result<()> {
 }
 
 fn guix_container_command(tools: &HarnessTools, base: &std::path::Path) -> std::process::Command {
+    if std::env::var_os("GUIX_P2P_E2E_NO_GUIX_SHELL").is_some() {
+        if let Some(env) = find_on_path("env") {
+            return std::process::Command::new(env);
+        }
+        let profile_env = std::path::Path::new("/run/current-system/profile/bin/env");
+        if profile_env.exists() {
+            return std::process::Command::new(profile_env);
+        }
+        return std::process::Command::new("env");
+    }
+
     let mut command = std::process::Command::new(&tools.guix);
     command
         .arg("shell")
         .arg("-C")
         .arg("-N")
         .arg("--writable-root")
-        .arg(format!("--share={}", project_root().display()))
-        .arg(format!("--share={}", base.display()))
-        .arg("--share=/gnu/store")
-        .arg("--symlink=/bin/sh=bin/sh");
+        .arg(format!("--share={}", base.display()));
+
+    let root = project_root();
+    if root.exists() {
+        command.arg(format!("--share={}", root.display()));
+    }
 
     if std::path::Path::new("/etc/guix").exists() {
         command.arg("--expose=/etc/guix");
@@ -1320,7 +1354,7 @@ fn guix_container_command(tools: &HarnessTools, base: &std::path::Path) -> std::
         command.arg("--expose=/var/guix");
     }
 
-    command.arg("bash-minimal").arg("coreutils").arg("--");
+    command.arg("--");
     command
 }
 
@@ -1328,6 +1362,17 @@ fn ensure_container_guix_store_writable(
     tools: &HarnessTools,
     base: &std::path::Path,
 ) -> anyhow::Result<()> {
+    if std::env::var_os("GUIX_P2P_E2E_NO_GUIX_SHELL").is_some() {
+        let probe = std::path::Path::new("/gnu/store/.guix-p2p-e2e-write-test");
+        std::fs::write(probe, b"probe").map_err(|e| {
+            anyhow::anyhow!(
+                "Guix VM E2E requires /gnu/store to be writable. The direct preflight failed: {e}"
+            )
+        })?;
+        std::fs::remove_file(probe).ok();
+        return Ok(());
+    }
+
     let mut command = guix_container_command(tools, base);
     command.args([
         "/bin/sh",
@@ -1391,7 +1436,13 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         seed_paths: &[],
     })?;
 
-    write_wrapper(&wrapper_path, &node_b_socket, &spec.tools.guix_p2p, &spec.tools.real_guix)?;
+    write_wrapper(
+        &wrapper_path,
+        &node_b_socket,
+        &spec.tools.guix_p2p,
+        &spec.tools.real_guix,
+        &spec.tools.shell,
+    )?;
 
     let mut processes = ProcessSet::default();
 
@@ -1417,13 +1468,16 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         .env("HOME", &node_a_dir)
         .env("XDG_CONFIG_HOME", &node_a_config_home)
         .env("RUST_LOG", "guix_p2p=trace,info");
-    processes.spawn_logged("node-a", &mut node_a_cmd, &logs_dir.join("node-a.log"))?;
-    wait_dashboard(spec.node_a_dashboard_port, "node A")?;
+    let node_a_log = logs_dir.join("node-a.log");
+    processes.spawn_logged("node-a", &mut node_a_cmd, &node_a_log)?;
+    wait_dashboard(spec.node_a_dashboard_port, "node A", Some(&node_a_log))?;
 
     let node_a_status = dashboard_json(spec.node_a_dashboard_port, "/api/status")?;
     let node_a_peer = json_string(&node_a_status, "peer_id")
         .context("node A dashboard did not expose peer_id")?;
     let bootstrap = format!("{node_a_addr}/p2p/{node_a_peer}");
+
+    maybe_remove_seed_store_path(spec.store_path)?;
 
     write_node_config(NodeConfigSpec {
         xdg_config_home: &node_b_config_home,
@@ -1460,8 +1514,9 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         .env("HOME", &node_b_dir)
         .env("XDG_CONFIG_HOME", &node_b_config_home)
         .env("RUST_LOG", "guix_p2p=trace,info");
-    processes.spawn_logged("node-b", &mut node_b_cmd, &logs_dir.join("node-b.log"))?;
-    wait_dashboard(spec.node_b_dashboard_port, "node B")?;
+    let node_b_log = logs_dir.join("node-b.log");
+    processes.spawn_logged("node-b", &mut node_b_cmd, &node_b_log)?;
+    wait_dashboard(spec.node_b_dashboard_port, "node B", Some(&node_b_log))?;
     wait_unix_socket(&node_b_socket, "node B relay socket")?;
 
     let guix_state = prepare_guix_daemon_state(&node_b_dir)?;
@@ -1550,6 +1605,19 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
     drop(processes);
 
     Ok(P2pBuildOutcome { elapsed_ms, p2p_evidence, nar_size })
+}
+
+fn maybe_remove_seed_store_path(store_path: &str) -> anyhow::Result<()> {
+    if std::env::var_os("GUIX_P2P_E2E_REMOVE_SEED_AFTER_NODE_A").is_none() {
+        return Ok(());
+    }
+    let path = std::path::Path::new(store_path);
+    if !path.starts_with("/gnu/store") || !path.exists() {
+        return Ok(());
+    }
+    tracing::info!("removing seeded store path before builder run: {}", store_path);
+    if path.is_dir() { std::fs::remove_dir_all(path) } else { std::fs::remove_file(path) }
+        .with_context(|| format!("failed to remove seeded store path {store_path}"))
 }
 
 fn run_http_benchmark(
@@ -1657,9 +1725,10 @@ fn write_wrapper(
     socket: &std::path::Path,
     guix_p2p: &std::path::Path,
     real_guix: &std::path::Path,
+    shell: &std::path::Path,
 ) -> anyhow::Result<()> {
     let content = format!(
-        r#"#!/bin/sh
+        r#"#!{}
 SOCKET={}
 GUIX_P2P={}
 REAL_GUIX={}
@@ -1684,6 +1753,7 @@ case "${{1-}}" in
         ;;
 esac
 "#,
+        shell.display(),
         shell_quote(&socket.display().to_string()),
         shell_quote(&guix_p2p.display().to_string()),
         shell_quote(&real_guix.display().to_string())
@@ -1729,8 +1799,12 @@ fn run_guix_build_logged(
     Ok(elapsed_ms)
 }
 
-fn wait_dashboard(port: u16, label: &str) -> anyhow::Result<()> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+fn wait_dashboard(
+    port: u16,
+    label: &str,
+    log_path: Option<&std::path::Path>,
+) -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
     loop {
         match dashboard_json(port, "/api/status") {
             Ok(_) => return Ok(()),
@@ -1738,7 +1812,14 @@ fn wait_dashboard(port: u16, label: &str) -> anyhow::Result<()> {
                 tracing::debug!("waiting for {label} dashboard: {e}");
                 std::thread::sleep(std::time::Duration::from_millis(500));
             },
-            Err(e) => anyhow::bail!("timed out waiting for {label} dashboard on {port}: {e}"),
+            Err(e) => {
+                let tail = log_path.map(|path| read_tail(path, 80)).unwrap_or_default();
+                anyhow::bail!(
+                    "timed out waiting for {label} dashboard on {port}: {e}\n{} log tail:\n{}",
+                    label,
+                    tail
+                );
+            },
         }
     }
 }
@@ -1796,7 +1877,12 @@ fn wait_for_catalog_entry(
             return Ok(catalog);
         }
         if std::time::Instant::now() >= deadline {
-            anyhow::bail!("node B catalog did not include {} or nar hash {}", store_path, nar_hash);
+            anyhow::bail!(
+                "node B catalog did not include {} or nar hash {}; last catalog: {}",
+                store_path,
+                nar_hash,
+                catalog
+            );
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }

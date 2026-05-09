@@ -463,7 +463,6 @@ fn build_swarm(
         .with_tokio()
         .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
         .with_quic_config(|_| quic_config)
-        .with_dns()?
         .with_behaviour(|keypair| Ok(behaviour::create_swarm_behaviour(keypair)))?
         .build();
 

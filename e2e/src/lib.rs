@@ -7,7 +7,7 @@ use std::{
 use anyhow::Context;
 use futures::StreamExt;
 use guix_p2p::{
-    behaviour::{GuixP2PBehaviour, GuixP2PEvent, create_swarm_behaviour},
+    behaviour::{GuixP2PBehaviour, GuixP2PEvent, create_swarm_behaviour_without_mdns},
     channel::SwarmCommand,
     swarm::{
         block::compute_block_hashes,
@@ -174,8 +174,7 @@ fn build_swarm(kp: &libp2p::identity::Keypair) -> anyhow::Result<libp2p::Swarm<G
         .with_tokio()
         .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
         .with_quic_config(|_| cfg)
-        .with_dns()?
-        .with_behaviour(|kp| Ok(create_swarm_behaviour(kp)))?
+        .with_behaviour(|kp| Ok(create_swarm_behaviour_without_mdns(kp)))?
         .build())
 }
 

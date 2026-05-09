@@ -41,8 +41,20 @@ mod daemon_protocol {
         let cmd = parse_line("info /gnu/store/abc-foo");
         let cmd = cmd.unwrap();
         match cmd {
-            DaemonCommand::Info(path) => {
-                assert_eq!(path, "/gnu/store/abc-foo");
+            DaemonCommand::Info(paths) => {
+                assert_eq!(paths, vec!["/gnu/store/abc-foo"]);
+            },
+            _ => panic!("expected Info"),
+        }
+    }
+
+    #[test]
+    fn test_info_multiple_paths() {
+        let cmd = parse_line("info /gnu/store/abc-foo /gnu/store/def-bar");
+        let cmd = cmd.unwrap();
+        match cmd {
+            DaemonCommand::Info(paths) => {
+                assert_eq!(paths, vec!["/gnu/store/abc-foo", "/gnu/store/def-bar"]);
             },
             _ => panic!("expected Info"),
         }

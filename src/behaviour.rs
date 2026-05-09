@@ -49,7 +49,26 @@ impl From<mdns::Event> for GuixP2PEvent {
     }
 }
 
+/// Create the default production swarm behaviour.
 pub fn create_swarm_behaviour(keypair: &libp2p::identity::Keypair) -> GuixP2PBehaviour {
+    create_swarm_behaviour_with_mdns(keypair, true)
+}
+
+/// Create a swarm behaviour with mDNS disabled.
+///
+/// Local E2E environments use explicit loopback bootstrap addresses, and some
+/// containers deny multicast socket sends. Disabling mDNS there avoids noisy
+/// permission errors without changing production defaults.
+pub fn create_swarm_behaviour_without_mdns(
+    keypair: &libp2p::identity::Keypair,
+) -> GuixP2PBehaviour {
+    create_swarm_behaviour_with_mdns(keypair, false)
+}
+
+fn create_swarm_behaviour_with_mdns(
+    keypair: &libp2p::identity::Keypair,
+    enable_mdns: bool,
+) -> GuixP2PBehaviour {
     let local_peer_id = libp2p::PeerId::from(keypair.public());
 
     let kad_config = KadConfig::default();
@@ -63,13 +82,17 @@ pub fn create_swarm_behaviour(keypair: &libp2p::identity::Keypair) -> GuixP2PBeh
         request_response::Config::default(),
     );
 
-    let mdns = match mdns::tokio::Behaviour::new(mdns::Config::default(), local_peer_id) {
-        Ok(behaviour) => Some(behaviour),
-        Err(e) => {
-            // mDNS needs multicast socket permissions; containers often deny it.
-            tracing::warn!("mDNS disabled: {}", e);
-            None
-        },
+    let mdns = if enable_mdns {
+        match mdns::tokio::Behaviour::new(mdns::Config::default(), local_peer_id) {
+            Ok(behaviour) => Some(behaviour),
+            Err(e) => {
+                // mDNS needs multicast socket permissions; containers often deny it.
+                tracing::warn!("mDNS disabled: {}", e);
+                None
+            },
+        }
+    } else {
+        None
     }
     .into();
 

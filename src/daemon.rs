@@ -28,7 +28,7 @@ use crate::{
 
 pub enum DaemonCommand {
     Have(Vec<String>),
-    Info(String),
+    Info(Vec<String>),
     Substitute { path: String, dest: String },
 }
 
@@ -46,7 +46,8 @@ pub fn parse_command_line(line: &str) -> io::Result<DaemonCommand> {
         let paths = rest.split_whitespace().map(str::to_string).collect();
         Ok(DaemonCommand::Have(paths))
     } else if let Some(rest) = line.strip_prefix("info ") {
-        Ok(DaemonCommand::Info(rest.to_string()))
+        let paths = rest.split_whitespace().map(str::to_string).collect();
+        Ok(DaemonCommand::Info(paths))
     } else if let Some(rest) = line.strip_prefix("substitute ") {
         let mut parts = rest.splitn(2, ' ');
         let path = parts.next().unwrap_or("").to_string();
@@ -282,8 +283,8 @@ pub async fn run_query_mode(
                 )
                 .await;
             },
-            DaemonCommand::Info(path) => {
-                handle_info(config, narinfo_cache, &mut reply, &path, client, None).await;
+            DaemonCommand::Info(paths) => {
+                handle_info(config, narinfo_cache, &mut reply, &paths, client, None).await;
             },
             DaemonCommand::Substitute { .. } => {},
         }
@@ -409,48 +410,47 @@ async fn handle_info(
     config: &Config,
     cache: &Mutex<NarinfoCache>,
     reply: &mut ReplyWriter,
-    path: &str,
+    paths: &[String],
     client: &reqwest::Client,
     event_tx: Option<&dashboard::EventBus>,
 ) {
-    let hash_part = match extract_hash_part(path) {
-        Ok(h) => h,
-        Err(e) => {
-            tracing::warn!("Cannot extract hash from {}: {}", path, e);
-            let _ = reply.write_line(path);
-            let _ = reply.write_end();
-            return;
-        },
-    };
+    for path in paths {
+        let hash_part = match extract_hash_part(path) {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::warn!("Cannot extract hash from {}: {}", path, e);
+                continue;
+            },
+        };
 
-    match crate::http_client::fetch_narinfo(config, &hash_part, cache, client).await {
-        Ok(info) => {
-            if let Some(tx) = event_tx {
-                let _ = tx.send(DashboardEvent::CatalogEntry {
-                    hash_part: hash_part.clone(),
-                    store_path: Some(info.store_path.clone()),
-                    nar_size: Some(info.nar_size),
-                    nar_hash: Some(info.nar_hash.clone()),
-                    p2p_available: false,
-                });
-            }
-            let _ = reply.write_line(&info.store_path);
-            let _ = reply.write_line(info.deriver.as_deref().unwrap_or(""));
-            let _ = reply.write_line(&info.references.len().to_string());
-            for r in &info.references {
-                let _ = reply.write_line(r);
-            }
-            let download_size = info.urls.first().map(|u| u.file_size).unwrap_or(0);
-            let _ = reply.write_line(&download_size.to_string());
-            let _ = reply.write_line(&info.nar_size.to_string());
-            let _ = reply.write_end();
-        },
-        Err(e) => {
-            tracing::debug!("No narinfo for {}: {}", hash_part, e);
-            let _ = reply.write_line(path);
-            let _ = reply.write_end();
-        },
+        match crate::http_client::fetch_narinfo(config, &hash_part, cache, client).await {
+            Ok(info) => {
+                if let Some(tx) = event_tx {
+                    let _ = tx.send(DashboardEvent::CatalogEntry {
+                        hash_part: hash_part.clone(),
+                        store_path: Some(info.store_path.clone()),
+                        nar_size: Some(info.nar_size),
+                        nar_hash: Some(info.nar_hash.clone()),
+                        p2p_available: false,
+                    });
+                }
+                let _ = reply.write_line(&info.store_path);
+                let _ = reply.write_line(info.deriver.as_deref().unwrap_or(""));
+                let _ = reply.write_line(&info.references.len().to_string());
+                for r in &info.references {
+                    let _ = reply.write_line(r);
+                }
+                let download_size = info.urls.first().map(|u| u.file_size).unwrap_or(0);
+                let _ = reply.write_line(&download_size.to_string());
+                let _ = reply.write_line(&info.nar_size.to_string());
+            },
+            Err(e) => {
+                tracing::debug!("No narinfo for {}: {}", hash_part, e);
+            },
+        }
     }
+
+    let _ = reply.write_end();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -527,7 +527,7 @@ async fn try_swarm_substitute(
         Ok(h) => h,
         Err(e) => {
             tracing::error!("Cannot extract hash from {}: {}", path, e);
-            let _ = reply.write_line(&format!("not-found {}", path));
+            let _ = reply.write_line("not-found");
             return;
         },
     };
@@ -537,7 +537,7 @@ async fn try_swarm_substitute(
             Ok(info) => info,
             Err(e) => {
                 tracing::warn!("Cannot fetch narinfo for {}: {}", hash_part, e);
-                let _ = reply.write_line(&format!("not-found {}", path));
+                let _ = reply.write_line("not-found");
                 return;
             },
         };
@@ -729,7 +729,7 @@ async fn try_swarm_substitute(
             // Write verified nar to dest
             if let Err(e) = tokio::fs::write(&dest_path, &nar_data).await {
                 tracing::error!("Failed to write nar to {}: {}", dest_path.display(), e);
-                let _ = reply.write_line(&format!("not-found {}", path));
+                let _ = reply.write_line("not-found");
                 let _ = event_tx.send(DashboardEvent::DownloadFailed {
                     nar_hash: nar_hash.clone(),
                     store_path: store_path.clone(),
@@ -797,7 +797,7 @@ async fn try_swarm_substitute(
                 reason: reason.to_string(),
             });
 
-            let _ = reply.write_line(&format!("not-found {}", path));
+            let _ = reply.write_line("not-found");
         },
     }
 }
@@ -1341,12 +1341,12 @@ async fn handle_socket_connection(
                         )
                         .await;
                     },
-                    DaemonCommand::Info(path) => {
+                    DaemonCommand::Info(paths) => {
                         handle_info(
                             config,
                             narinfo_cache,
                             &mut reply,
-                            &path,
+                            &paths,
                             client,
                             Some(event_tx),
                         )
@@ -1436,6 +1436,17 @@ mod tests {
                 assert_eq!(dest, "/tmp/dest");
             },
             _ => panic!("expected Substitute"),
+        }
+    }
+
+    #[test]
+    fn test_parse_info_multiple_paths() {
+        let cmd = parse_command_line("info /gnu/store/abc-foo /gnu/store/def-bar").unwrap();
+        match cmd {
+            DaemonCommand::Info(paths) => {
+                assert_eq!(paths, vec!["/gnu/store/abc-foo", "/gnu/store/def-bar"]);
+            },
+            _ => panic!("expected Info"),
         }
     }
 

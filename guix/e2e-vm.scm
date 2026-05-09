@@ -1,71 +1,82 @@
 (use-modules (gnu)
              (gnu bootloader grub)
+             (gnu packages base)
              (gnu packages bash)
              (gnu services)
              (gnu services networking)
              (gnu services shepherd)
-             (gnu system nss))
+             (gnu system nss)
+             (guix gexp))
 
 (define guix-p2p-e2e-runner
   (program-file
    "guix-p2p-e2e-runner"
    #~(begin
        (use-modules (ice-9 popen)
+                    (ice-9 rdelim)
                     (ice-9 textual-ports))
 
+       (define console (open-file "/dev/console" "a"))
+
+       (define (emit text)
+         (display text)
+         (force-output)
+         (display text console)
+         (force-output console))
+
+       (define (emit-line text)
+         (emit text)
+         (emit "\n"))
+
+       (define (copy-output port)
+         (let loop ((line (read-line port)))
+           (unless (eof-object? line)
+             (emit-line line)
+             (loop (read-line port)))))
+
+       (define (open-command args)
+         ;; Route child stderr into stdout so failures are visible on the
+         ;; serial console, not only in Shepherd's service log.
+         (apply open-pipe* OPEN_READ "/run/current-system/profile/bin/sh" "-c"
+                "exec \"$@\" 2>&1"
+                "guix-p2p-e2e-runner"
+                args))
+
        (define (run . args)
-         (let* ((port (apply open-pipe* OPEN_BOTH args))
-                (output (get-string-all port))
+         (emit-line (format #f "running: ~s" args))
+         (let* ((port (open-command args))
+                (_ (copy-output port))
                 (status (close-pipe port)))
-           (display output)
            (unless (zero? status)
-             (format (current-error-port) "command failed: ~s~%" args)
+             (emit-line (format #f "command failed: ~s" args))
              (exit 1))))
 
        (define (try-run . args)
-         (let* ((port (apply open-pipe* OPEN_BOTH args))
-                (output (get-string-all port))
+         (let* ((port (open-command args))
+                (_ (copy-output port))
                 (status (close-pipe port)))
-           (display output)
            (zero? status)))
 
-       (define repo "/mnt/guix-p2p")
        (define target "/tmp/guix-p2p-target")
        (define base "/tmp/guix-p2p-e2e")
+       (define payload "/mnt/guix-p2p-bin")
+       (define payload-device "/dev/disk/by-label/guix-p2p-bin")
        (define profile "/run/current-system/profile/bin/")
 
-       (define (wait-for-9p-tag)
-         (let ((probe
-                (string-append
-                 "for f in /sys/bus/virtio/devices/*/mount_tag; do "
-                 "[ -e \"$f\" ] && [ \"$(cat \"$f\")\" = guix_p2p ] && exit 0; "
-                 "done; exit 1")))
-           (let loop ((remaining 30))
-             (cond
-              ((try-run (string-append profile "sh") "-c" probe) #t)
-              ((zero? remaining)
-               (format (current-error-port)
-                       "timed out waiting for virtio 9p tag guix_p2p~%")
-               (try-run (string-append profile "sh") "-c"
-                        (string-append
-                         "for f in /sys/bus/virtio/devices/*/mount_tag; do "
-                         "[ -e \"$f\" ] && printf '%s: ' \"$f\" && cat \"$f\"; "
-                         "done"))
-               (exit 1))
-              (else
-               (try-run (string-append profile "sleep") "1")
-               (loop (- remaining 1)))))))
+       (run (string-append profile "mkdir") "-p" target payload)
 
-       (run (string-append profile "mkdir") "-p" repo target)
-       (try-run (string-append profile "sh") "-c"
-                "modprobe 9pnet_virtio 2>/dev/null || true")
-       (wait-for-9p-tag)
-       (unless (try-run (string-append profile "mount")
-                        "-t" "9p" "-o" "trans=virtio,cache=loose"
-                        "guix_p2p" repo)
-         (format (current-error-port)
-                 "failed to mount shared checkout tag guix_p2p at ~a~%" repo)
-         (exit 1))
+       (let loop ((remaining 30))
+         (cond
+          ((try-run (string-append profile "test") "-e" payload-device) #t)
+          ((zero? remaining)
+           (emit-line "timed out waiting for guix-p2p payload disk")
+           (try-run (string-append profile "ls") "-l" "/dev/disk/by-label")
+           (exit 1))
+          (else
+           (try-run (string-append profile "sleep") "1")
+           (loop (- remaining 1)))))
+
+       (run (string-append profile "mount") "-o" "ro" payload-device payload)
 
        ;; This VM is a disposable test image. The raw test guix-daemon imports
        ;; substituted nars into /gnu/store, so the harness must be able to write.
@@ -77,11 +88,14 @@
 
        (setenv "CARGO_TARGET_DIR" target)
        (setenv "GUIX_P2P_E2E_BASE" base)
-       (chdir repo)
-       (run (string-append profile "guix") "shell" "-m" "manifest.scm" "--"
-            "cargo" "run" "-p" "guix-p2p-e2e" "--" "container-smoke"
-            "--package" "hello"
+       (setenv "LD_LIBRARY_PATH" (string-append payload "/lib"))
+       (setenv "GUIX_P2P_E2E_NO_GUIX_SHELL" "1")
+       (setenv "GUIX_P2P_E2E_REMOVE_SEED_AFTER_NODE_A" "1")
+       (run (string-append payload "/bin/guix-p2p-e2e") "container-smoke"
+            "--package" #$(raw-derivation-file hello)
+            "--store-path" #$hello
             "--transport" "tcp"
+            "--guix-p2p-bin" (string-append payload "/bin/guix-p2p")
             "--dashboard-bind" "0.0.0.0"
             "--hold"
             "--keep-temp"))))
@@ -94,6 +108,7 @@
    (start #~(make-forkexec-constructor
              (list #$guix-p2p-e2e-runner)
              #:log-file "/var/log/guix-p2p-e2e.log"))
+   (respawn? #f)
    (stop #~(make-kill-destructor))))
 
 (operating-system
@@ -110,9 +125,10 @@
     (serial-unit 0)
     (serial-speed 115200)))
   (kernel-arguments '("console=ttyS0,115200n8"))
-  (initrd-modules
-   (append '("virtio" "virtio_pci" "9p" "9pnet" "9pnet_virtio")
-           %base-initrd-modules))
+  (packages
+   (append
+    (list bash hello)
+    %base-packages))
   (file-systems
    (cons (file-system
            (mount-point "/")
