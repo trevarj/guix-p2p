@@ -157,6 +157,10 @@ Harness state and per-process logs:
 - `GUIX_P2P_E2E_HOLD`: keep dashboards running after success, default `0`.
 - `GUIX_P2P_E2E_LOG_DIR`: shell log directory, default `target/guix-p2p-vm/logs`.
 - `GUIX_P2P_E2E_HEARTBEAT_SECS`: long command heartbeat interval, default `30`.
+- `GUIX_P2P_E2E_HEARTBEAT_TAIL_LINES`: output log lines copied into each
+  heartbeat, default `12`. Set to `0` to disable output snippets.
+- `GUIX_P2P_E2E_HEARTBEAT_PROCESS_SNAPSHOT`: include focused process snapshots
+  in heartbeats, default `1`. Set to `0` to disable.
 
 The runner uses KVM when `/dev/kvm` is available and falls back to slower TCG
 otherwise.
@@ -171,6 +175,10 @@ target/guix-p2p-vm/logs/image-build.log
 target/guix-p2p-vm/logs/payload-build.log
 target/guix-p2p-vm/logs/qemu-serial.log
 ```
+
+Heartbeat lines in `e2e-vm.log` include recent output from the active command's
+log and a focused process snapshot. This is useful when Guix is querying
+substitutes or the image build is quiet for long stretches.
 
 Guest-side logs:
 

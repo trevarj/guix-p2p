@@ -25,6 +25,8 @@ IMAGE_LOG="$LOG_DIR/image-build.log"
 PAYLOAD_LOG="$LOG_DIR/payload-build.log"
 QEMU_LOG="$LOG_DIR/qemu-serial.log"
 HEARTBEAT_SECS="${GUIX_P2P_E2E_HEARTBEAT_SECS:-30}"
+HEARTBEAT_TAIL_LINES="${GUIX_P2P_E2E_HEARTBEAT_TAIL_LINES:-12}"
+HEARTBEAT_PROCESS_SNAPSHOT="${GUIX_P2P_E2E_HEARTBEAT_PROCESS_SNAPSHOT:-1}"
 TIME_MACHINE_DIR="$VM_DIR/time-machine-guix"
 TIME_MACHINE_GUIX="$TIME_MACHINE_DIR/bin/guix"
 
@@ -50,6 +52,58 @@ log_tail() {
     fi
 }
 
+positive_integer() {
+    case "$1" in
+        '' | *[!0-9]* | 0)
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
+log_recent_output() {
+    label="$1"
+    path="$2"
+
+    if ! positive_integer "$HEARTBEAT_TAIL_LINES"; then
+        return 0
+    fi
+    if [ ! -f "$path" ]; then
+        log "$label heartbeat output tail unavailable; log file is missing: $path"
+        return 0
+    fi
+
+    log "$label heartbeat output tail; last $HEARTBEAT_TAIL_LINES lines from $path"
+    tail -n "$HEARTBEAT_TAIL_LINES" "$path" 2>/dev/null |
+        sed 's/\r/\n/g' |
+        tail -n "$HEARTBEAT_TAIL_LINES" |
+        while IFS= read -r line; do
+            log "$label output: $line"
+        done || true
+}
+
+log_process_snapshot() {
+    label="$1"
+    root_pid="$2"
+
+    if [ "$HEARTBEAT_PROCESS_SNAPSHOT" != 1 ]; then
+        return 0
+    fi
+    if ! command -v ps >/dev/null 2>&1; then
+        return 0
+    fi
+
+    log "$label heartbeat process snapshot"
+    ps -eo pid,ppid,stat,etime,cmd 2>/dev/null |
+        grep -E "^[[:space:]]*($root_pid)[[:space:]]|^[[:space:]]*[0-9]+[[:space:]]+($root_pid)[[:space:]]|guix substitute|guix-daemon|qemu-system-x86_64" |
+        grep -v 'grep -E' |
+        while IFS= read -r line; do
+            log "$label process: $line"
+        done || true
+}
+
 run_with_heartbeat() {
     label="$1"
     output_log="$2"
@@ -70,6 +124,8 @@ run_with_heartbeat() {
         elapsed="$((now - started))"
         if [ "$elapsed" -ge "$next_heartbeat" ] && kill -0 "$pid" 2>/dev/null; then
             log "$label still running; pid=$pid elapsed=$((now - started))s output=$output_log"
+            log_recent_output "$label" "$output_log"
+            log_process_snapshot "$label" "$pid"
             next_heartbeat="$((next_heartbeat + HEARTBEAT_SECS))"
         fi
     done
@@ -114,6 +170,8 @@ Environment:
   GUIX_P2P_E2E_HOLD         Keep dashboards running after success, default 0
   GUIX_P2P_E2E_LOG_DIR      Shell log directory, default target/guix-p2p-vm/logs
   GUIX_P2P_E2E_HEARTBEAT_SECS  Long command heartbeat interval, default 30
+  GUIX_P2P_E2E_HEARTBEAT_TAIL_LINES  Output log lines per heartbeat, default 12
+  GUIX_P2P_E2E_HEARTBEAT_PROCESS_SNAPSHOT  Process snapshot per heartbeat, default 1
 EOF
 }
 
