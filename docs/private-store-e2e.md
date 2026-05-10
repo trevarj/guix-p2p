@@ -15,7 +15,7 @@ base image:
 
 - The base image does not include `hello`.
 - Both nodes boot with serial console, DHCP, Guix daemon, OpenSSH, and the
-  locally built `guix-p2p` binary at `/usr/local/bin/guix-p2p`.
+  locally built `guix-p2p` binary in the system profile.
 - Node A will realize the package under test after boot.
 - Node B starts from the same base image and must obtain the package through
   the private-store test flow.
@@ -69,6 +69,7 @@ password: e2e
 Inside either VM, verify the embedded binary:
 
 ```sh
+command -v guix-p2p
 guix-p2p --help
 ```
 
