@@ -13,6 +13,7 @@ libp2p = { version = "0.56", features = ["full", "kad", "quic", "tcp", "dns", "r
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 ed25519-dalek = "2"
+libgcrypt-sys = "0.7"
 sha2 = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "socks"] }
 serde = { version = "1", features = ["derive"] }

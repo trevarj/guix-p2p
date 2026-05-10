@@ -3,6 +3,7 @@
              (gnu packages base)
              (gnu packages commencement)
              (gnu packages crypto)
+             (gnu packages gnupg)
              (gnu packages linux)
              (gnu packages llvm)
              (gnu packages libunwind)
@@ -36,6 +37,7 @@
 
   ;; Libraries for certain sys crates
   openssl
+  libgcrypt
   eudev                                 ; libudev replacement
   libsecp256k1
 

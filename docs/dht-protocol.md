@@ -140,7 +140,7 @@ but cannot be dialed inbound. libp2p's relay protocol (post-MVP) solves this.
 
 The DHT does NOT replace:
 - Narinfo serving (still HTTP from official servers, tiny <500 bytes)
-- Narinfo signature verification (still Ed25519 against ACL)
+- Narinfo signature verification (still Guix SPKI/libgcrypt against ACL)
 - Substitute URL configuration (still used for HTTP fallback)
 
 The DHT ONLY replaces:

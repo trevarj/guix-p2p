@@ -64,9 +64,12 @@ To iterate on Rust changes without rebuilding the image, rebuild the host
 binary and copy it into both running VMs:
 
 ```sh
-cargo build --release
+guix shell -m manifest.scm -- cargo build --release
 scripts/e2e-private-store.sh push-binary
 ```
+
+The push step installs `/tmp/guix-p2p-real` plus a `/tmp/guix-p2p` wrapper
+that resolves the VM's runtime libraries with `guix build`.
 
 Then run the VM helpers with the pushed binary:
 

@@ -41,8 +41,8 @@ Block hash list is serialized and sent in the handshake.
 
 Final verification: `SHA-256(block_0 || block_1 || ... || block_N-1) == nar-SHA-256`
 
-This final check validates complete data integrity. Combined with narinfo
-signature verification (Ed25519 against ACL), the trust chain is:
+This final check validates complete data integrity. Combined with Guix-compatible
+narinfo signature verification (SPKI/libgcrypt against ACL), the trust chain is:
 1. narinfo: signed by authorized key → nar-SHA-256 is authentic
 2. Blocks reassembled → SHA-256 matches nar-SHA-256 → data is authentic
 3. Untrusted peers can serve blocks safely — tampered data fails the hash check

@@ -260,9 +260,11 @@ yet supported. The preference order is: zstd > gzip > none.
 Narinfo flow:
 1. Check NarinfoCache (60s TTL, shared via `std::sync::Mutex`)
 2. `reqwest` GET `<substitute_url>/<hash-part>.narinfo`
-3. Verify Guix's canonical s-expression Ed25519 signature against
-   `/etc/guix/acl` public keys
-4. Cache result, return parsed Narinfo
+3. Verify Guix's SPKI signature with libgcrypt against `/etc/guix/acl`
+   public keys
+4. Decode `NarHash: sha256:<nix-base32>` to raw SHA-256 bytes for DHT/swarm
+   keys
+5. Cache result, return parsed Narinfo
 
 ## Crate Dependencies
 
@@ -272,7 +274,8 @@ Narinfo flow:
 (features: kad, quic, tcp, dns, request-response, mdns, identify, autonat, relay) |
 | `tokio` | Async runtime, channels, sync primitives |
 | `tokio-stream` | UnboundedReceiverStream for swarm notification channel |
-| `ed25519-dalek` | Key generation, signing, signature verification |
+| `ed25519-dalek` | libp2p identity key handling and ACL key parsing |
+| `libgcrypt-sys` | Guix-compatible SPKI narinfo signature verification |
 | `sha2` | SHA-256 (block hashes, nar verification) |
 | `reqwest` | HTTP narinfo fetching from official substitute URLs |
 | `serde` / `serde_json` | Protocol message serialization, config parsing, reputation persistence |

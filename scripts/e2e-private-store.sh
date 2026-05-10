@@ -212,6 +212,7 @@ ssh_node() {
         -i "$SSH_CLIENT_KEY" \
         -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
         -o StrictHostKeyChecking=accept-new \
+        -o ConnectTimeout=10 \
         -p "$ssh_port" \
         e2e@127.0.0.1
 }
@@ -225,16 +226,31 @@ push_binary() {
         -i "$SSH_CLIENT_KEY" \
         -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
         -o StrictHostKeyChecking=accept-new \
+        -o BatchMode=yes \
+        -o ConnectTimeout=10 \
         -P "$ssh_port" \
         "$GUIX_P2P_BINARY" \
-        e2e@127.0.0.1:/tmp/guix-p2p
+        e2e@127.0.0.1:/tmp/guix-p2p-real
+    remote_install="
+set -eu
+cat > /tmp/guix-p2p <<'EOF'
+#!/bin/sh
+set -eu
+LIBGCRYPT=\"\${GUIX_P2P_E2E_LIBGCRYPT:-\$(guix build libgcrypt 2>/dev/null | tail -n 1)}\"
+export LD_LIBRARY_PATH=\"\$LIBGCRYPT/lib:/run/current-system/profile/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}\"
+exec /tmp/guix-p2p-real \"\$@\"
+EOF
+chmod 755 /tmp/guix-p2p /tmp/guix-p2p-real
+"
     ssh \
         -i "$SSH_CLIENT_KEY" \
         -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
         -o StrictHostKeyChecking=accept-new \
+        -o BatchMode=yes \
+        -o ConnectTimeout=10 \
         -p "$ssh_port" \
         e2e@127.0.0.1 \
-        chmod 755 /tmp/guix-p2p
+        "$remote_install"
     log "pushed binary to $(node_name "$node"):/tmp/guix-p2p"
 }
 

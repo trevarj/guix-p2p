@@ -7,6 +7,7 @@
              (gnu packages bash)
              (gnu packages commencement)
              (gnu packages curl)
+             (gnu packages gnupg)
              (gnu packages ssh)
              (gnu packages tls)
              (gnu services networking)
@@ -61,7 +62,7 @@
                  (string-append
                   "#!" #$(file-append bash "/bin/sh") "\n"
                   "export LD_LIBRARY_PATH=\""
-                  #$openssl "/lib:" #$gcc-toolchain "/lib"
+                  #$openssl "/lib:" #$libgcrypt "/lib:" #$gcc-toolchain "/lib"
                   "${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n"
                  "exec \"" real "\" \"$@\"\n")
                  port)))
@@ -72,6 +73,9 @@
                  (string-append
                   "#!" #$(file-append bash "/bin/sh") "\n"
                   "set -eu\n"
+                  "export LD_LIBRARY_PATH=\""
+                  #$openssl "/lib:" #$libgcrypt "/lib:" #$gcc-toolchain "/lib"
+                  "${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n"
                   "PACKAGE=\"${1:-hello}\"\n"
                   "P2P=\"${GUIX_P2P_E2E_P2P_BIN:-guix-p2p}\"\n"
                   "CACHE_DIR=\"${GUIX_P2P_E2E_A_CACHE:-/tmp/guix-p2p-a}\"\n"
@@ -139,6 +143,9 @@
                  (string-append
                   "#!" #$(file-append bash "/bin/sh") "\n"
                   "set -eu\n"
+                  "export LD_LIBRARY_PATH=\""
+                  #$openssl "/lib:" #$libgcrypt "/lib:" #$gcc-toolchain "/lib"
+                  "${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n"
                   "if [ \"$#\" -lt 2 ]; then\n"
                   "  echo 'usage: guix-p2p-e2e-node-b STORE_PATH NODE_A_PEER_ID' >&2\n"
                   "  exit 2\n"

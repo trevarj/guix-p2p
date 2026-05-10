@@ -131,7 +131,9 @@
   - Parse Signature field: version;hostname;base64-signature
   - Compute SHA-256 of signed portion (everything above Signature: line)
   - `load_acl_keys()` to parse `/etc/guix/acl` s-expression format
-  - `verify_narinfo_signature()` to validate Ed25519 signatures against ACL public keys
+  - `verify_narinfo_signature()` to validate Guix SPKI signatures with libgcrypt
+    against ACL public keys
+  - Decode Guix/Nix base32 `NarHash` values into raw SHA-256 bytes for swarm keys
   - `NarinfoCache` struct with 60s TTL, shared via `std::sync::Mutex`
 - [x] `src/http_client.rs` (renamed from `fallback.rs`):
   - `fetch_narinfo(config, hash_part, cache) → Narinfo` with cache check + ACL verification
@@ -151,7 +153,7 @@
   - On swarm failure → reply "not-found" to daemon, let guix-daemon fall through
 
 ### Deliverables
-- Narinfo fetch with Ed25519 signature verification and 60s TTL cache
+- Narinfo fetch with Guix-compatible libgcrypt signature verification and 60s TTL cache
 - Swarm-only substitute delivery; guix-daemon chains to HTTP substituters on failure
 
 ---

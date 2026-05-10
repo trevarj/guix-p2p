@@ -1,7 +1,13 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ffi::CString, ptr, slice, sync::Once};
 
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::VerifyingKey;
+use libgcrypt_sys::{
+    gcry_check_version, gcry_pk_verify, gcry_sexp_find_token, gcry_sexp_new, gcry_sexp_nth_data,
+    gcry_sexp_release, gcry_sexp_t,
+};
 use sha2::{Digest, Sha256};
+
+static GCRYPT_INIT: Once = Once::new();
 
 /// A simple TTL-based cache for narinfos keyed by hash part.
 #[derive(Debug, Default)]
@@ -172,9 +178,11 @@ pub fn load_acl_keys(path: &std::path::Path) -> Result<Vec<VerifyingKey>, ParseE
     Ok(keys)
 }
 
-/// Verify the narinfo's Ed25519 signature against a list of authorized keys.
-/// Returns true if any authorized key validates the signature.
+/// Verify the narinfo's Guix SPKI signature against a list of authorized keys.
+/// Returns true if an authorized key made a valid signature.
 pub fn verify_narinfo_signature(narinfo: &Narinfo, keys: &[VerifyingKey]) -> bool {
+    init_gcrypt();
+
     let sig_str = match &narinfo.signature {
         Some(s) => s,
         None => return false,
@@ -185,6 +193,9 @@ pub fn verify_narinfo_signature(narinfo: &Narinfo, keys: &[VerifyingKey]) -> boo
     if parts.len() < 3 {
         return false;
     }
+    if parts[0] != "1" {
+        return false;
+    }
 
     let b64 = parts[2];
     let sig_bytes = match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64) {
@@ -192,16 +203,19 @@ pub fn verify_narinfo_signature(narinfo: &Narinfo, keys: &[VerifyingKey]) -> boo
         Err(_) => return false,
     };
 
-    let parsed = match CanonicalSexp::parse(&sig_bytes) {
-        Some(node) => node,
+    let signature = match GcryptSexp::new(&sig_bytes) {
+        Some(signature) => signature,
         None => return false,
     };
 
-    let data = match parsed.find_list("data") {
-        Some(node) => node,
+    let hash = match signature.find_token("hash") {
+        Some(hash) => hash,
         None => return false,
     };
-    let signed_hash = match data.find_list("hash").and_then(|hash| hash.atom_at(2)) {
+    if hash.data_at(1).as_deref() != Some(b"sha256") {
+        return false;
+    }
+    let signed_hash = match hash.data_at(2) {
         Some(bytes) => bytes,
         None => return false,
     };
@@ -210,114 +224,67 @@ pub fn verify_narinfo_signature(narinfo: &Narinfo, keys: &[VerifyingKey]) -> boo
         return false;
     }
 
-    let q = match parsed.find_list("q").and_then(|node| node.atom_at(1)) {
+    let q = match signature.find_token("q").and_then(|q| q.data_at(1)) {
         Some(bytes) if bytes.len() == 32 => bytes,
         _ => return false,
     };
-    let key = match keys.iter().find(|key| key.to_bytes().as_slice() == q.as_slice()) {
-        Some(key) => key,
-        None => return false,
-    };
+    if !keys.iter().any(|key| key.to_bytes().as_slice() == q.as_slice()) {
+        return false;
+    }
 
-    let r = match parsed.find_list("r").and_then(|node| node.atom_at(1)) {
-        Some(bytes) if bytes.len() == 32 => bytes,
-        _ => return false,
-    };
-    let s = match parsed.find_list("s").and_then(|node| node.atom_at(1)) {
-        Some(bytes) if bytes.len() == 32 => bytes,
-        _ => return false,
-    };
-    let mut ed25519_sig = [0u8; 64];
-    ed25519_sig[..32].copy_from_slice(&r);
-    ed25519_sig[32..].copy_from_slice(&s);
-    let signature = match Signature::from_slice(&ed25519_sig) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-
-    let (data_start, data_end) = match data.span() {
-        Some(span) => span,
-        None => return false,
-    };
-    key.verify(&sig_bytes[data_start..data_end], &signature).is_ok()
+    signature.verify()
 }
 
-#[derive(Debug)]
-enum CanonicalSexp {
-    Atom { bytes: Vec<u8> },
-    List { start: usize, end: usize, items: Vec<CanonicalSexp> },
+fn init_gcrypt() {
+    GCRYPT_INIT.call_once(|| unsafe {
+        gcry_check_version(ptr::null());
+    });
 }
 
-impl CanonicalSexp {
-    fn parse(input: &[u8]) -> Option<Self> {
-        let (node, pos) = Self::parse_at(input, 0)?;
-        (pos == input.len()).then_some(node)
+impl GcryptSexp {
+    fn new(bytes: &[u8]) -> Option<Self> {
+        let mut raw = ptr::null_mut();
+        let err = unsafe { gcry_sexp_new(&mut raw, bytes.as_ptr().cast(), bytes.len(), 1) };
+        (err == 0 && !raw.is_null()).then_some(Self { raw })
     }
 
-    fn parse_at(input: &[u8], pos: usize) -> Option<(Self, usize)> {
-        match input.get(pos).copied()? {
-            b'(' => {
-                let start = pos;
-                let mut pos = pos + 1;
-                let mut items = Vec::new();
-                while input.get(pos).copied()? != b')' {
-                    let (item, next) = Self::parse_at(input, pos)?;
-                    items.push(item);
-                    pos = next;
-                }
-                let end = pos + 1;
-                Some((CanonicalSexp::List { start, end, items }, end))
-            },
-            b'0'..=b'9' => {
-                let mut pos = pos;
-                let mut len = 0usize;
-                while let Some(digit @ b'0'..=b'9') = input.get(pos).copied() {
-                    len = len.checked_mul(10)?.checked_add((digit - b'0') as usize)?;
-                    pos += 1;
-                }
-                if input.get(pos).copied()? != b':' {
-                    return None;
-                }
-                pos += 1;
-                let end = pos.checked_add(len)?;
-                let bytes = input.get(pos..end)?.to_vec();
-                Some((CanonicalSexp::Atom { bytes }, end))
-            },
-            _ => None,
-        }
+    fn find_token(&self, token: &str) -> Option<Self> {
+        let token = CString::new(token).ok()?;
+        let raw = unsafe { gcry_sexp_find_token(self.raw, token.as_ptr(), 0) };
+        (!raw.is_null()).then_some(Self { raw })
     }
 
-    fn find_list(&self, head: &str) -> Option<&CanonicalSexp> {
-        match self {
-            CanonicalSexp::Atom { .. } => None,
-            CanonicalSexp::List { items, .. } => {
-                if self.head_is(head) {
-                    return Some(self);
-                }
-                items.iter().find_map(|item| item.find_list(head))
-            },
-        }
+    fn data_at(&self, index: i32) -> Option<Vec<u8>> {
+        let mut len = 0usize;
+        let data = unsafe { gcry_sexp_nth_data(self.raw, index, &mut len) };
+        (!data.is_null()).then(|| unsafe { slice::from_raw_parts(data.cast(), len).to_vec() })
     }
 
-    fn atom_at(&self, index: usize) -> Option<Vec<u8>> {
-        match self {
-            CanonicalSexp::List { items, .. } => match items.get(index)? {
-                CanonicalSexp::Atom { bytes } => Some(bytes.clone()),
-                CanonicalSexp::List { .. } => None,
-            },
-            CanonicalSexp::Atom { .. } => None,
-        }
-    }
+    fn verify(&self) -> bool {
+        let data = match self.find_token("data") {
+            Some(data) => data,
+            None => return false,
+        };
+        let sig_val = match self.find_token("sig-val") {
+            Some(sig_val) => sig_val,
+            None => return false,
+        };
+        let public_key = match self.find_token("public-key") {
+            Some(public_key) => public_key,
+            None => return false,
+        };
 
-    fn head_is(&self, head: &str) -> bool {
-        self.atom_at(0).is_some_and(|bytes| bytes == head.as_bytes())
+        unsafe { gcry_pk_verify(sig_val.raw, data.raw, public_key.raw) == 0 }
     }
+}
 
-    fn span(&self) -> Option<(usize, usize)> {
-        match self {
-            CanonicalSexp::List { start, end, .. } => Some((*start, *end)),
-            CanonicalSexp::Atom { .. } => None,
-        }
+struct GcryptSexp {
+    raw: gcry_sexp_t,
+}
+
+impl Drop for GcryptSexp {
+    fn drop(&mut self) {
+        unsafe { gcry_sexp_release(self.raw) };
     }
 }
 
@@ -347,6 +314,58 @@ FileSize: 5000000
         assert_eq!(info.urls[0].compression, "gzip");
         assert_eq!(info.urls[0].file_size, 5000000);
         assert!(info.signature.is_some());
+    }
+
+    #[test]
+    fn test_verify_real_guix_narinfo_signature() {
+        let data = "\
+StorePath: /gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2
+NarHash: sha256:0qhasy0w9w9mfv0vacgzymxl4nww8cslyza5x2ci42v7i2b13lyl
+NarSize: 282616
+References: cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2 m2vhzr0dy352cn59sgcklcaykprrr4j6-gcc-14.3.0-lib yj053cys0724p7vs9kir808x7fivz17m-glibc-2.41
+System: x86_64-linux
+Deriver: rxw8g87bf61bwbagfq38sp5xwy28jb5d-hello-2.12.2.drv
+Signature: 1;bayfront;KHNpZ25hdHVyZSAKIChkYXRhIAogIChmbGFncyByZmM2OTc5KQogIChoYXNoIHNoYTI1NiAjMENDQjE0QjFFNkZFQUI4OTIyRjVGN0NFQjQ3QzRENUQ5N0E4QTFFNzk3RkIyM0RDREY5N0QyQkRFODA4MjYyQSMpCiAgKQogKHNpZy12YWwgCiAgKGVjZHNhIAogICAociAjMEJBNkY2ODkzQjhEQThCQ0ZCNUMxNDk2QTUwMDA4MTIzNUUyMjFCQkU4RDFCNUJBOEQ3NTk1REUyNkYxNUYxNCMpCiAgIChzICMwM0RCOUQ0MzA1QUEwRjQ3N0NCMDM4MkEyMzJBNzFGNUMyQkFEOEJBRjEwQzJGNURCMUM0NTZFNTE1MjA5RTIxIykKICAgKQogICkKIChwdWJsaWMta2V5IAogIChlY2MgCiAgIChjdXJ2ZSBFZDI1NTE5KQogICAocSAjN0Q2MDI5MDJEM0EyREJCODNGOEEwRkI5ODYwMkE3NTRDNTQ5M0IwQjc3OEM4RDFERDRFMEY0MURFMTRERTM0RiMpCiAgICkKICApCiApCg==
+URL: nar/lzip/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2
+Compression: lzip
+FileSize: 68076
+URL: nar/zstd/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2
+Compression: zstd
+FileSize: 73413
+";
+        let info = parse_narinfo(data).unwrap();
+        let key = VerifyingKey::from_bytes(
+            &hex::decode("7D602902D3A2DBB83F8A0FB98602A754C5493B0B778C8D1DD4E0F41DE14DE34F")
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert!(verify_narinfo_signature(&info, &[key]));
+    }
+
+    #[test]
+    fn test_verify_real_guix_narinfo_signature_rejects_tampered_signed_data() {
+        let data = "\
+StorePath: /gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2
+NarHash: sha256:1qhasy0w9w9mfv0vacgzymxl4nww8cslyza5x2ci42v7i2b13lyl
+NarSize: 282616
+References: cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2 m2vhzr0dy352cn59sgcklcaykprrr4j6-gcc-14.3.0-lib yj053cys0724p7vs9kir808x7fivz17m-glibc-2.41
+System: x86_64-linux
+Deriver: rxw8g87bf61bwbagfq38sp5xwy28jb5d-hello-2.12.2.drv
+Signature: 1;bayfront;KHNpZ25hdHVyZSAKIChkYXRhIAogIChmbGFncyByZmM2OTc5KQogIChoYXNoIHNoYTI1NiAjMENDQjE0QjFFNkZFQUI4OTIyRjVGN0NFQjQ3QzRENUQ5N0E4QTFFNzk3RkIyM0RDREY5N0QyQkRFODA4MjYyQSMpCiAgKQogKHNpZy12YWwgCiAgKGVjZHNhIAogICAociAjMEJBNkY2ODkzQjhEQThCQ0ZCNUMxNDk2QTUwMDA4MTIzNUUyMjFCQkU4RDFCNUJBOEQ3NTk1REUyNkYxNUYxNCMpCiAgIChzICMwM0RCOUQ0MzA1QUEwRjQ3N0NCMDM4MkEyMzJBNzFGNUMyQkFEOEJBRjEwQzJGNURCMUM0NTZFNTE1MjA5RTIxIykKICAgKQogICkKIChwdWJsaWMta2V5IAogIChlY2MgCiAgIChjdXJ2ZSBFZDI1NTE5KQogICAocSAjN0Q2MDI5MDJEM0EyREJCODNGOEEwRkI5ODYwMkE3NTRDNTQ5M0IwQjc3OEM4RDFERDRFMEY0MURFMTRERTM0RiMpCiAgICkKICApCiApCg==
+";
+        let info = parse_narinfo(data).unwrap();
+        let key = VerifyingKey::from_bytes(
+            &hex::decode("7D602902D3A2DBB83F8A0FB98602A754C5493B0B778C8D1DD4E0F41DE14DE34F")
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert!(!verify_narinfo_signature(&info, &[key]));
     }
 
     #[test]

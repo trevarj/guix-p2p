@@ -238,12 +238,63 @@ pub fn extract_hash_part(store_path: &str) -> Result<String, String> {
 }
 
 /// Extract the raw SHA-256 bytes from a narinfo NarHash field.
-fn extract_nar_hash_bytes(nar_hash: &str) -> [u8; 32] {
-    let hex = nar_hash.strip_prefix("sha256:").unwrap_or(nar_hash);
-    let bytes = hex::decode(hex).expect("valid hex hash in narinfo");
+fn extract_nar_hash_bytes(nar_hash: &str) -> Option<[u8; 32]> {
+    let hash = nar_hash.strip_prefix("sha256:").unwrap_or(nar_hash);
+    let bytes = if hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        hex::decode(hash).ok()?
+    } else {
+        decode_nix_base32(hash)?
+    };
+    if bytes.len() != 32 {
+        return None;
+    }
     let mut arr = [0u8; 32];
-    arr.copy_from_slice(&bytes[..32]);
-    arr
+    arr.copy_from_slice(&bytes);
+    Some(arr)
+}
+
+fn decode_nix_base32(input: &str) -> Option<Vec<u8>> {
+    const ALPHABET: &[u8; 32] = b"0123456789abcdfghijklmnpqrsvwxyz";
+    let mut out = vec![0u8; input.len() * 5 / 8];
+    for (index, chr) in input.bytes().rev().enumerate() {
+        let value = ALPHABET.iter().position(|&c| c == chr)? as u8;
+        set_nix_base32_quintet(&mut out, index, value);
+    }
+    Some(out)
+}
+
+fn set_nix_base32_quintet(out: &mut [u8], index: usize, value: u8) {
+    let offset = index * 5 / 8;
+    let value = value & 0x1f;
+    match index % 8 {
+        0 => out[offset] |= value,
+        1 => {
+            out[offset] |= (value & 0x07) << 5;
+            set_byte(out, offset + 1, value >> 3);
+        },
+        2 => out[offset] |= value << 2,
+        3 => {
+            out[offset] |= (value & 0x01) << 7;
+            set_byte(out, offset + 1, value >> 1);
+        },
+        4 => {
+            out[offset] |= (value & 0x0f) << 4;
+            set_byte(out, offset + 1, value >> 4);
+        },
+        5 => out[offset] |= value << 1,
+        6 => {
+            out[offset] |= (value & 0x03) << 6;
+            set_byte(out, offset + 1, value >> 2);
+        },
+        7 => out[offset] |= value << 3,
+        _ => unreachable!(),
+    }
+}
+
+fn set_byte(out: &mut [u8], offset: usize, value: u8) {
+    if let Some(byte) = out.get_mut(offset) {
+        *byte |= value;
+    }
 }
 
 pub async fn run_query_mode(
@@ -347,7 +398,13 @@ async fn handle_have(
                     },
                 };
 
-                let nar_hash_bytes = extract_nar_hash_bytes(&narinfo.nar_hash);
+                let nar_hash_bytes = match extract_nar_hash_bytes(&narinfo.nar_hash) {
+                    Some(bytes) => bytes,
+                    None => {
+                        tracing::warn!("have: skipping {} (invalid nar hash)", path);
+                        continue;
+                    },
+                };
                 let dht_key = hex::encode(nar_hash_bytes);
                 let _ = query_tx.send(dht_key.clone());
                 let query_timeout =
@@ -380,7 +437,7 @@ async fn handle_have(
                         hash_part: hash_part.clone(),
                         store_path: Some(narinfo.store_path.clone()),
                         nar_size: Some(narinfo.nar_size),
-                        nar_hash: Some(narinfo.nar_hash.clone()),
+                        nar_hash: Some(dht_key.clone()),
                         p2p_available,
                     });
                 }
@@ -545,7 +602,15 @@ async fn try_swarm_substitute(
     let store_path = narinfo.store_path.clone();
     let nar_size = narinfo.nar_size;
     let nar_hash = narinfo.nar_hash.clone();
-    let nar_hash_bytes = extract_nar_hash_bytes(&nar_hash);
+    let nar_hash_bytes = match extract_nar_hash_bytes(&nar_hash) {
+        Some(bytes) => bytes,
+        None => {
+            tracing::warn!("Cannot decode nar hash for {}: {}", hash_part, nar_hash);
+            let _ = reply.write_line("not-found");
+            return;
+        },
+    };
+    let nar_hash_hex = hex::encode(nar_hash_bytes);
 
     tracing::info!(
         policy = %config.substitute_policy,
@@ -565,7 +630,7 @@ async fn try_swarm_substitute(
                 b.narinfo_raw = Some(narinfo.signed_portion.clone());
             })
             .or_insert_with(|| ObservedBuild {
-                nar_hash: nar_hash.clone(),
+                nar_hash: nar_hash_hex.clone(),
                 store_path: Some(narinfo.store_path.clone()),
                 nar_size: Some(narinfo.nar_size),
                 references: narinfo.references.clone(),
@@ -578,7 +643,7 @@ async fn try_swarm_substitute(
     }
 
     let _ = event_tx.send(DashboardEvent::BuildDiscovered {
-        nar_hash: nar_hash.clone(),
+        nar_hash: nar_hash_hex.clone(),
         store_path: Some(store_path.clone()),
         nar_size: Some(nar_size),
     });
@@ -587,7 +652,7 @@ async fn try_swarm_substitute(
         hash_part: hash_part.clone(),
         store_path: Some(store_path.clone()),
         nar_size: Some(nar_size),
-        nar_hash: Some(nar_hash.clone()),
+        nar_hash: Some(nar_hash_hex.clone()),
         p2p_available: false,
     });
 
@@ -603,7 +668,7 @@ async fn try_swarm_substitute(
                 config,
                 cmd_tx,
                 notify_rx,
-                &nar_hash,
+                &nar_hash_hex,
                 &nar_hash_bytes,
                 &store_path,
                 nar_size,
@@ -625,7 +690,7 @@ async fn try_swarm_substitute(
                 config,
                 cmd_tx,
                 notify_rx,
-                &nar_hash,
+                &nar_hash_hex,
                 &nar_hash_bytes,
                 &store_path,
                 nar_size,
@@ -640,7 +705,7 @@ async fn try_swarm_substitute(
                 Ok(nar_data) => Ok(nar_data),
                 Err(_) => {
                     tracing::info!(
-                        hash = %nar_hash,
+                        hash = %nar_hash_hex,
                         "P2P failed, falling back to HTTP"
                     );
                     let _ = reply.write_trace(&format_trace_started(
@@ -659,7 +724,7 @@ async fn try_swarm_substitute(
                 Ok(nar_data) => Ok(nar_data),
                 Err(e) => {
                     tracing::info!(
-                        hash = %nar_hash,
+                        hash = %nar_hash_hex,
                         error = %e,
                         "HTTP failed, falling back to P2P"
                     );
@@ -672,7 +737,7 @@ async fn try_swarm_substitute(
                         config,
                         cmd_tx,
                         notify_rx,
-                        &nar_hash,
+                        &nar_hash_hex,
                         &nar_hash_bytes,
                         &store_path,
                         nar_size,
@@ -695,11 +760,10 @@ async fn try_swarm_substitute(
 
             // Verify nar hash against narinfo's expected hash
             let hash = Sha256::digest(&nar_data);
-            let hash_hex = format!("sha256:{:x}", hash);
-            let expected_nar_hash = nar_hash.strip_prefix("sha256:").unwrap_or(&nar_hash);
-            let actual_nar_hash = hash_hex.strip_prefix("sha256:").unwrap_or(&hash_hex);
+            let actual_nar_hash = hex::encode(hash);
+            let expected_nar_hash = nar_hash_hex.as_str();
 
-            if !expected_nar_hash.eq_ignore_ascii_case(actual_nar_hash) {
+            if !expected_nar_hash.eq_ignore_ascii_case(&actual_nar_hash) {
                 tracing::error!(
                     "Nar hash mismatch for {}: expected {}, got {}",
                     store_path,
@@ -711,7 +775,7 @@ async fn try_swarm_substitute(
                 let _ = tokio::fs::remove_file(&dest_path).await;
 
                 let _ = event_tx.send(DashboardEvent::DownloadFailed {
-                    nar_hash: nar_hash.clone(),
+                    nar_hash: nar_hash_hex.clone(),
                     store_path: store_path.clone(),
                     reason: format!(
                         "hash mismatch: expected sha256:{}, got sha256:{}",
@@ -731,7 +795,7 @@ async fn try_swarm_substitute(
                 tracing::error!("Failed to write nar to {}: {}", dest_path.display(), e);
                 let _ = reply.write_line("not-found");
                 let _ = event_tx.send(DashboardEvent::DownloadFailed {
-                    nar_hash: nar_hash.clone(),
+                    nar_hash: nar_hash_hex.clone(),
                     store_path: store_path.clone(),
                     reason: format!("write error: {}", e),
                 });
@@ -740,18 +804,17 @@ async fn try_swarm_substitute(
 
             // Save nar to local store for re-seeding
             {
-                let nar_hash_hex = nar_hash.strip_prefix("sha256:").unwrap_or(&nar_hash);
                 let mut store = nar_store.lock().unwrap();
-                if store.has_nar(nar_hash_hex) {
+                if store.has_nar(&nar_hash_hex) {
                     tracing::debug!("nar already in store, skipping save");
-                } else if let Err(e) = store.save(nar_hash_hex, &nar_data) {
+                } else if let Err(e) = store.save(&nar_hash_hex, &nar_data) {
                     tracing::warn!("failed to save nar to store for re-seeding: {}", e);
                 } else {
                     drop(store);
-                    let _ = cmd_tx
-                        .send(SwarmCommand::StartProviding { hash: nar_hash_hex.to_string() });
+                    let _ =
+                        cmd_tx.send(SwarmCommand::StartProviding { hash: nar_hash_hex.clone() });
                     let _ = event_tx.send(DashboardEvent::SeedAdded {
-                        nar_hash: nar_hash_hex.to_string(),
+                        nar_hash: nar_hash_hex.clone(),
                         store_path: Some(store_path.clone()),
                         nar_size: size,
                     });
@@ -773,7 +836,7 @@ async fn try_swarm_substitute(
             }
 
             let _ = event_tx.send(DashboardEvent::DownloadSucceeded {
-                nar_hash: nar_hash.clone(),
+                nar_hash: nar_hash_hex.clone(),
                 store_path: store_path.clone(),
                 size,
                 elapsed_ms: 0,
@@ -785,14 +848,14 @@ async fn try_swarm_substitute(
                 size,
             ));
 
-            let _ = reply.write_line(&format!("success {} {}", hash_hex, size));
+            let _ = reply.write_line(&format!("success sha256:{} {}", nar_hash_hex, size));
             tracing::info!("Substitute download succeeded for {}", store_path);
         },
         Err(reason) => {
             tracing::error!("Substitute download failed for {}: {}", store_path, reason);
 
             let _ = event_tx.send(DashboardEvent::DownloadFailed {
-                nar_hash: nar_hash.clone(),
+                nar_hash: nar_hash_hex.clone(),
                 store_path: store_path.clone(),
                 reason: reason.to_string(),
             });
@@ -1138,7 +1201,7 @@ async fn download_blocks_from_peers(
 }
 
 fn nar_hash_bytes(nar_hash: &str) -> Vec<u8> {
-    hex::decode(nar_hash.strip_prefix("sha256:").unwrap_or(nar_hash)).unwrap_or_default()
+    extract_nar_hash_bytes(nar_hash).map(Vec::from).unwrap_or_default()
 }
 
 pub fn format_trace_started(store_path: &str, url: &str, size: u64) -> String {
@@ -1477,6 +1540,24 @@ mod tests {
             extract_hash_part("/gnu/store/abc123def456ghi789jkl012mno345pq-foo-1.0").unwrap(),
             "abc123def456ghi789jkl012mno345pq"
         );
+    }
+
+    #[test]
+    fn test_extract_nar_hash_bytes_decodes_guix_nix_base32() {
+        let bytes =
+            extract_nar_hash_bytes("sha256:0qhasy0w9w9mfv0vacgzymxl4nww8cslyza5x2ci42v7i2b13lyl")
+                .unwrap();
+        assert_eq!(
+            hex::encode(bytes),
+            "d4d3119688670b1299e8457d4f35439c5b427bf5ff31b5c17635f1c481d70a62"
+        );
+    }
+
+    #[test]
+    fn test_extract_nar_hash_bytes_accepts_hex() {
+        let hash = "d4d3119688670b1299e8457d4f35439c5b427bf5ff31b5c17635f1c481d70a62";
+        let bytes = extract_nar_hash_bytes(&format!("sha256:{hash}")).unwrap();
+        assert_eq!(hex::encode(bytes), hash);
     }
 
     #[test]
