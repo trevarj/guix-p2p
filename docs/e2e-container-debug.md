@@ -21,7 +21,9 @@ scripts/e2e-container-debug.sh minimal-launch
 
 Build steps run directly and write logs under
 `target/guix-p2p-container-debug/logs/`. Launch steps print the exact `sudo`
-command because `guix system container` runs in the foreground as root.
+command because `guix system container` runs in the foreground as root. Rebuild
+steps replace their generated GC-root link under
+`target/guix-p2p-container-debug/`.
 
 ## Minimal Container
 

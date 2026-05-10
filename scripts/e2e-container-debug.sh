@@ -49,14 +49,23 @@ ensure_log_dir() {
 run_logged() {
     label="$1"
     output="$2"
+    status_file="$output.status"
     shift 2
 
     ensure_log_dir
     log "starting $label; output=$output"
-    if "$@" 2>&1 | tee "$output"; then
+    rm -f "$status_file"
+    set +e
+    {
+        "$@"
+        printf '%s\n' "$?" >"$status_file"
+    } 2>&1 | tee "$output"
+    status="$(cat "$status_file" 2>/dev/null || printf '1\n')"
+    rm -f "$status_file"
+    set -e
+    if [ "$status" -eq 0 ]; then
         log "$label completed"
     else
-        status="$?"
         log "$label failed; status=$status output=$output"
         exit "$status"
     fi
@@ -67,6 +76,11 @@ build_container() {
     system_file="$2"
     root="$ROOT_DIR/$name-run-container"
     output="$LOG_DIR/$name-build.log"
+
+    if [ -e "$root" ] || [ -L "$root" ]; then
+        log "removing previous GC root link; root=$root"
+        rm -f "$root"
+    fi
 
     run_logged "$name container build" "$output" \
         guix system container -N \
