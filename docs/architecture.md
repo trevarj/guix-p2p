@@ -260,7 +260,8 @@ yet supported. The preference order is: zstd > gzip > none.
 Narinfo flow:
 1. Check NarinfoCache (60s TTL, shared via `std::sync::Mutex`)
 2. `reqwest` GET `<substitute_url>/<hash-part>.narinfo`
-3. Verify Ed25519 signature against `/etc/guix/acl` public keys
+3. Verify Guix's canonical s-expression Ed25519 signature against
+   `/etc/guix/acl` public keys
 4. Cache result, return parsed Narinfo
 
 ## Crate Dependencies

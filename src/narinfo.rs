@@ -61,7 +61,7 @@ pub enum ParseError {
 pub fn parse_narinfo(input: &str) -> Result<Narinfo, ParseError> {
     let (signed_portion, remainder) = if let Some(sig_pos) = input.find("Signature:") {
         let (above, below) = input.split_at(sig_pos);
-        (above.trim_end().to_string(), Some(below.to_string()))
+        (above.to_string(), Some(below.to_string()))
     } else {
         (input.trim().to_string(), None)
     };
@@ -187,52 +187,138 @@ pub fn verify_narinfo_signature(narinfo: &Narinfo, keys: &[VerifyingKey]) -> boo
     }
 
     let b64 = parts[2];
-    let sexp_bytes = match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64) {
+    let sig_bytes = match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64) {
         Ok(b) => b,
         Err(_) => return false,
     };
-    let sexp = String::from_utf8_lossy(&sexp_bytes);
 
-    // Extract (r #hex#) from canonical sexp
-    let r_hex = match extract_sexp_field(&sexp, "r") {
-        Some(h) => h,
-        None => return false,
-    };
-    let s_hex = match extract_sexp_field(&sexp, "s") {
-        Some(h) => h,
+    let parsed = match CanonicalSexp::parse(&sig_bytes) {
+        Some(node) => node,
         None => return false,
     };
 
-    let r_bytes = match hex::decode(&r_hex) {
-        Ok(b) => b,
-        Err(_) => return false,
+    let data = match parsed.find_list("data") {
+        Some(node) => node,
+        None => return false,
     };
-    let s_bytes = match hex::decode(&s_hex) {
-        Ok(b) => b,
-        Err(_) => return false,
+    let signed_hash = match data.find_list("hash").and_then(|hash| hash.atom_at(2)) {
+        Some(bytes) => bytes,
+        None => return false,
+    };
+    let expected_hash = Sha256::digest(narinfo.signed_portion.as_bytes());
+    if signed_hash.as_slice() != expected_hash.as_slice() {
+        return false;
+    }
+
+    let q = match parsed.find_list("q").and_then(|node| node.atom_at(1)) {
+        Some(bytes) if bytes.len() == 32 => bytes,
+        _ => return false,
+    };
+    let key = match keys.iter().find(|key| key.to_bytes().as_slice() == q.as_slice()) {
+        Some(key) => key,
+        None => return false,
     };
 
-    let mut sig_bytes = [0u8; 64];
-    sig_bytes[..r_bytes.len().min(32)].copy_from_slice(&r_bytes[..r_bytes.len().min(32)]);
-    sig_bytes[32..32 + s_bytes.len().min(32)].copy_from_slice(&s_bytes[..s_bytes.len().min(32)]);
-
-    let signature = match Signature::from_slice(&sig_bytes) {
+    let r = match parsed.find_list("r").and_then(|node| node.atom_at(1)) {
+        Some(bytes) if bytes.len() == 32 => bytes,
+        _ => return false,
+    };
+    let s = match parsed.find_list("s").and_then(|node| node.atom_at(1)) {
+        Some(bytes) if bytes.len() == 32 => bytes,
+        _ => return false,
+    };
+    let mut ed25519_sig = [0u8; 64];
+    ed25519_sig[..32].copy_from_slice(&r);
+    ed25519_sig[32..].copy_from_slice(&s);
+    let signature = match Signature::from_slice(&ed25519_sig) {
         Ok(s) => s,
         Err(_) => return false,
     };
 
-    let hash = Sha256::digest(narinfo.signed_portion.as_bytes());
-
-    keys.iter().any(|key| key.verify(&hash, &signature).is_ok())
+    let (data_start, data_end) = match data.span() {
+        Some(span) => span,
+        None => return false,
+    };
+    key.verify(&sig_bytes[data_start..data_end], &signature).is_ok()
 }
 
-/// Extract a field value `(field #hex#)` from a canonical s-expression string.
-fn extract_sexp_field(sexp: &str, field: &str) -> Option<String> {
-    let needle = format!("({} #", field);
-    let start = sexp.find(&needle)? + needle.len();
-    let rest = &sexp[start..];
-    let end = rest.find('#')?;
-    Some(rest[..end].to_string())
+#[derive(Debug)]
+enum CanonicalSexp {
+    Atom { bytes: Vec<u8> },
+    List { start: usize, end: usize, items: Vec<CanonicalSexp> },
+}
+
+impl CanonicalSexp {
+    fn parse(input: &[u8]) -> Option<Self> {
+        let (node, pos) = Self::parse_at(input, 0)?;
+        (pos == input.len()).then_some(node)
+    }
+
+    fn parse_at(input: &[u8], pos: usize) -> Option<(Self, usize)> {
+        match input.get(pos).copied()? {
+            b'(' => {
+                let start = pos;
+                let mut pos = pos + 1;
+                let mut items = Vec::new();
+                while input.get(pos).copied()? != b')' {
+                    let (item, next) = Self::parse_at(input, pos)?;
+                    items.push(item);
+                    pos = next;
+                }
+                let end = pos + 1;
+                Some((CanonicalSexp::List { start, end, items }, end))
+            },
+            b'0'..=b'9' => {
+                let mut pos = pos;
+                let mut len = 0usize;
+                while let Some(digit @ b'0'..=b'9') = input.get(pos).copied() {
+                    len = len.checked_mul(10)?.checked_add((digit - b'0') as usize)?;
+                    pos += 1;
+                }
+                if input.get(pos).copied()? != b':' {
+                    return None;
+                }
+                pos += 1;
+                let end = pos.checked_add(len)?;
+                let bytes = input.get(pos..end)?.to_vec();
+                Some((CanonicalSexp::Atom { bytes }, end))
+            },
+            _ => None,
+        }
+    }
+
+    fn find_list(&self, head: &str) -> Option<&CanonicalSexp> {
+        match self {
+            CanonicalSexp::Atom { .. } => None,
+            CanonicalSexp::List { items, .. } => {
+                if self.head_is(head) {
+                    return Some(self);
+                }
+                items.iter().find_map(|item| item.find_list(head))
+            },
+        }
+    }
+
+    fn atom_at(&self, index: usize) -> Option<Vec<u8>> {
+        match self {
+            CanonicalSexp::List { items, .. } => match items.get(index)? {
+                CanonicalSexp::Atom { bytes } => Some(bytes.clone()),
+                CanonicalSexp::List { .. } => None,
+            },
+            CanonicalSexp::Atom { .. } => None,
+        }
+    }
+
+    fn head_is(&self, head: &str) -> bool {
+        self.atom_at(0).is_some_and(|bytes| bytes == head.as_bytes())
+    }
+
+    fn span(&self) -> Option<(usize, usize)> {
+        match self {
+            CanonicalSexp::List { start, end, .. } => Some((*start, *end)),
+            CanonicalSexp::Atom { .. } => None,
+        }
+    }
 }
 
 #[cfg(test)]
