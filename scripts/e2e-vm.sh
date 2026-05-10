@@ -25,6 +25,8 @@ IMAGE_LOG="$LOG_DIR/image-build.log"
 PAYLOAD_LOG="$LOG_DIR/payload-build.log"
 QEMU_LOG="$LOG_DIR/qemu-serial.log"
 HEARTBEAT_SECS="${GUIX_P2P_E2E_HEARTBEAT_SECS:-30}"
+TIME_MACHINE_DIR="$VM_DIR/time-machine-guix"
+TIME_MACHINE_GUIX="$TIME_MACHINE_DIR/bin/guix"
 
 timestamp() {
     date '+%Y-%m-%dT%H:%M:%S%z'
@@ -322,13 +324,47 @@ build_payload() {
     log "payload ready; root=$PAYLOAD_ROOT log=$PAYLOAD_LOG"
 }
 
-build_local_image_once() {
-    rm -f "$LOCAL_IMAGE_ROOT"
-    guix time-machine \
+prepare_time_machine_guix() {
+    mkdir -p "$TIME_MACHINE_DIR/bin"
+    log "resolving pinned Guix time-machine profile; url=$GUIX_URL commit=$GUIX_COMMIT"
+    profile="$(guix time-machine \
         -q \
         --url="$GUIX_URL" \
-        --commit="$GUIX_COMMIT" \
-        -- \
+        --commit="$GUIX_COMMIT")"
+
+    if [ ! -x "$profile/bin/guix" ]; then
+        echo "pinned Guix executable is missing: $profile/bin/guix" >&2
+        exit 1
+    fi
+
+    rm -f "$TIME_MACHINE_GUIX.tmp"
+    cp "$profile/bin/guix" "$TIME_MACHINE_GUIX.tmp"
+    chmod u+w "$TIME_MACHINE_GUIX.tmp"
+
+    # Guix 1.5 time-machine profiles can pair the pinned load path with a
+    # newer host Guile.  Keep the wrapper isolated to the pinned profile paths
+    # and prime this module so (guix status) can report image builds.
+    sed -i \
+        -e 's| %load-path))|))|' \
+        -e 's| %load-compiled-path))|))|' \
+        -e 's|(let ((locpath |(use-modules (ice-9 binary-ports)) (let ((locpath |' \
+        "$TIME_MACHINE_GUIX.tmp"
+
+    if ! grep -q '(use-modules (ice-9 binary-ports))' "$TIME_MACHINE_GUIX.tmp" ||
+        grep -q ' %load-path))\| %load-compiled-path))' "$TIME_MACHINE_GUIX.tmp"; then
+        echo "failed to prepare pinned Guix compatibility wrapper: $TIME_MACHINE_GUIX.tmp" >&2
+        exit 1
+    fi
+
+    chmod 755 "$TIME_MACHINE_GUIX.tmp"
+    mv "$TIME_MACHINE_GUIX.tmp" "$TIME_MACHINE_GUIX"
+    log "pinned Guix wrapper ready; profile=$profile wrapper=$TIME_MACHINE_GUIX"
+}
+
+build_local_image_once() {
+    rm -f "$LOCAL_IMAGE_ROOT"
+    prepare_time_machine_guix
+    "$TIME_MACHINE_GUIX" \
         system image \
         -t qcow2 \
         --image-size="$IMAGE_SIZE" \
@@ -344,7 +380,7 @@ rebuild_image() {
     mkdir -p "$VM_DIR"
     log "rebuilding pinned Guix qcow2 image; url=$GUIX_URL commit=$GUIX_COMMIT size=$IMAGE_SIZE output=$LOCAL_IMAGE_ROOT"
 
-    if run_with_heartbeat "guix time-machine system image" "$IMAGE_LOG" build_local_image_once; then
+    if run_with_heartbeat "pinned guix system image" "$IMAGE_LOG" build_local_image_once; then
         log "image ready; output=$LOCAL_IMAGE_ROOT"
         return 0
     fi

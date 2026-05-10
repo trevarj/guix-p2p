@@ -26,14 +26,18 @@ The image contains only the base services needed for the proof: Guix daemon,
 networking, serial console boot, and the `guix-p2p-e2e` Shepherd service. It
 does not include a desktop environment or SSH service.
 
-Image builds run through:
+Image builds resolve a pinned Guix 1.5 profile with:
 
 ```sh
 guix time-machine -q \
   --url=https://codeberg.org/guix/guix.git \
-  --commit=7c0cd7e45b0240b842b4f3e767599501eac42ee1 \
-  -- system image -t qcow2 ...
+  --commit=7c0cd7e45b0240b842b4f3e767599501eac42ee1
 ```
+
+The runner copies that profile's `bin/guix` under
+`target/guix-p2p-vm/time-machine-guix/`, keeps its Guile load paths isolated to
+that pinned profile, adds a small compatibility import for the build-status
+reporter, then runs `guix system image -t qcow2`.
 
 Normal Rust changes only rebuild the shared payload directory. Rebuild the image
 only when `guix/e2e-vm.scm` changes, the pinned Guix revision changes, or Guix
@@ -197,7 +201,7 @@ scripts/e2e-vm.sh run
 If an old QEMU process still holds the qcow2 lock, stop that process and rerun
 the command.
 
-If `guix time-machine ... -- system image` reports that `/gnu/store/... is not
+If the pinned `guix system image` step reports that `/gnu/store/... is not
 valid`, treat that as a host Guix store integrity issue. The VM runner stops
 immediately and does not auto-repair host store paths. Repair the exact path or
 run a broader store verification before retrying:
