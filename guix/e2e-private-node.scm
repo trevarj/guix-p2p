@@ -1,6 +1,5 @@
 (use-modules (gnu)
              (gnu bootloader grub)
-             (gnu packages base)
              (gnu packages bash)
              (gnu packages ssh)
              (gnu services networking)
@@ -8,7 +7,7 @@
              (gnu system nss))
 
 (operating-system
-  (host-name "guix-p2p-node-a")
+  (host-name "guix-p2p-node")
   (timezone "Etc/UTC")
   (locale "en_US.utf8")
   (bootloader
@@ -34,9 +33,11 @@
                 (group "users")
                 (supplementary-groups '("wheel" "netdev")))
                %base-user-accounts))
+  ;; Keep the base image neutral. Node A will realize the package under test
+  ;; after boot so Node B starts from an identical store without that package.
   (packages
    (append
-    (list bash hello openssh-sans-x)
+    (list bash openssh-sans-x)
     %base-packages))
   (services
    (append
@@ -44,6 +45,7 @@
           (service openssh-service-type
                    (openssh-configuration
                     (openssh openssh-sans-x)
+                    (password-authentication? #t)
                     (port-number 22))))
     %base-services))
   (name-service-switch %mdns-host-lookup-nss))

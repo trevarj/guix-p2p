@@ -9,8 +9,7 @@ IMAGE_SIZE="${GUIX_P2P_E2E_IMAGE_SIZE:-8G}"
 MEMORY="${GUIX_P2P_E2E_VM_MEMORY:-2048}"
 CPUS="${GUIX_P2P_E2E_VM_CPUS:-2}"
 SUBSTITUTE_URLS="${GUIX_P2P_E2E_SUBSTITUTE_URLS:-https://ci.guix.gnu.org https://bordeaux.guix.gnu.org}"
-NODE_A_SYSTEM="$PROJECT_DIR/guix/e2e-private-node-a.scm"
-NODE_B_SYSTEM="$PROJECT_DIR/guix/e2e-private-node-b.scm"
+NODE_SYSTEM="$PROJECT_DIR/guix/e2e-private-node.scm"
 
 timestamp() {
     date '+%Y-%m-%dT%H:%M:%S%z'
@@ -52,10 +51,8 @@ usage() {
 Usage: scripts/e2e-private-store.sh STEP
 
 Steps:
-  derivation-a    Print Node A qcow2 image derivation
-  derivation-b    Print Node B qcow2 image derivation
-  image-a         Build and copy Node A qcow2 to target state
-  image-b         Build and copy Node B qcow2 to target state
+  derivation      Print the base qcow2 image derivation
+  image           Build the base qcow2 and copy it to Node A and Node B disks
   launch-a        Print QEMU command for Node A
   launch-b        Print QEMU command for Node B
   run-a           Run Node A under QEMU in the foreground
@@ -71,14 +68,6 @@ Environment:
 EOF
 }
 
-node_system() {
-    case "$1" in
-        a) printf '%s\n' "$NODE_A_SYSTEM" ;;
-        b) printf '%s\n' "$NODE_B_SYSTEM" ;;
-        *) echo "unknown node: $1" >&2; exit 2 ;;
-    esac
-}
-
 node_name() {
     case "$1" in
         a) printf '%s\n' "node-a" ;;
@@ -87,8 +76,12 @@ node_name() {
     esac
 }
 
-image_root() {
-    printf '%s/%s-image' "$STATE_DIR" "$(node_name "$1")"
+base_image_root() {
+    printf '%s/base-image' "$STATE_DIR"
+}
+
+base_disk_path() {
+    printf '%s/base.qcow2' "$STATE_DIR"
 }
 
 disk_path() {
@@ -100,40 +93,44 @@ serial_log() {
 }
 
 image_derivation() {
-    system_file="$(node_system "$1")"
     guix system image \
         --derivation \
         --image-type=qcow2 \
         --image-size="$IMAGE_SIZE" \
         --substitute-urls="$SUBSTITUTE_URLS" \
-        "$system_file"
+        "$NODE_SYSTEM"
 }
 
 build_image() {
-    node="$1"
-    system_file="$(node_system "$node")"
-    root="$(image_root "$node")"
-    disk="$(disk_path "$node")"
-    output_log="$STATE_DIR/logs/$(node_name "$node")-image-build.log"
+    root="$(base_image_root)"
+    base_disk="$(base_disk_path)"
+    output_log="$STATE_DIR/logs/base-image-build.log"
 
     mkdir -p "$STATE_DIR/logs"
     if [ -e "$root" ] || [ -L "$root" ]; then
         log "removing previous image root; root=$root"
         rm -f "$root"
     fi
-    run_logged "$(node_name "$node") image build" "$output_log" \
+    run_logged "base image build" "$output_log" \
         guix system image \
         --image-type=qcow2 \
         --image-size="$IMAGE_SIZE" \
         --substitute-urls="$SUBSTITUTE_URLS" \
         --root="$root" \
-        "$system_file"
+        "$NODE_SYSTEM"
 
     source_image="$(readlink -f "$root")"
-    log "copying writable disk; source=$source_image target=$disk"
-    cp -f "$source_image" "$disk"
-    chmod u+w "$disk"
-    printf '%s\n' "$disk"
+    log "copying base disk; source=$source_image target=$base_disk"
+    cp -f "$source_image" "$base_disk"
+    chmod u+w "$base_disk"
+
+    for node in a b; do
+        disk="$(disk_path "$node")"
+        log "copying writable $(node_name "$node") disk; source=$base_disk target=$disk"
+        cp -f "$base_disk" "$disk"
+        chmod u+w "$disk"
+        printf '%s\n' "$disk"
+    done
 }
 
 qemu_ports() {
@@ -163,7 +160,7 @@ qemu_command() {
     serial="$(serial_log "$node")"
 
     if [ ! -f "$disk" ]; then
-        log "disk is missing; build it first with image-$node"
+        log "disk is missing; build it first with image"
         exit 1
     fi
 
@@ -179,7 +176,7 @@ run_qemu() {
     serial="$(serial_log "$node")"
 
     if [ ! -f "$disk" ]; then
-        log "disk is missing; build it first with image-$node"
+        log "disk is missing; build it first with image"
         exit 1
     fi
 
@@ -214,17 +211,19 @@ case "${1:-help}" in
     help | -h | --help)
         usage
         ;;
-    derivation-a)
-        image_derivation a
+    derivation)
+        image_derivation
         ;;
-    derivation-b)
-        image_derivation b
+    derivation-a | derivation-b)
+        log "$1 is deprecated; use derivation"
+        image_derivation
         ;;
-    image-a)
-        build_image a
+    image)
+        build_image
         ;;
-    image-b)
-        build_image b
+    image-a | image-b)
+        log "$1 is deprecated; use image"
+        build_image
         ;;
     launch-a)
         qemu_command a

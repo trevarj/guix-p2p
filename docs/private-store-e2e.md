@@ -8,26 +8,27 @@ This path uses qcow2 Guix System images because `guix system vm` shares the
 host store, while `guix system image --image-type=qcow2` creates a disk image
 with its own store.
 
-## First Milestone
+## Current Milestone
 
-Node A and Node B are separate qcow2 images:
+Node A and Node B use separate writable qcow2 disks copied from one common
+base image:
 
-- Node A: includes `hello`.
-- Node B: does not include `hello`.
-- Both boot with serial console, DHCP, Guix daemon, and OpenSSH.
+- The base image does not include `hello`.
+- Both nodes boot with serial console, DHCP, Guix daemon, and OpenSSH.
+- Node A will realize the package under test after boot.
+- Node B starts from the same base image and must obtain the package through
+  the private-store test flow.
 
-Build only derivations first:
+Build only the derivation first:
 
 ```sh
-scripts/e2e-private-store.sh derivation-a
-scripts/e2e-private-store.sh derivation-b
+scripts/e2e-private-store.sh derivation
 ```
 
-Build writable disks:
+Build the base image and copy it to writable Node A and Node B disks:
 
 ```sh
-scripts/e2e-private-store.sh image-a
-scripts/e2e-private-store.sh image-b
+scripts/e2e-private-store.sh image
 ```
 
 Print QEMU launch commands:
@@ -51,7 +52,7 @@ The launch commands forward:
 | A | `2221` | `3031` | `6881` |
 | B | `2222` | `3032` | `6882` |
 
-Both images include a test login:
+Both disks include a test login:
 
 ```text
 user: e2e
@@ -70,7 +71,7 @@ QEMU in the foreground and create the serial log file.
 ## Next Milestones
 
 - Prove both VMs boot and expose independent stores.
-- Prove Node A has `hello` and Node B does not.
+- Realize `hello` on Node A and prove Node B does not have it.
 - Share the project payload into both VMs or bake it into the images.
 - Start `guix-p2p` on both nodes with fixed TCP/dashboard ports.
 - Start Node B's raw `guix-daemon` with the `GUIX` wrapper.
