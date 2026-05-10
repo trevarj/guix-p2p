@@ -11,6 +11,9 @@ CPUS="${GUIX_P2P_E2E_VM_CPUS:-2}"
 SUBSTITUTE_URLS="${GUIX_P2P_E2E_SUBSTITUTE_URLS:-https://ci.guix.gnu.org https://bordeaux.guix.gnu.org}"
 NODE_SYSTEM="$PROJECT_DIR/guix/e2e-private-node.scm"
 GUIX_P2P_BINARY="${GUIX_P2P_E2E_BINARY:-$PROJECT_DIR/target/release/guix-p2p}"
+SSH_DIR="$STATE_DIR/ssh"
+SSH_HOST_KEY="${GUIX_P2P_E2E_SSH_HOST_KEY:-$SSH_DIR/ssh_host_ed25519_key}"
+SSH_HOST_KEY_PUB="${GUIX_P2P_E2E_SSH_HOST_KEY_PUB:-$SSH_HOST_KEY.pub}"
 
 timestamp() {
     date '+%Y-%m-%dT%H:%M:%S%z'
@@ -68,6 +71,8 @@ Environment:
   GUIX_P2P_E2E_SUBSTITUTE_URLS Substitute URLs, default official Guix servers
   GUIX_P2P_E2E_BINARY          guix-p2p binary embedded in the image,
                                default target/release/guix-p2p
+  GUIX_P2P_E2E_SSH_HOST_KEY    Persistent test SSH host key embedded in image,
+                               default target/guix-p2p-private-store/ssh/ssh_host_ed25519_key
 EOF
 }
 
@@ -103,9 +108,29 @@ ensure_guix_p2p_binary() {
     fi
 }
 
+ensure_ssh_host_key() {
+    if [ -f "$SSH_HOST_KEY" ] && [ -f "$SSH_HOST_KEY_PUB" ]; then
+        return
+    fi
+
+    mkdir -p "$SSH_DIR"
+    log "generating persistent test SSH host key; key=$SSH_HOST_KEY"
+    if command -v ssh-keygen >/dev/null 2>&1; then
+        ssh-keygen -t ed25519 -N "" -C "guix-p2p-e2e-private-store" -f "$SSH_HOST_KEY" >/dev/null
+    else
+        guix shell openssh -- ssh-keygen -t ed25519 -N "" -C "guix-p2p-e2e-private-store" -f "$SSH_HOST_KEY" >/dev/null
+    fi
+    chmod 600 "$SSH_HOST_KEY"
+    chmod 644 "$SSH_HOST_KEY_PUB"
+}
+
 image_derivation() {
     ensure_guix_p2p_binary
-    GUIX_P2P_E2E_BINARY="$GUIX_P2P_BINARY" guix system image \
+    ensure_ssh_host_key
+    GUIX_P2P_E2E_BINARY="$GUIX_P2P_BINARY" \
+        GUIX_P2P_E2E_SSH_HOST_KEY="$SSH_HOST_KEY" \
+        GUIX_P2P_E2E_SSH_HOST_KEY_PUB="$SSH_HOST_KEY_PUB" \
+        guix system image \
         --derivation \
         --image-type=qcow2 \
         --image-size="$IMAGE_SIZE" \
@@ -115,6 +140,7 @@ image_derivation() {
 
 build_image() {
     ensure_guix_p2p_binary
+    ensure_ssh_host_key
     root="$(base_image_root)"
     base_disk="$(base_disk_path)"
     output_log="$STATE_DIR/logs/base-image-build.log"
@@ -125,7 +151,10 @@ build_image() {
         rm -f "$root"
     fi
     run_logged "base image build" "$output_log" \
-        env GUIX_P2P_E2E_BINARY="$GUIX_P2P_BINARY" guix system image \
+        env GUIX_P2P_E2E_BINARY="$GUIX_P2P_BINARY" \
+            GUIX_P2P_E2E_SSH_HOST_KEY="$SSH_HOST_KEY" \
+            GUIX_P2P_E2E_SSH_HOST_KEY_PUB="$SSH_HOST_KEY_PUB" \
+            guix system image \
         --image-type=qcow2 \
         --image-size="$IMAGE_SIZE" \
         --substitute-urls="$SUBSTITUTE_URLS" \

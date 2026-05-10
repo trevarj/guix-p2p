@@ -82,6 +82,21 @@ target/guix-p2p-private-store/logs/
 The `launch-*` steps only print commands. The `run-*` steps actually start
 QEMU in the foreground and create the serial log file.
 
+The image embeds a persistent test-only OpenSSH host key from:
+
+```sh
+target/guix-p2p-private-store/ssh/ssh_host_ed25519_key
+```
+
+Rebuilding the image keeps the same SSH fingerprint. The first rebuild after
+introducing this persistent key may still require removing the old generated
+host key from `known_hosts` once:
+
+```sh
+ssh-keygen -R '[127.0.0.1]:2221'
+ssh-keygen -R '[127.0.0.1]:2222'
+```
+
 ## Next Milestones
 
 - Prove both VMs boot and expose independent stores.

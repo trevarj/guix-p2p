@@ -17,6 +17,16 @@
                   "target/release/guix-p2p")
               "guix-p2p-release"))
 
+(define %ssh-host-key
+  (local-file (or (getenv "GUIX_P2P_E2E_SSH_HOST_KEY")
+                  "target/guix-p2p-private-store/ssh/ssh_host_ed25519_key")
+              "ssh_host_ed25519_key"))
+
+(define %ssh-host-key.pub
+  (local-file (or (getenv "GUIX_P2P_E2E_SSH_HOST_KEY_PUB")
+                  "target/guix-p2p-private-store/ssh/ssh_host_ed25519_key.pub")
+              "ssh_host_ed25519_key.pub"))
+
 (define %guix-p2p-e2e-package
   (package
     (name "guix-p2p-e2e")
@@ -89,10 +99,22 @@ private-store E2E VM image.")
     %base-packages))
   (services
    (append
-    (list (service dhcpcd-service-type)
+    (list (simple-service 'guix-p2p-e2e-ssh-host-key
+                          activation-service-type
+                          #~(begin
+                              (use-modules (guix build utils))
+                              (mkdir-p "/etc/ssh")
+                              (copy-file #$%ssh-host-key
+                                         "/etc/ssh/ssh_host_ed25519_key")
+                              (copy-file #$%ssh-host-key.pub
+                                         "/etc/ssh/ssh_host_ed25519_key.pub")
+                              (chmod "/etc/ssh/ssh_host_ed25519_key" #o600)
+                              (chmod "/etc/ssh/ssh_host_ed25519_key.pub" #o644)))
+          (service dhcpcd-service-type)
           (service openssh-service-type
                    (openssh-configuration
-                   (openssh openssh-sans-x)
+                    (openssh openssh-sans-x)
+                    (generate-host-keys? #f)
                     (password-authentication? #t)
                     (port-number 22))))
     %base-services))
