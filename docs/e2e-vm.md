@@ -19,6 +19,8 @@ scripts/e2e-vm.sh run
 This ensures a minimal qcow2 image exists, creates a disposable writable qcow2
 overlay at `target/guix-p2p-vm/e2e-vm.qcow2`, builds static release binaries
 for the payload directory, and boots headlessly with QEMU on the serial console.
+Long image and payload steps emit timestamped heartbeat lines every 30 seconds
+by default, with command output captured under `target/guix-p2p-vm/logs/`.
 
 The image contains only the base services needed for the proof: Guix daemon,
 networking, serial console boot, and the `guix-p2p-e2e` Shepherd service. It
@@ -123,9 +125,29 @@ Harness state and per-process logs:
 - `GUIX_P2P_E2E_VM_MEMORY`: QEMU memory in MB, default `4096`.
 - `GUIX_P2P_E2E_VM_CPUS`: QEMU CPU count, default `2`.
 - `GUIX_P2P_E2E_VM_DISPLAY`: QEMU display backend, default `none`.
+- `GUIX_P2P_E2E_LOG_DIR`: shell log directory, default `target/guix-p2p-vm/logs`.
+- `GUIX_P2P_E2E_HEARTBEAT_SECS`: long command heartbeat interval, default `30`.
 
 The runner uses KVM when `/dev/kvm` is available and falls back to slower TCG
 otherwise.
+
+## Logs
+
+Host-side wrapper logs:
+
+```sh
+target/guix-p2p-vm/logs/e2e-vm.log
+target/guix-p2p-vm/logs/image-build.log
+target/guix-p2p-vm/logs/payload-build.log
+```
+
+Guest-side logs:
+
+```sh
+/var/log/guix-p2p-e2e-runner.log
+/var/log/guix-p2p-e2e.log
+/tmp/guix-p2p-e2e/logs/
+```
 
 ## Troubleshooting
 
@@ -147,6 +169,20 @@ scripts/e2e-vm.sh run
 
 If an old QEMU process still holds the qcow2 lock, stop that process and rerun
 the command.
+
+If `guix system image` reports that `/gnu/store/... is not valid`, treat that
+as a host Guix store integrity issue. The VM runner stops immediately and does
+not auto-repair host store paths. Repair the exact path or run a broader store
+verification before retrying:
+
+```sh
+sudo guix build --repair /gnu/store/...-source.tar.xz
+sudo guix gc --verify=contents,repair
+scripts/e2e-vm.sh rebuild-image
+```
+
+Source tarballs such as `gzip-1.14.tar.xz` can appear here because the VM image
+contains the transitive build/source closure for the seeded `hello` derivation.
 
 If the guest fails before the smoke proof starts, rebuild the image with
 `scripts/e2e-vm.sh rebuild-image`. If only Rust code changed,

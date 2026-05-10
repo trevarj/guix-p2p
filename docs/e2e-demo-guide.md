@@ -18,6 +18,17 @@ Seeders generate synthetic nars and announce them in the DHT. Downloaders
 connect, discover providers, and request blocks. Each node gets its own
 dashboard URL printed at startup.
 
+The shell wrapper `scripts/e2e-fast-demo.sh` prints timestamped progress and
+captures wrapper output under `target/guix-p2p-e2e-logs/` by default:
+
+```sh
+target/guix-p2p-e2e-logs/e2e-fast-demo.log
+target/guix-p2p-e2e-logs/e2e-fast-demo-output.log
+```
+
+Set `GUIX_P2P_E2E_LOG_DIR` to move these logs, or
+`GUIX_P2P_E2E_HEARTBEAT_SECS` to change the default 30-second heartbeat.
+
 ### `seed` — real store path seeding
 
 ```sh

@@ -17,6 +17,19 @@ env var, and successfully downloads the nar from Node A via P2P.
 Policy: `p2p-only` (no HTTP fallback -- pure P2P). The checked-in
 orchestrator is `cargo run -p guix-p2p-e2e -- container-smoke`.
 
+The compatibility wrapper `scripts/e2e-container-test.sh` prints timestamped
+progress and captures wrapper output under `target/guix-p2p-e2e-logs/` by
+default:
+
+```sh
+target/guix-p2p-e2e-logs/e2e-container-test.log
+target/guix-p2p-e2e-logs/e2e-container-test-output.log
+```
+
+Set `GUIX_P2P_E2E_LOG_DIR` to move these logs, or
+`GUIX_P2P_E2E_HEARTBEAT_SECS` to change the default 30-second heartbeat. The
+Rust harness still writes node and build logs under `$GUIX_P2P_E2E_BASE/logs/`.
+
 ## Container Approach
 
 **`guix shell -CN`** -- lightweight containers with filesystem isolation (`-C`)

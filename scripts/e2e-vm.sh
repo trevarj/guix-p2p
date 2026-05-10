@@ -14,10 +14,73 @@ GUIX_P2P_BIN="$BINARY_DIR/guix-p2p"
 GUIX_P2P_E2E_BIN="$BINARY_DIR/guix-p2p-e2e"
 STATIC_TARGET="x86_64-unknown-linux-musl"
 IMAGE_SIZE="${GUIX_P2P_E2E_VM_SIZE:-20G}"
-IMAGE_REPAIR_ATTEMPTS="${GUIX_P2P_E2E_IMAGE_REPAIR_ATTEMPTS:-20}"
 MEMORY="${GUIX_P2P_E2E_VM_MEMORY:-4096}"
 CPUS="${GUIX_P2P_E2E_VM_CPUS:-2}"
 DISPLAY_MODE="${GUIX_P2P_E2E_VM_DISPLAY:-none}"
+LOG_DIR="${GUIX_P2P_E2E_LOG_DIR:-$VM_DIR/logs}"
+SHELL_LOG="$LOG_DIR/e2e-vm.log"
+IMAGE_LOG="$LOG_DIR/image-build.log"
+PAYLOAD_LOG="$LOG_DIR/payload-build.log"
+HEARTBEAT_SECS="${GUIX_P2P_E2E_HEARTBEAT_SECS:-30}"
+
+timestamp() {
+    date '+%Y-%m-%dT%H:%M:%S%z'
+}
+
+log() {
+    mkdir -p "$LOG_DIR"
+    line="$(timestamp) e2e-vm: $*"
+    printf '%s\n' "$line" >&2
+    printf '%s\n' "$line" >>"$SHELL_LOG"
+}
+
+log_tail() {
+    path="$1"
+    lines="${2:-80}"
+    if [ -f "$path" ]; then
+        log "last $lines lines from $path:"
+        tail -n "$lines" "$path" >&2 || true
+    else
+        log "log file is missing: $path"
+    fi
+}
+
+run_with_heartbeat() {
+    label="$1"
+    output_log="$2"
+    shift 2
+
+    mkdir -p "$LOG_DIR"
+    rm -f "$output_log"
+    log "starting $label; output=$output_log"
+    started="$(date +%s)"
+    "$@" >"$output_log" 2>&1 &
+    pid="$!"
+    log "$label pid=$pid"
+
+    next_heartbeat="$HEARTBEAT_SECS"
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep 1 || true
+        now="$(date +%s)"
+        elapsed="$((now - started))"
+        if [ "$elapsed" -ge "$next_heartbeat" ] && kill -0 "$pid" 2>/dev/null; then
+            log "$label still running; pid=$pid elapsed=$((now - started))s output=$output_log"
+            next_heartbeat="$((next_heartbeat + HEARTBEAT_SECS))"
+        fi
+    done
+
+    set +e
+    wait "$pid"
+    status="$?"
+    set -e
+    elapsed="$(($(date +%s) - started))"
+    if [ "$status" -eq 0 ]; then
+        log "$label completed; elapsed=${elapsed}s"
+    else
+        log "$label failed; status=$status elapsed=${elapsed}s output=$output_log"
+    fi
+    return "$status"
+}
 
 usage() {
     cat <<EOF
@@ -41,6 +104,8 @@ Environment:
   GUIX_P2P_E2E_VM_MEMORY    QEMU memory in MB, default 4096
   GUIX_P2P_E2E_VM_CPUS      QEMU CPU count, default 2
   GUIX_P2P_E2E_VM_DISPLAY   QEMU display backend, default none
+  GUIX_P2P_E2E_LOG_DIR      Shell log directory, default target/guix-p2p-vm/logs
+  GUIX_P2P_E2E_HEARTBEAT_SECS  Long command heartbeat interval, default 30
 EOF
 }
 
@@ -125,12 +190,23 @@ write_payload_runner() {
 set -eu
 
 PAYLOAD=/mnt/guix-p2p-bin
+GUEST_LOG=/var/log/guix-p2p-e2e-runner.log
+
+guest_log() {
+    line="$(date '+%Y-%m-%dT%H:%M:%S%z') e2e-vm-guest: $*"
+    printf '%s\n' "$line" >&2
+    printf '%s\n' "$line" >>"$GUEST_LOG" 2>/dev/null || true
+}
 
 mkdir -p "$PAYLOAD"
 if ! mountpoint -q "$PAYLOAD"; then
+    guest_log "mounting 9p payload share at $PAYLOAD"
     mount -t 9p -o trans=virtio,version=9p2000.L,ro guix-p2p-bin "$PAYLOAD"
+else
+    guest_log "payload share already mounted at $PAYLOAD"
 fi
 
+guest_log "remounting /gnu/store writable for disposable VM proof"
 mount -o remount,rw /gnu/store 2>/dev/null || true
 
 export GUIX_P2P_E2E_BASE=/tmp/guix-p2p-e2e
@@ -147,15 +223,18 @@ set -- \
     --keep-temp
 
 if [ -n "${GUIX_P2P_E2E_STORE_PATH:-}" ]; then
+    guest_log "starting guix-p2p-e2e container-smoke with explicit store path"
     exec "$PAYLOAD/bin/guix-p2p-e2e" "$@" --store-path "$GUIX_P2P_E2E_STORE_PATH"
 fi
 
+guest_log "starting guix-p2p-e2e container-smoke"
 exec "$PAYLOAD/bin/guix-p2p-e2e" "$@"
 EOF
     chmod 755 "$PAYLOAD_ROOT/run-e2e-service.sh"
 }
 
 build_payload() {
+    log "building static payload; target=$STATIC_TARGET payload=$PAYLOAD_ROOT"
     need_build_tools payload
     ensure_rust_src
 
@@ -178,7 +257,7 @@ build_payload() {
     export CC_x86_64_unknown_linux_musl
     export CARGO_PROFILE_RELEASE_PANIC
 
-    cargo build \
+    run_with_heartbeat "payload cargo build" "$PAYLOAD_LOG" cargo build \
         -Z build-std=std,panic_abort \
         --release \
         --target "$STATIC_TARGET" \
@@ -194,6 +273,7 @@ build_payload() {
     ensure_static_binary "$GUIX_P2P_BIN"
     ensure_static_binary "$GUIX_P2P_E2E_BIN"
     write_payload_runner
+    log "payload ready; root=$PAYLOAD_ROOT log=$PAYLOAD_LOG"
 }
 
 build_local_image_once() {
@@ -211,34 +291,39 @@ extract_invalid_store_path() {
 
 rebuild_image() {
     mkdir -p "$VM_DIR"
+    log "rebuilding local Guix qcow2 image; size=$IMAGE_SIZE output=$LOCAL_IMAGE_ROOT"
 
-    attempt=1
-    while [ "$attempt" -le "$IMAGE_REPAIR_ATTEMPTS" ]; do
-        log="$VM_DIR/image-build-$attempt.log"
-        if build_local_image_once >"$log" 2>&1; then
-            cat "$log"
-            rm -f "$log"
-            return 0
-        fi
+    if run_with_heartbeat "guix system image" "$IMAGE_LOG" build_local_image_once; then
+        log "image ready; output=$LOCAL_IMAGE_ROOT"
+        return 0
+    fi
 
-        cat "$log"
-        missing="$(extract_invalid_store_path "$log")"
-        if [ -z "$missing" ]; then
-            echo "image build failed without a repairable missing store path; log: $log" >&2
-            return 1
-        fi
+    log_tail "$IMAGE_LOG" 100
+    missing="$(extract_invalid_store_path "$IMAGE_LOG")"
+    if [ -n "$missing" ]; then
+        log "invalid host Guix store path detected: $missing"
+        cat >&2 <<EOF
+The local Guix image build failed because a host store path is marked invalid.
+Repair the host Guix store manually before rerunning the E2E VM.
 
-        echo "restoring missing store path before retry: $missing" >&2
-        guix build "$missing"
-        attempt=$((attempt + 1))
-    done
+Exact-path repair:
+  sudo guix build --repair $missing
 
-    echo "image build still failed after $IMAGE_REPAIR_ATTEMPTS missing-path repair attempts" >&2
+Broader store verification and repair:
+  sudo guix gc --verify=contents,repair
+
+Then rerun:
+  scripts/e2e-vm.sh rebuild-image
+EOF
+    else
+        log "image build failed; full log: $IMAGE_LOG"
+    fi
     return 1
 }
 
 ensure_image() {
     if [ -e "$LOCAL_IMAGE_ROOT" ]; then
+        log "using existing image; output=$LOCAL_IMAGE_ROOT"
         return 0
     fi
     rebuild_image
@@ -250,6 +335,7 @@ image_source_path() {
 }
 
 prepare_disk() {
+    log "preparing writable VM disk; disk=$DISK"
     image_source="$(image_source_path)"
     disk_source=""
     if [ -e "$DISK_SOURCE" ]; then
@@ -258,17 +344,21 @@ prepare_disk() {
 
     if [ ! -e "$DISK" ] || [ "$disk_source" != "$image_source" ]; then
         if [ -e "$DISK" ]; then
-            echo "refreshing writable VM disk from updated image" >&2
+            log "refreshing writable VM disk from updated image"
         fi
         rm -f "$DISK.tmp"
         qemu-img create -f qcow2 -F qcow2 -b "$image_source" "$DISK.tmp" >/dev/null
         mv "$DISK.tmp" "$DISK"
         chmod 600 "$DISK"
         printf '%s\n' "$image_source" >"$DISK_SOURCE"
+        log "writable VM disk ready; backing=$image_source"
+    else
+        log "using existing writable VM disk; backing=$image_source"
     fi
 }
 
 boot_vm() {
+    log "boot requested; vm_dir=$VM_DIR memory=${MEMORY}M cpus=$CPUS display=$DISPLAY_MODE"
     need_runtime_tools boot
     prepare_disk
     build_payload
@@ -277,9 +367,10 @@ boot_vm() {
     if [ -e /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
         accel=kvm
     else
-        echo "warning: /dev/kvm is unavailable; using slower QEMU TCG" >&2
+        log "warning: /dev/kvm is unavailable; using slower QEMU TCG"
     fi
 
+    log "starting QEMU; accel=$accel disk=$DISK payload=$PAYLOAD_ROOT"
     echo "dashboard ports forwarded:"
     echo "  node A: http://127.0.0.1:3031"
     echo "  node B: http://127.0.0.1:3032"
@@ -287,6 +378,8 @@ boot_vm() {
     echo "guest service: guix-p2p-e2e Shepherd service"
     echo "display backend: $DISPLAY_MODE"
     echo "VM log inside guest: /var/log/guix-p2p-e2e.log"
+    echo "guest runner log: /var/log/guix-p2p-e2e-runner.log"
+    echo "host shell log: $SHELL_LOG"
 
     exec qemu-system-x86_64 \
         -m "$MEMORY" \
@@ -301,25 +394,31 @@ boot_vm() {
 }
 
 clean_vm() {
+    log "removing generated VM state under $VM_DIR"
     rm -rf "$VM_DIR"
 }
 
 case "${1:-}" in
     image)
+        log "command=image"
         need_runtime_tools image
         ensure_image
         ;;
     rebuild-image)
+        log "command=rebuild-image"
         need_runtime_tools rebuild-image
         rebuild_image
         ;;
     payload)
+        log "command=payload"
         build_payload
         ;;
     boot)
+        log "command=boot"
         boot_vm
         ;;
     run)
+        log "command=run"
         need_runtime_tools run
         ensure_image
         boot_vm
