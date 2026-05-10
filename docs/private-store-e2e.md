@@ -96,6 +96,17 @@ guix-p2p-e2e-node-b /gnu/store/...-hello-... 12D3...
 The Node B helper refuses to continue if that exact store path already exists
 locally.
 
+Rerunning either helper stops the previous helper-started daemon for that node
+before starting a new one, avoiding stale dashboard or socket listeners.
+
+For manual relay checks from a shell, connect fd 4 to stdout because the
+Guix substitute protocol writes structured replies on fd 4:
+
+```sh
+printf 'have %s\n' "$STORE_PATH" \
+  | guix-p2p --query --socket /tmp/guix-p2p-b/guix-p2p.sock 4>&1
+```
+
 Serial logs are written under:
 
 ```sh
