@@ -10,6 +10,19 @@ Use official substitutes while debugging:
 SUBS='https://ci.guix.gnu.org https://bordeaux.guix.gnu.org'
 ```
 
+The thin script wrapper keeps each step addressable:
+
+```sh
+scripts/e2e-container-debug.sh help
+scripts/e2e-container-debug.sh host-build
+scripts/e2e-container-debug.sh minimal-build
+scripts/e2e-container-debug.sh minimal-launch
+```
+
+Build steps run directly and write logs under
+`target/guix-p2p-container-debug/logs/`. Launch steps print the exact `sudo`
+command because `guix system container` runs in the foreground as root.
+
 ## Minimal Container
 
 Prove the host build path first:
