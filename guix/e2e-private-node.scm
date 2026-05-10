@@ -6,6 +6,7 @@
              (gnu bootloader grub)
              (gnu packages bash)
              (gnu packages commencement)
+             (gnu packages curl)
              (gnu packages ssh)
              (gnu packages tls)
              (gnu services networking)
@@ -70,13 +71,30 @@
                   "CACHE_DIR=\"${GUIX_P2P_E2E_A_CACHE:-/tmp/guix-p2p-a}\"\n"
                   "LOG=\"${GUIX_P2P_E2E_A_LOG:-/tmp/guix-p2p-a.log}\"\n"
                   "SOCKET=\"${GUIX_P2P_E2E_A_SOCKET:-$CACHE_DIR/guix-p2p.sock}\"\n"
+                  "SUBSTITUTE_URLS=\"${GUIX_P2P_E2E_SUBSTITUTE_URLS:-https://ci.guix.gnu.org https://bordeaux.guix.gnu.org}\"\n"
                   "LISTEN=\"${GUIX_P2P_E2E_A_LISTEN:-/ip4/0.0.0.0/tcp/6881}\"\n"
                   "DASHBOARD_BIND=\"${GUIX_P2P_E2E_A_DASHBOARD_BIND:-0.0.0.0}\"\n"
                   "DASHBOARD_PORT=\"${GUIX_P2P_E2E_A_DASHBOARD_PORT:-3031}\"\n"
                   "mkdir -p \"$CACHE_DIR\" \"$HOME/.config/guix-p2p\"\n"
                   "printf 'min_providers = 1\\n' > \"$HOME/.config/guix-p2p/config.toml\"\n"
-                  "STORE_PATH=\"$(guix build \"$PACKAGE\")\"\n"
+                  "STORE_PATH=\"$(guix build --substitute-urls=\"$SUBSTITUTE_URLS\" \"$PACKAGE\")\"\n"
+                  "STORE_HASH=\"${STORE_PATH#/gnu/store/}\"\n"
+                  "STORE_HASH=\"${STORE_HASH%%-*}\"\n"
+                  "NARINFO_URL=''\n"
+                  "for BASE_URL in $SUBSTITUTE_URLS; do\n"
+                  "  URL=\"${BASE_URL%/}/$STORE_HASH.narinfo\"\n"
+                  "  if curl -fsI \"$URL\" >/dev/null 2>&1; then\n"
+                  "    NARINFO_URL=\"$URL\"\n"
+                  "    break\n"
+                  "  fi\n"
+                  "done\n"
+                  "if [ -z \"$NARINFO_URL\" ]; then\n"
+                  "  echo \"no official narinfo found for $STORE_PATH\" >&2\n"
+                  "  echo \"B needs signed narinfo from one of: $SUBSTITUTE_URLS\" >&2\n"
+                  "  exit 1\n"
+                  "fi\n"
                   "printf '%s\\n' \"$STORE_PATH\" > /tmp/guix-p2p-a-store-path\n"
+                  "printf '%s\\n' \"$NARINFO_URL\" > /tmp/guix-p2p-a-narinfo-url\n"
                   "if [ -f /tmp/guix-p2p-a.pid ]; then\n"
                   "  OLD_PID=\"$(cat /tmp/guix-p2p-a.pid 2>/dev/null || true)\"\n"
                   "  if [ -n \"$OLD_PID\" ] && kill -0 \"$OLD_PID\" 2>/dev/null; then\n"
@@ -104,6 +122,7 @@
                   "done\n"
                   "[ -n \"$PEER_ID\" ] && printf '%s\\n' \"$PEER_ID\" > /tmp/guix-p2p-a-peer-id\n"
                   "printf 'store_path=%s\\n' \"$STORE_PATH\"\n"
+                  "printf 'narinfo_url=%s\\n' \"$NARINFO_URL\"\n"
                   "printf 'peer_id=%s\\n' \"$PEER_ID\"\n"
                   "printf 'pid=%s\\nlog=%s\\nsocket=%s\\ndashboard=http://127.0.0.1:%s\\n' \"$PID\" \"$LOG\" \"$SOCKET\" \"$DASHBOARD_PORT\"\n")
                  port)))
@@ -204,7 +223,7 @@ private-store E2E VM image.")
   ;; after boot so Node B starts from an identical store without that package.
   (packages
    (append
-    (list bash gcc-toolchain %guix-p2p-e2e-package openssh-sans-x openssl)
+    (list bash curl gcc-toolchain %guix-p2p-e2e-package openssh-sans-x openssl)
     %base-packages))
   (services
    (append
