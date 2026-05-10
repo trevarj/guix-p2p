@@ -14,10 +14,17 @@ Node A and Node B use separate writable qcow2 disks copied from one common
 base image:
 
 - The base image does not include `hello`.
-- Both nodes boot with serial console, DHCP, Guix daemon, and OpenSSH.
+- Both nodes boot with serial console, DHCP, Guix daemon, OpenSSH, and the
+  locally built `guix-p2p` binary at `/usr/local/bin/guix-p2p`.
 - Node A will realize the package under test after boot.
 - Node B starts from the same base image and must obtain the package through
   the private-store test flow.
+
+Build the binary that will be embedded in the image:
+
+```sh
+cargo build --release
+```
 
 Build only the derivation first:
 
@@ -57,6 +64,12 @@ Both disks include a test login:
 ```text
 user: e2e
 password: e2e
+```
+
+Inside either VM, verify the embedded binary:
+
+```sh
+guix-p2p --help
 ```
 
 Serial logs are written under:
