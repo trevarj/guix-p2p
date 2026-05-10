@@ -73,6 +73,29 @@ command -v guix-p2p
 guix-p2p --help
 ```
 
+The image also includes VM-local setup helpers:
+
+```sh
+command -v guix-p2p-e2e-node-a
+command -v guix-p2p-e2e-node-b
+```
+
+On Node A, build and seed the package under test:
+
+```sh
+guix-p2p-e2e-node-a hello
+```
+
+The command prints `store_path=...` and `peer_id=...`; pass those two values to
+Node B:
+
+```sh
+guix-p2p-e2e-node-b /gnu/store/...-hello-... 12D3...
+```
+
+The Node B helper refuses to continue if that exact store path already exists
+locally.
+
 Serial logs are written under:
 
 ```sh

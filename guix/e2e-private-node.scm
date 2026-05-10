@@ -41,7 +41,9 @@
           (use-modules (guix build utils))
           (let* ((bin (string-append #$output "/bin"))
                  (real (string-append bin "/.guix-p2p-real"))
-                 (wrapper (string-append bin "/guix-p2p")))
+                 (wrapper (string-append bin "/guix-p2p"))
+                 (node-a (string-append bin "/guix-p2p-e2e-node-a"))
+                 (node-b (string-append bin "/guix-p2p-e2e-node-b")))
             (mkdir-p bin)
             (copy-file #$%guix-p2p-binary real)
             (chmod real #o555)
@@ -55,9 +57,102 @@
                   "export LD_LIBRARY_PATH=\""
                   #$openssl "/lib:" #$gcc-toolchain "/lib"
                   "${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n"
-                  "exec \"" real "\" \"$@\"\n")
+                 "exec \"" real "\" \"$@\"\n")
                  port)))
-            (chmod wrapper #o555)))))
+            (chmod wrapper #o555)
+            (call-with-output-file node-a
+              (lambda (port)
+                (display
+                 (string-append
+                  "#!" #$(file-append bash "/bin/sh") "\n"
+                  "set -eu\n"
+                  "PACKAGE=\"${1:-hello}\"\n"
+                  "CACHE_DIR=\"${GUIX_P2P_E2E_A_CACHE:-/tmp/guix-p2p-a}\"\n"
+                  "LOG=\"${GUIX_P2P_E2E_A_LOG:-/tmp/guix-p2p-a.log}\"\n"
+                  "SOCKET=\"${GUIX_P2P_E2E_A_SOCKET:-$CACHE_DIR/guix-p2p.sock}\"\n"
+                  "LISTEN=\"${GUIX_P2P_E2E_A_LISTEN:-/ip4/0.0.0.0/tcp/6881}\"\n"
+                  "DASHBOARD_BIND=\"${GUIX_P2P_E2E_A_DASHBOARD_BIND:-0.0.0.0}\"\n"
+                  "DASHBOARD_PORT=\"${GUIX_P2P_E2E_A_DASHBOARD_PORT:-3031}\"\n"
+                  "mkdir -p \"$CACHE_DIR\" \"$HOME/.config/guix-p2p\"\n"
+                  "printf 'min_providers = 1\\n' > \"$HOME/.config/guix-p2p/config.toml\"\n"
+                  "STORE_PATH=\"$(guix build \"$PACKAGE\")\"\n"
+                  "printf '%s\\n' \"$STORE_PATH\" > /tmp/guix-p2p-a-store-path\n"
+                  "rm -f \"$SOCKET\"\n"
+                  "RUST_LOG=\"${RUST_LOG:-info}\" guix-p2p --daemon \\\n"
+                  "  --cache-dir \"$CACHE_DIR\" \\\n"
+                  "  --listen-addr \"$LISTEN\" \\\n"
+                  "  --socket \"$SOCKET\" \\\n"
+                  "  --dashboard --dashboard-bind \"$DASHBOARD_BIND\" --dashboard-port \"$DASHBOARD_PORT\" \\\n"
+                  "  --seed \"$STORE_PATH\" \\\n"
+                  "  > \"$LOG\" 2>&1 &\n"
+                  "PID=\"$!\"\n"
+                  "printf '%s\\n' \"$PID\" > /tmp/guix-p2p-a.pid\n"
+                  "PEER_ID=''\n"
+                  "i=0\n"
+                  "while [ \"$i\" -lt 30 ]; do\n"
+                  "  PEER_ID=\"$(sed -n 's/.*Peer ID: //p' \"$LOG\" 2>/dev/null | tail -n 1)\"\n"
+                  "  [ -n \"$PEER_ID\" ] && break\n"
+                  "  i=$((i + 1))\n"
+                  "  sleep 1\n"
+                  "done\n"
+                  "[ -n \"$PEER_ID\" ] && printf '%s\\n' \"$PEER_ID\" > /tmp/guix-p2p-a-peer-id\n"
+                  "printf 'store_path=%s\\n' \"$STORE_PATH\"\n"
+                  "printf 'peer_id=%s\\n' \"$PEER_ID\"\n"
+                  "printf 'pid=%s\\nlog=%s\\nsocket=%s\\ndashboard=http://127.0.0.1:%s\\n' \"$PID\" \"$LOG\" \"$SOCKET\" \"$DASHBOARD_PORT\"\n")
+                 port)))
+            (chmod node-a #o555)
+            (call-with-output-file node-b
+              (lambda (port)
+                (display
+                 (string-append
+                  "#!" #$(file-append bash "/bin/sh") "\n"
+                  "set -eu\n"
+                  "if [ \"$#\" -lt 2 ]; then\n"
+                  "  echo 'usage: guix-p2p-e2e-node-b STORE_PATH NODE_A_PEER_ID' >&2\n"
+                  "  exit 2\n"
+                  "fi\n"
+                  "STORE_PATH=\"$1\"\n"
+                  "PEER_ID=\"$2\"\n"
+                  "CACHE_DIR=\"${GUIX_P2P_E2E_B_CACHE:-/tmp/guix-p2p-b}\"\n"
+                  "LOG=\"${GUIX_P2P_E2E_B_LOG:-/tmp/guix-p2p-b.log}\"\n"
+                  "SOCKET=\"${GUIX_P2P_E2E_B_SOCKET:-$CACHE_DIR/guix-p2p.sock}\"\n"
+                  "LISTEN=\"${GUIX_P2P_E2E_B_LISTEN:-/ip4/0.0.0.0/tcp/6882}\"\n"
+                  "DASHBOARD_BIND=\"${GUIX_P2P_E2E_B_DASHBOARD_BIND:-0.0.0.0}\"\n"
+                  "DASHBOARD_PORT=\"${GUIX_P2P_E2E_B_DASHBOARD_PORT:-3032}\"\n"
+                  "BOOTSTRAP=\"${GUIX_P2P_E2E_B_BOOTSTRAP:-/ip4/10.0.2.2/tcp/6881/p2p/$PEER_ID}\"\n"
+                  "if [ -e \"$STORE_PATH\" ]; then\n"
+                  "  echo \"Node B already has $STORE_PATH; stop before mutating the proof\" >&2\n"
+                  "  exit 1\n"
+                  "fi\n"
+                  "mkdir -p \"$CACHE_DIR\" \"$HOME/.config/guix-p2p\"\n"
+                  "printf 'min_providers = 1\\n' > \"$HOME/.config/guix-p2p/config.toml\"\n"
+                  "rm -f \"$SOCKET\"\n"
+                  "RUST_LOG=\"${RUST_LOG:-info}\" guix-p2p --daemon \\\n"
+                  "  --cache-dir \"$CACHE_DIR\" \\\n"
+                  "  --listen-addr \"$LISTEN\" \\\n"
+                  "  --socket \"$SOCKET\" \\\n"
+                  "  --dashboard --dashboard-bind \"$DASHBOARD_BIND\" --dashboard-port \"$DASHBOARD_PORT\" \\\n"
+                  "  --bootstrap-peers \"$BOOTSTRAP\" \\\n"
+                  "  --policy p2p-only \\\n"
+                  "  > \"$LOG\" 2>&1 &\n"
+                  "PID=\"$!\"\n"
+                  "printf '%s\\n' \"$PID\" > /tmp/guix-p2p-b.pid\n"
+                  "i=0\n"
+                  "while [ \"$i\" -lt 30 ]; do\n"
+                  "  [ -S \"$SOCKET\" ] && break\n"
+                  "  i=$((i + 1))\n"
+                  "  sleep 1\n"
+                  "done\n"
+                  "printf 'store_path=%s\\n' \"$STORE_PATH\"\n"
+                  "printf 'bootstrap=%s\\n' \"$BOOTSTRAP\"\n"
+                  "printf 'pid=%s\\nlog=%s\\nsocket=%s\\ndashboard=http://127.0.0.1:%s\\n' \"$PID\" \"$LOG\" \"$SOCKET\" \"$DASHBOARD_PORT\"\n"
+                  "if [ -S \"$SOCKET\" ]; then\n"
+                  "  printf 'have_query=' && printf 'have %s\\n' \"$STORE_PATH\" | guix-p2p --query --socket \"$SOCKET\"\n"
+                  "else\n"
+                  "  echo \"socket did not appear yet; inspect $LOG\" >&2\n"
+                  "fi\n")
+                 port)))
+            (chmod node-b #o555)))))
     (home-page "https://example.invalid/guix-p2p-e2e")
     (synopsis "Locally built guix-p2p binary for private-store E2E images")
     (description "This package wraps the locally built guix-p2p binary for the
