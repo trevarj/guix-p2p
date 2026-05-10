@@ -326,6 +326,20 @@ async fn run_swarm_task(
                     SwarmEvent::Behaviour(GuixP2PEvent::BlockExchange(e)) => {
                         handle_block_exchange(&notify_tx, &event_tx, e, &reputation, &conn_mgr, &mut swarm, &nar_store);
                     },
+                    SwarmEvent::Behaviour(GuixP2PEvent::Mdns(libp2p::mdns::Event::Discovered(list))) => {
+                        for (peer_id, addr) in list {
+                            tracing::info!("Discovered LAN peer {} at {}", peer_id, addr);
+                            swarm.behaviour_mut().kad.add_address(&peer_id, addr);
+                        }
+                    },
+                    SwarmEvent::Behaviour(GuixP2PEvent::Identify(e)) => {
+                        if let libp2p::identify::Event::Received { peer_id, info, .. } = *e {
+                            for addr in info.listen_addrs {
+                                tracing::debug!("Identify learned peer {} at {}", peer_id, addr);
+                                swarm.behaviour_mut().kad.add_address(&peer_id, addr);
+                            }
+                        }
+                    },
                     SwarmEvent::ConnectionEstablished {
                         peer_id,
                         endpoint: libp2p::core::ConnectedPoint::Dialer { address, .. },

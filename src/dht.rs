@@ -1,6 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
-use libp2p::kad::{Event as KadEvent, GetProvidersOk, QueryResult};
+use libp2p::{
+    Multiaddr, PeerId,
+    kad::{Event as KadEvent, GetProvidersOk, QueryResult},
+    multiaddr::Protocol,
+};
 
 use crate::{
     behaviour::GuixP2PBehaviour,
@@ -88,6 +92,10 @@ pub fn bootstrap(
         match addr_str.parse::<libp2p::Multiaddr>() {
             Ok(addr) => {
                 tracing::info!("Bootstrapping from {}", addr);
+                if let Some((peer_id, peer_addr)) = kad_peer_address(&addr) {
+                    swarm.behaviour_mut().kad.add_address(&peer_id, peer_addr);
+                    tracing::debug!("Added bootstrap peer {} to Kad routing table", peer_id);
+                }
                 match swarm.dial(addr) {
                     Ok(_) => connected += 1,
                     Err(e) => {
@@ -116,6 +124,14 @@ pub fn bootstrap(
     Ok(())
 }
 
+fn kad_peer_address(addr: &Multiaddr) -> Option<(PeerId, Multiaddr)> {
+    let mut peer_addr = addr.clone();
+    match peer_addr.pop() {
+        Some(Protocol::P2p(peer_id)) => Some((peer_id, peer_addr)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,6 +141,17 @@ mod tests {
         let cache = create_provider_cache();
         // Verify it's created (no panic)
         let _ = cache;
+    }
+
+    #[test]
+    fn test_kad_peer_address_splits_p2p_suffix() {
+        let peer_id = libp2p::PeerId::random();
+        let addr: Multiaddr = format!("/ip4/127.0.0.1/tcp/6881/p2p/{peer_id}").parse().unwrap();
+
+        let (got_peer_id, got_addr) = kad_peer_address(&addr).unwrap();
+
+        assert_eq!(got_peer_id, peer_id);
+        assert_eq!(got_addr.to_string(), "/ip4/127.0.0.1/tcp/6881");
     }
 
     #[tokio::test]

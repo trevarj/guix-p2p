@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
+use sha2::{Digest, Sha256};
 use tracing;
 
 use crate::swarm::{
@@ -68,11 +69,24 @@ impl NarStore {
                 None => continue,
             };
 
-            let meta = match std::fs::metadata(&path) {
-                Ok(m) => m,
-                Err(_) => continue,
+            let data = match std::fs::read(&path) {
+                Ok(data) => data,
+                Err(e) => {
+                    tracing::warn!("failed to read cached nar {}: {}", path.display(), e);
+                    continue;
+                },
             };
-            let nar_size = meta.len();
+            let actual_hash = hex::encode(Sha256::digest(&data));
+            if actual_hash != stem {
+                tracing::warn!(
+                    "skipping cached nar with hash mismatch: file={} expected={} actual={}",
+                    path.display(),
+                    stem,
+                    actual_hash,
+                );
+                continue;
+            }
+            let nar_size = data.len() as u64;
             let block_info = BlockInfo::from_file_size(nar_size, self.block_size);
 
             tracing::info!(
@@ -107,7 +121,7 @@ impl NarStore {
         Ok(())
     }
 
-    /// Seed a nar from a store path using `guix archive --export`.
+    /// Seed a single-item nar from a store path using Guix's nar serializer.
     /// The nar hash is computed via `guix hash -S nar -f hex`.
     pub fn seed_store_path(&mut self, store_path: &str) -> anyhow::Result<String> {
         let nar_hash_hex = compute_nar_hash(store_path).context("failed to compute nar hash")?;
@@ -277,15 +291,32 @@ fn compute_nar_hash(store_path: &str) -> anyhow::Result<String> {
     Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
-/// Export nar data from a store path using `guix archive --export`.
+/// Export raw single-item nar data from a store path.
+///
+/// `guix archive --export` intentionally writes a nar bundle with store-item
+/// metadata and a signature. Substitute servers serve the raw single-item nar,
+/// so use Guix's serializer directly.
 fn export_nar(store_path: &str) -> anyhow::Result<Vec<u8>> {
-    let output = std::process::Command::new("guix")
-        .args(["archive", "--export", store_path])
+    let output = std::process::Command::new("guile")
+        .args([
+            "-c",
+            r#"
+(use-modules (guix serialization)
+             (ice-9 match))
+(match (command-line)
+  ((_ store-path)
+   (write-file store-path (current-output-port)))
+  (_
+   (format (current-error-port) "usage: guile -c SCRIPT STORE-PATH~%")
+   (exit 2)))
+"#,
+            store_path,
+        ])
         .output()
-        .context("failed to run `guix archive --export`")?;
+        .context("failed to run Guix nar serializer via `guile`")?;
 
     if !output.status.success() {
-        anyhow::bail!("guix archive --export failed: {}", String::from_utf8_lossy(&output.stderr));
+        anyhow::bail!("Guix nar serializer failed: {}", String::from_utf8_lossy(&output.stderr));
     }
 
     Ok(output.stdout)
@@ -327,6 +358,22 @@ mod tests {
         let store = NarStore::new(tmp.path(), 512);
         assert!(store.has_nar(&hash));
         assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn test_nar_store_skips_cached_hash_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nar_dir = tmp.path().join("nar");
+        std::fs::create_dir_all(&nar_dir).unwrap();
+
+        let good_data = b"good nar bytes";
+        let good_hash = hex::encode(Sha256::digest(good_data));
+        std::fs::write(nar_dir.join(format!("{good_hash}.nar")), b"different bytes").unwrap();
+
+        let store = NarStore::new(tmp.path(), 512);
+
+        assert!(!store.has_nar(&good_hash));
+        assert_eq!(store.len(), 0);
     }
 
     #[test]

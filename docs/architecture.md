@@ -452,12 +452,13 @@ and serving.
   saved to `<cache_dir>/nar/<sha256hex>.nar` and announced in the DHT via
   `start_providing`. Future peers can download it from this node.
 - **Explicit seeding**: The `--seed` flag accepts comma-separated store paths.
-  Each is exported via `guix archive --export`, hashed via `guix hash -S nar
-  -f hex`, and stored in the nar cache. All seeded nars are announced in the
-  DHT on startup.
+  Each is hashed via `guix hash -S nar -f hex`, serialized as a raw
+  single-item NAR with Guix's `(guix serialization) write-file`, and stored in
+  the nar cache. All seeded nars are announced in the DHT on startup.
 - **Startup scan**: On startup, `NarStore::new()` scans `<cache_dir>/nar/*.nar`
-  and indexes each file by its filename stem (the hex sha256). All indexed
-  nars are announced in the DHT.
+  and indexes each file by its filename stem (the hex sha256). Files whose
+  bytes do not hash to the filename stem are skipped. All indexed nars are
+  announced in the DHT.
 - **Serving**: Incoming block requests are served from the nar store. The
   `NarStore::handle_request()` method dispatches to handshake replies (with
   block hashes) or block data reads. The old `serve_block_request()` stub has
@@ -479,7 +480,9 @@ guix-p2p --daemon --seed /gnu/store/...-foo,/gnu/store/...-bar
 ```
 
 Each path is fed to `NarStore::seed_store_path()`, which runs `guix hash` and
-`guix archive --export` to compute the hash and export the nar data.
+Guix's raw NAR serializer. It intentionally does not use `guix archive
+--export`, because that command writes a signed nar bundle rather than the
+single-item NAR byte stream served by substitute servers.
 
 ## Dashboard Seeding View
 

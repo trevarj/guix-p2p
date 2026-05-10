@@ -69,7 +69,8 @@ scripts/e2e-private-store.sh push-binary
 ```
 
 The push step installs `/tmp/guix-p2p-real` plus a `/tmp/guix-p2p` wrapper
-that resolves the VM's runtime libraries with `guix build`.
+that points at runtime libraries from the host-built closure and the VM system
+profile.
 
 Then run the VM helpers with the pushed binary:
 
@@ -143,6 +144,21 @@ printf 'have %s\n' "$STORE_PATH" \
   | guix-p2p --query --socket /tmp/guix-p2p-b/guix-p2p.sock 4>&1
 ```
 
+To test the P2P substitute path without running `guix-daemon`, request a raw
+single-item NAR destination on Node B:
+
+```sh
+printf 'substitute %s /tmp/guix-p2p-substitute.nar\n' "$STORE_PATH" \
+  | guix-p2p --substitute --socket /tmp/guix-p2p-b/guix-p2p.sock 4>&1
+guix hash -f hex /tmp/guix-p2p-substitute.nar
+```
+
+The expected success line is:
+
+```text
+success sha256:<nar-hash> <nar-size>
+```
+
 Serial logs are written under:
 
 ```sh
@@ -169,9 +185,10 @@ ssh-keygen -R '[127.0.0.1]:2222'
 
 ## Next Milestones
 
-- Prove both VMs boot and expose independent stores.
-- Realize `hello` on Node A and prove Node B does not have it.
-- Share the project payload into both VMs or bake it into the images.
-- Start `guix-p2p` on both nodes with fixed TCP/dashboard ports.
+- Prove both VMs boot and expose independent stores. Done.
+- Realize `hello` on Node A and prove Node B does not have it. Done.
+- Share the project payload into both VMs or bake it into the images. Done.
+- Start `guix-p2p` on both nodes with fixed TCP/dashboard ports. Done.
+- Verify direct P2P substitute relay from Node A to Node B. Done.
 - Start Node B's raw `guix-daemon` with the `GUIX` wrapper.
 - Run `guix build hello` on Node B and require p2p-only substitution from Node A.

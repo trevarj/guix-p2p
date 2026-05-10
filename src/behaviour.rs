@@ -1,6 +1,9 @@
 use libp2p::{
     identify,
-    kad::{Behaviour as KadBehaviour, Config as KadConfig, Event as KadEvent, store::MemoryStore},
+    kad::{
+        Behaviour as KadBehaviour, Config as KadConfig, Event as KadEvent, Mode as KadMode,
+        store::MemoryStore,
+    },
     mdns,
     request_response::{self, cbor},
     swarm::{NetworkBehaviour, behaviour::toggle::Toggle},
@@ -72,7 +75,11 @@ fn create_swarm_behaviour_with_mdns(
     let local_peer_id = libp2p::PeerId::from(keypair.public());
 
     let kad_config = KadConfig::default();
-    let kad = KadBehaviour::with_config(local_peer_id, MemoryStore::new(local_peer_id), kad_config);
+    let mut kad =
+        KadBehaviour::with_config(local_peer_id, MemoryStore::new(local_peer_id), kad_config);
+    // guix-p2p nodes must answer provider lookups even in local E2E VMs that
+    // do not advertise public addresses, so do not wait for Kad auto-promotion.
+    kad.set_mode(Some(KadMode::Server));
 
     let block_exchange = cbor::Behaviour::<BlockRequest, BlockResponse>::new(
         [(

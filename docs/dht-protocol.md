@@ -38,6 +38,7 @@ Returns:
 
 ```rust
 for addr in &config.bootstrap_peers {
+    kad.add_address(peer_id, address_without_p2p_suffix);
     swarm.dial(addr).await;
     // After k-bucket population, periodic bootstrap via iterative FIND_NODE
 }
@@ -47,6 +48,15 @@ Bootstraps:
 1. Connect to configured seed nodes (community volunteers initially, official Guix servers long-term)
 2. Perform iterative `FIND_NODE` toward own PeerId to populate k-buckets
 3. After bootstrap, routing table maintains itself via periodic refresh
+
+When a bootstrap multiaddr ends in `/p2p/<peer-id>`, the address without the
+`/p2p` suffix is inserted into the Kademlia routing table before dialing. mDNS
+discoveries and identify listen addresses are also inserted into Kademlia.
+
+guix-p2p forces libp2p-kad server mode. The libp2p default starts in client
+mode and auto-promotes only after address confidence improves; local private
+VM tests do not always advertise public addresses, but they still need to
+answer provider lookups.
 
 ### Bootstrap Peer Config
 

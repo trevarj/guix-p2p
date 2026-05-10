@@ -221,6 +221,7 @@ push_binary() {
     node="$1"
     ensure_guix_p2p_binary
     ensure_ssh_client_key
+    libgcrypt_runtime="$(guix build libgcrypt | tail -n 1)"
     qemu_ports "$node"
     scp \
         -i "$SSH_CLIENT_KEY" \
@@ -236,7 +237,7 @@ set -eu
 cat > /tmp/guix-p2p <<'EOF'
 #!/bin/sh
 set -eu
-LIBGCRYPT=\"\${GUIX_P2P_E2E_LIBGCRYPT:-\$(guix build libgcrypt 2>/dev/null | tail -n 1)}\"
+LIBGCRYPT=\"\${GUIX_P2P_E2E_LIBGCRYPT:-$libgcrypt_runtime}\"
 export LD_LIBRARY_PATH=\"\$LIBGCRYPT/lib:/run/current-system/profile/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}\"
 exec /tmp/guix-p2p-real \"\$@\"
 EOF
