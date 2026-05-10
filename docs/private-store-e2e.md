@@ -52,6 +52,29 @@ scripts/e2e-private-store.sh run-a
 scripts/e2e-private-store.sh run-b
 ```
 
+After the first rebuild with the persistent test client key, SSH does not need
+the password:
+
+```sh
+scripts/e2e-private-store.sh ssh-a
+scripts/e2e-private-store.sh ssh-b
+```
+
+To iterate on Rust changes without rebuilding the image, rebuild the host
+binary and copy it into both running VMs:
+
+```sh
+cargo build --release
+scripts/e2e-private-store.sh push-binary
+```
+
+Then run the VM helpers with the pushed binary:
+
+```sh
+GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p guix-p2p-e2e-node-a hello
+GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p guix-p2p-e2e-node-b /gnu/store/... 12D3...
+```
+
 The launch commands forward:
 
 | Node | SSH | Dashboard | P2P TCP |
@@ -64,6 +87,12 @@ Both disks include a test login:
 ```text
 user: e2e
 password: e2e
+```
+
+The image also authorizes a persistent test SSH client key generated under:
+
+```sh
+target/guix-p2p-private-store/ssh/e2e_ed25519
 ```
 
 Inside either VM, verify the embedded binary:

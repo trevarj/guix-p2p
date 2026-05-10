@@ -14,6 +14,8 @@ GUIX_P2P_BINARY="${GUIX_P2P_E2E_BINARY:-$PROJECT_DIR/target/release/guix-p2p}"
 SSH_DIR="$STATE_DIR/ssh"
 SSH_HOST_KEY="${GUIX_P2P_E2E_SSH_HOST_KEY:-$SSH_DIR/ssh_host_ed25519_key}"
 SSH_HOST_KEY_PUB="${GUIX_P2P_E2E_SSH_HOST_KEY_PUB:-$SSH_HOST_KEY.pub}"
+SSH_CLIENT_KEY="${GUIX_P2P_E2E_SSH_CLIENT_KEY:-$SSH_DIR/e2e_ed25519}"
+SSH_CLIENT_KEY_PUB="${GUIX_P2P_E2E_SSH_AUTHORIZED_KEY:-$SSH_CLIENT_KEY.pub}"
 
 timestamp() {
     date '+%Y-%m-%dT%H:%M:%S%z'
@@ -61,6 +63,11 @@ Steps:
   launch-b        Print QEMU command for Node B
   run-a           Run Node A under QEMU in the foreground
   run-b           Run Node B under QEMU in the foreground
+  ssh-a           SSH to Node A with the persistent test key
+  ssh-b           SSH to Node B with the persistent test key
+  push-binary     Copy target/release/guix-p2p to /tmp/guix-p2p on both nodes
+  push-binary-a   Copy target/release/guix-p2p to /tmp/guix-p2p on Node A
+  push-binary-b   Copy target/release/guix-p2p to /tmp/guix-p2p on Node B
   help            Show this help
 
 Environment:
@@ -73,6 +80,8 @@ Environment:
                                default target/release/guix-p2p
   GUIX_P2P_E2E_SSH_HOST_KEY    Persistent test SSH host key embedded in image,
                                default target/guix-p2p-private-store/ssh/ssh_host_ed25519_key
+  GUIX_P2P_E2E_SSH_CLIENT_KEY  Persistent test SSH client key authorized for e2e,
+                               default target/guix-p2p-private-store/ssh/e2e_ed25519
 EOF
 }
 
@@ -124,12 +133,30 @@ ensure_ssh_host_key() {
     chmod 644 "$SSH_HOST_KEY_PUB"
 }
 
+ensure_ssh_client_key() {
+    if [ -f "$SSH_CLIENT_KEY" ] && [ -f "$SSH_CLIENT_KEY_PUB" ]; then
+        return
+    fi
+
+    mkdir -p "$SSH_DIR"
+    log "generating persistent test SSH client key; key=$SSH_CLIENT_KEY"
+    if command -v ssh-keygen >/dev/null 2>&1; then
+        ssh-keygen -t ed25519 -N "" -C "guix-p2p-e2e-client" -f "$SSH_CLIENT_KEY" >/dev/null
+    else
+        guix shell openssh -- ssh-keygen -t ed25519 -N "" -C "guix-p2p-e2e-client" -f "$SSH_CLIENT_KEY" >/dev/null
+    fi
+    chmod 600 "$SSH_CLIENT_KEY"
+    chmod 644 "$SSH_CLIENT_KEY_PUB"
+}
+
 image_derivation() {
     ensure_guix_p2p_binary
     ensure_ssh_host_key
+    ensure_ssh_client_key
     GUIX_P2P_E2E_BINARY="$GUIX_P2P_BINARY" \
         GUIX_P2P_E2E_SSH_HOST_KEY="$SSH_HOST_KEY" \
         GUIX_P2P_E2E_SSH_HOST_KEY_PUB="$SSH_HOST_KEY_PUB" \
+        GUIX_P2P_E2E_SSH_AUTHORIZED_KEY="$SSH_CLIENT_KEY_PUB" \
         guix system image \
         --derivation \
         --image-type=qcow2 \
@@ -141,6 +168,7 @@ image_derivation() {
 build_image() {
     ensure_guix_p2p_binary
     ensure_ssh_host_key
+    ensure_ssh_client_key
     root="$(base_image_root)"
     base_disk="$(base_disk_path)"
     output_log="$STATE_DIR/logs/base-image-build.log"
@@ -154,6 +182,7 @@ build_image() {
         env GUIX_P2P_E2E_BINARY="$GUIX_P2P_BINARY" \
             GUIX_P2P_E2E_SSH_HOST_KEY="$SSH_HOST_KEY" \
             GUIX_P2P_E2E_SSH_HOST_KEY_PUB="$SSH_HOST_KEY_PUB" \
+            GUIX_P2P_E2E_SSH_AUTHORIZED_KEY="$SSH_CLIENT_KEY_PUB" \
             guix system image \
         --image-type=qcow2 \
         --image-size="$IMAGE_SIZE" \
@@ -173,6 +202,40 @@ build_image() {
         chmod u+w "$disk"
         printf '%s\n' "$disk"
     done
+}
+
+ssh_node() {
+    node="$1"
+    ensure_ssh_client_key
+    qemu_ports "$node"
+    exec ssh \
+        -i "$SSH_CLIENT_KEY" \
+        -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+        -o StrictHostKeyChecking=accept-new \
+        -p "$ssh_port" \
+        e2e@127.0.0.1
+}
+
+push_binary() {
+    node="$1"
+    ensure_guix_p2p_binary
+    ensure_ssh_client_key
+    qemu_ports "$node"
+    scp \
+        -i "$SSH_CLIENT_KEY" \
+        -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+        -o StrictHostKeyChecking=accept-new \
+        -P "$ssh_port" \
+        "$GUIX_P2P_BINARY" \
+        e2e@127.0.0.1:/tmp/guix-p2p
+    ssh \
+        -i "$SSH_CLIENT_KEY" \
+        -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+        -o StrictHostKeyChecking=accept-new \
+        -p "$ssh_port" \
+        e2e@127.0.0.1 \
+        chmod 755 /tmp/guix-p2p
+    log "pushed binary to $(node_name "$node"):/tmp/guix-p2p"
 }
 
 qemu_ports() {
@@ -278,6 +341,22 @@ case "${1:-help}" in
         ;;
     run-b)
         run_qemu b
+        ;;
+    ssh-a)
+        ssh_node a
+        ;;
+    ssh-b)
+        ssh_node b
+        ;;
+    push-binary)
+        push_binary a
+        push_binary b
+        ;;
+    push-binary-a)
+        push_binary a
+        ;;
+    push-binary-b)
+        push_binary b
         ;;
     *)
         usage >&2

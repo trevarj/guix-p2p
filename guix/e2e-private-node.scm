@@ -28,6 +28,11 @@
                   "target/guix-p2p-private-store/ssh/ssh_host_ed25519_key.pub")
               "ssh_host_ed25519_key.pub"))
 
+(define %ssh-authorized-key
+  (local-file (or (getenv "GUIX_P2P_E2E_SSH_AUTHORIZED_KEY")
+                  "target/guix-p2p-private-store/ssh/e2e_ed25519.pub")
+              "e2e_ed25519.pub"))
+
 (define %guix-p2p-e2e-package
   (package
     (name "guix-p2p-e2e")
@@ -68,6 +73,7 @@
                   "#!" #$(file-append bash "/bin/sh") "\n"
                   "set -eu\n"
                   "PACKAGE=\"${1:-hello}\"\n"
+                  "P2P=\"${GUIX_P2P_E2E_P2P_BIN:-guix-p2p}\"\n"
                   "CACHE_DIR=\"${GUIX_P2P_E2E_A_CACHE:-/tmp/guix-p2p-a}\"\n"
                   "LOG=\"${GUIX_P2P_E2E_A_LOG:-/tmp/guix-p2p-a.log}\"\n"
                   "SOCKET=\"${GUIX_P2P_E2E_A_SOCKET:-$CACHE_DIR/guix-p2p.sock}\"\n"
@@ -103,7 +109,7 @@
                   "  fi\n"
                   "fi\n"
                   "rm -f \"$SOCKET\"\n"
-                  "RUST_LOG=\"${RUST_LOG:-info}\" guix-p2p --daemon \\\n"
+                  "RUST_LOG=\"${RUST_LOG:-info}\" \"$P2P\" --daemon \\\n"
                   "  --cache-dir \"$CACHE_DIR\" \\\n"
                   "  --listen-addr \"$LISTEN\" \\\n"
                   "  --socket \"$SOCKET\" \\\n"
@@ -139,6 +145,7 @@
                   "fi\n"
                   "STORE_PATH=\"$1\"\n"
                   "PEER_ID=\"$2\"\n"
+                  "P2P=\"${GUIX_P2P_E2E_P2P_BIN:-guix-p2p}\"\n"
                   "CACHE_DIR=\"${GUIX_P2P_E2E_B_CACHE:-/tmp/guix-p2p-b}\"\n"
                   "LOG=\"${GUIX_P2P_E2E_B_LOG:-/tmp/guix-p2p-b.log}\"\n"
                   "SOCKET=\"${GUIX_P2P_E2E_B_SOCKET:-$CACHE_DIR/guix-p2p.sock}\"\n"
@@ -160,7 +167,7 @@
                   "  fi\n"
                   "fi\n"
                   "rm -f \"$SOCKET\"\n"
-                  "RUST_LOG=\"${RUST_LOG:-info}\" guix-p2p --daemon \\\n"
+                  "RUST_LOG=\"${RUST_LOG:-info}\" \"$P2P\" --daemon \\\n"
                   "  --cache-dir \"$CACHE_DIR\" \\\n"
                   "  --listen-addr \"$LISTEN\" \\\n"
                   "  --socket \"$SOCKET\" \\\n"
@@ -180,7 +187,7 @@
                   "printf 'bootstrap=%s\\n' \"$BOOTSTRAP\"\n"
                   "printf 'pid=%s\\nlog=%s\\nsocket=%s\\ndashboard=http://127.0.0.1:%s\\n' \"$PID\" \"$LOG\" \"$SOCKET\" \"$DASHBOARD_PORT\"\n"
                   "if [ -S \"$SOCKET\" ]; then\n"
-                  "  printf 'have_query=' && printf 'have %s\\n' \"$STORE_PATH\" | RUST_LOG=warn guix-p2p --query --socket \"$SOCKET\" 4>&1\n"
+                  "  printf 'have_query=' && printf 'have %s\\n' \"$STORE_PATH\" | RUST_LOG=warn \"$P2P\" --query --socket \"$SOCKET\" 4>&1\n"
                   "else\n"
                   "  echo \"socket did not appear yet; inspect $LOG\" >&2\n"
                   "fi\n")
@@ -242,6 +249,8 @@ private-store E2E VM image.")
           (service openssh-service-type
                    (openssh-configuration
                     (openssh openssh-sans-x)
+                    (authorized-keys
+                     `(("e2e" ,%ssh-authorized-key)))
                     (generate-host-keys? #f)
                     (password-authentication? #t)
                     (port-number 22))))
