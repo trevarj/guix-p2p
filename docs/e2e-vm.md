@@ -60,9 +60,10 @@ scripts/e2e-vm-repair-loop.sh
 ```
 
 It reruns `scripts/e2e-vm.sh rebuild-image`, captures each attempt under
-`target/guix-p2p-vm/logs/`, parses the exact invalid `/gnu/store/...` path from
-the runner output, and runs `sudo guix build --repair /gnu/store/...` before
-retrying. It stops on unknown failures.
+`target/guix-p2p-vm/logs/`, parses invalid `/gnu/store/...` paths from the
+runner output and Guix builder logs, and runs
+`sudo guix build --repair /gnu/store/...` before retrying. It stops on unknown
+failures.
 
 `run` and `boot` return success only when the guest prints the VM proof PASS
 marker to the QEMU serial log. Set `GUIX_P2P_E2E_HOLD=1` to keep the VM and
@@ -174,7 +175,7 @@ Harness state and per-process logs:
 - `GUIX_P2P_E2E_HEARTBEAT_PROCESS_SNAPSHOT`: include focused process snapshots
   in heartbeats, default `1`. Set to `0` to disable.
 - `GUIX_P2P_E2E_REPAIR_MAX`: maximum host store repairs for
-  `scripts/e2e-vm-repair-loop.sh`, default `50`.
+  `scripts/e2e-vm-repair-loop.sh`, default `1000`.
 - `GUIX_P2P_E2E_REPAIR_COMMAND`: repair command prefix for
   `scripts/e2e-vm-repair-loop.sh`, default `sudo guix build --repair`.
 
