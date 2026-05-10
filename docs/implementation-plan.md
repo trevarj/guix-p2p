@@ -329,41 +329,46 @@
 
 ---
 
-## Phase 10: E2E Container Test
+## Phase 10: Private-Store E2E Proof
 
 ### Goals
 
-- Multi-node P2P substitute test using `guix shell -CN` containers
-- End-to-end `guix build hello` through guix-daemon with `GUIX` env var
-  pointing to guix-p2p wrapper
-- Verify P2P nar download from seeder to builder node
+- Multi-node P2P substitute test with genuinely separate writable stores.
+- End-to-end `guix build hello` through Node B's Guix daemon with `GUIX`
+  pointing to the guix-p2p wrapper.
+- Verify Node A has the package, Node B does not, and Node B realizes it via
+  P2P nar download from Node A.
 
 ### Tasks
 
-- [x] Create orchestrator script (`scripts/e2e-container-test.sh`)
-- [x] Find raw C++ guix-daemon binary (not Guile wrapper) for `GUIX` env var
+- [ ] Build a minimal real Guix image or VM root with a writable private
+  `/gnu/store`.
+- [ ] Launch two isolated nodes with separate stores and Guix state.
+- [ ] Find raw C++ guix-daemon binary (not Guile wrapper) for `GUIX` env var
   override
-- [x] Generate per-node wrapper scripts with `GUIX_P2P_SOCKET` and
+- [ ] Generate per-node wrapper scripts with `GUIX_P2P_SOCKET` and
   `GUIX_P2P_BIN` env vars
-- [x] Phase 1: Start Node A (seeder) — guix-p2p daemon, wait for readiness,
+- [ ] Phase 1: Start Node A (seeder) — guix-p2p daemon, wait for readiness,
   capture PeerId via dashboard API
-- [x] Phase 2: Start Node B (builder) — guix-p2p daemon with
+- [ ] Phase 2: Start Node B (builder) — guix-p2p daemon with
   `--bootstrap-peers` pointing to Node A
-- [x] Phase 3: Start guix-daemon inside Node B with separate
-  `GUIX_STATE_DIRECTORY` (empty DB) and `GUIX` pointing to wrapper
-- [x] Phase 4: Seed hello on Node A via `--seed` flag
-- [x] Phase 5: Run `guix build hello` inside Node B
-- [x] Phase 6: Print dashboard catalog/seeds and propagate build exit code
-- [x] Phase 7: Cleanup (kill processes)
+- [ ] Phase 3: Start guix-daemon inside Node B with private store/state and
+  `GUIX` pointing to wrapper
+- [ ] Phase 4: Seed hello on Node A via `--seed` flag
+- [ ] Phase 5: Prove Node B does not already have the seeded output
+- [ ] Phase 6: Run `guix build hello` inside Node B
+- [ ] Phase 7: Print dashboard catalog/seeds and propagate build exit code
+- [ ] Phase 8: Cleanup VMs/processes
 
 ### Key Design Decisions
 
-- `guix shell -CN` containers sharing host network, separate filesystems
-- Separate `GUIX_STATE_DIRECTORY` per container (empty DB) so daemon doesn't
-  know existing packages and must substitute
-- Shared writable `/gnu/store` from host (daemon needs to write nar imports)
+- `guix system container` and `guix shell -C` are not sufficient for the full
+  proof because they share the host `/gnu/store`.
+- Use a VM/image or equivalent private rootfs so Node A and Node B have
+  separate writable stores.
+- Separate `GUIX_STATE_DIRECTORY` per node so daemon validity state is isolated.
 - Raw C++ `guix-daemon` binary (not Guile wrapper which overwrites `GUIX`)
-- `--disable-chroot` + `--max-jobs=0` for substitute-only container operation
+- `--max-jobs=0` for substitute-only Node B operation where appropriate.
 - `--policy p2p-only` to force pure P2P (no HTTP nar fallback)
 
 ### Findings Applied 2026-05-07
@@ -375,22 +380,16 @@
   requested nar instead of relying on prior handshake state.
 - The E2E script defaults to TCP loopback. Set `GUIX_P2P_E2E_TRANSPORT=quic`
   to exercise QUIC where UDP sockets are available.
-- `guix-p2p-e2e container-smoke` is the canonical real-Guix validation path;
-  the shell script is a compatibility wrapper.
+- `guix-p2p-e2e container-smoke` remains useful for process-level smoke tests,
+  but it cannot prove absence of a package when the host store is shared.
 - `guix-p2p-e2e benchmark` produces local controlled HTTP, p2p-only, and
   p2p-first timing reports from real Guix nars.
-- The real-Guix validation path now runs the peer daemons, raw `guix-daemon`,
-  and client build through `guix shell -CN` containers. Writable `/gnu/store`
-  inside the test container is a hard prerequisite.
-- Dashboard-first local proof now uses `scripts/e2e-vm.sh run` to boot a
-  disposable pinned qcow2 Guix VM, share the static payload, and run
-  `container-smoke --dashboard-bind 0.0.0.0 --vm-direct` with a writable guest
-  store.
+- The real-Guix validation path must move to private writable stores. Shared
+  host-store containers are no longer considered a valid full proof.
 
 ### See Also
 
-- `docs/e2e-container-test-plan.md` — full detailed plan with architecture,
-  execution phases, known challenges, and wrapper script specification
+- Future private-store E2E design doc.
 
 ### Deliverables
 

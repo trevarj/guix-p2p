@@ -44,11 +44,15 @@ guix-daemon
 
 Substitute mode follows the same path with `--substitute`.
 
-## Guix Container E2E Flow
+## Private-Store E2E Flow
 
-The E2E harness runs Node A, Node B, Node B's raw ELF `guix-daemon`, and the
-client `guix build` through `guix shell -CN` containers. It runs the raw daemon
-binary directly, not the Guile wrapper. It sets:
+The strict E2E proof must run Node A and Node B with separate writable Guix
+stores. Node B must not already have the package seeded by Node A, so shared
+host-store containers are not sufficient.
+
+The proof still runs Node A, Node B, Node B's raw ELF `guix-daemon`, and the
+client `guix build`. It runs the raw daemon binary directly, not the Guile
+wrapper. It sets:
 
 - `GUIX_STATE_DIRECTORY` to an isolated state tree.
 - `GUIX_CONFIGURATION_DIRECTORY` to an isolated config tree.
@@ -59,13 +63,8 @@ binary directly, not the Guile wrapper. It sets:
 This forces a real `guix build <package>` through the substitute protocol while
 keeping production Guix state untouched.
 
-The containers share the project checkout, generated state directory, and
-`/gnu/store`. The store must be writable inside the test container so the raw
-daemon can import substituted nars.
-
-For hosts with a read-only store, use the disposable VM flow in
-[e2e-vm.md](e2e-vm.md). It uses a full qcow2 image instead of `guix system vm`
-so the guest has its own writable store for the proof.
+The planned implementation should use a VM/image or equivalent private rootfs
+per node so imported nars are written to Node B's own `/gnu/store`.
 
 ## Seeding
 

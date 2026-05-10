@@ -80,41 +80,14 @@ Acceptance checks:
 - Node B logs show p2p-only handling and a successful substitute download.
 - Node B logs do not show HTTP nar fallback in p2p-only mode.
 
-The legacy script delegates to the same harness:
+## Private-Store E2E
 
-```sh
-scripts/e2e-container-test.sh
-```
+The strict proof requires Node A and Node B to have separate writable stores so
+Node B can prove it does not already have the package seeded by Node A. Shared
+host-store containers are not a valid full proof for that requirement.
 
-Environment variables retained by the wrapper:
-
-- `GUIX_P2P_E2E_BASE`
-- `GUIX_P2P_E2E_PACKAGE`
-- `GUIX_P2P_E2E_TRANSPORT`
-- `GUIX_P2P_E2E_NODE_A_PORT`
-- `GUIX_P2P_E2E_NODE_B_PORT`
-- `GUIX_P2P_E2E_NODE_A_DASH`
-- `GUIX_P2P_E2E_NODE_B_DASH`
-- `GUIX_P2P_E2E_DASHBOARD_BIND`
-- `GUIX_P2P_E2E_HOLD`
-
-## Disposable VM
-
-On hosts where `/gnu/store` is read-only, use the disposable Guix VM runner for
-strict proof:
-
-```sh
-scripts/e2e-vm.sh run
-```
-
-The runner builds a pinned qcow2 image, boots a fresh writable copy under QEMU,
-shares the static payload into the guest, forwards dashboard ports `3031` and
-`3032`, and runs `container-smoke --vm-direct` inside the VM.
-
-This path can download `linux-libre` because it builds a full Guix system
-image. Use `scripts/e2e-fast-demo.sh` when you need a quick dashboard demo.
-
-See [e2e-vm.md](e2e-vm.md) for the full flow.
+Use `scripts/e2e-fast-demo.sh` when you need a quick dashboard demo. The
+private-store VM/image proof is tracked in `docs/implementation-plan.md`.
 
 ## Benchmark
 
