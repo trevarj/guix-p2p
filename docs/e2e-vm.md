@@ -16,27 +16,41 @@ scripts/e2e-fast-demo.sh
 scripts/e2e-vm.sh run
 ```
 
-This ensures a minimal qcow2 image exists, creates a disposable writable qcow2
-overlay at `target/guix-p2p-vm/e2e-vm.qcow2`, builds static release binaries
-for the payload directory, and boots headlessly with QEMU on the serial console.
-Long image and payload steps emit timestamped heartbeat lines every 30 seconds
-by default, with command output captured under `target/guix-p2p-vm/logs/`.
+This ensures a pinned Guix 1.5 qcow2 image exists, creates a fresh disposable
+writable overlay at `target/guix-p2p-vm/e2e-vm.qcow2`, builds static release
+binaries for the payload directory, and boots headlessly with QEMU. Long image,
+payload, and VM steps emit timestamped heartbeat lines every 30 seconds by
+default, with command output captured under `target/guix-p2p-vm/logs/`.
 
 The image contains only the base services needed for the proof: Guix daemon,
 networking, serial console boot, and the `guix-p2p-e2e` Shepherd service. It
 does not include a desktop environment or SSH service.
 
+Image builds run through:
+
+```sh
+guix time-machine -q \
+  --url=https://codeberg.org/guix/guix.git \
+  --commit=7c0cd7e45b0240b842b4f3e767599501eac42ee1 \
+  -- system image -t qcow2 ...
+```
+
 Normal Rust changes only rebuild the shared payload directory. Rebuild the image
-only when `guix/e2e-vm.scm` changes or when Guix image state needs refreshing.
+only when `guix/e2e-vm.scm` changes, the pinned Guix revision changes, or Guix
+image state needs refreshing.
 
 ```sh
 scripts/e2e-vm.sh image          # ensure image exists
 scripts/e2e-vm.sh rebuild-image  # force image rebuild
 scripts/e2e-vm.sh payload        # rebuild static payload
 scripts/e2e-vm.sh boot           # rebuild payload and boot existing image
-scripts/e2e-vm.sh run            # ensure image, rebuild payload, boot
+scripts/e2e-vm.sh run            # ensure image, rebuild payload, boot, validate
 scripts/e2e-vm.sh clean          # remove generated VM state
 ```
+
+`run` and `boot` return success only when the guest prints the VM proof PASS
+marker to the QEMU serial log. Set `GUIX_P2P_E2E_HOLD=1` to keep the VM and
+dashboards running after validation for manual inspection.
 
 ## Payload
 
@@ -62,7 +76,6 @@ guest `/gnu/store` writable, and starts:
 
 ```sh
 GUIX_P2P_E2E_BASE=/tmp/guix-p2p-e2e \
-  GUIX_P2P_E2E_NO_GUIX_SHELL=1 \
   GUIX_P2P_E2E_REMOVE_SEED_AFTER_NODE_A=1 \
   /mnt/guix-p2p-bin/bin/guix-p2p-e2e container-smoke \
     --package /gnu/store/...-hello-....drv \
@@ -70,13 +83,14 @@ GUIX_P2P_E2E_BASE=/tmp/guix-p2p-e2e \
     --transport tcp \
     --guix-p2p-bin /mnt/guix-p2p-bin/bin/guix-p2p \
     --dashboard-bind 0.0.0.0 \
-    --hold \
+    --vm-direct \
     --keep-temp
 ```
 
-Inside this VM, `GUIX_P2P_E2E_NO_GUIX_SHELL=1` makes the harness run the peer
-and daemon processes directly instead of nesting another `guix shell -C`. The VM
-disk is already the isolation boundary.
+Inside this VM, `--vm-direct` makes the harness run the peer and daemon
+processes directly instead of nesting another `guix shell -C`. The VM disk is
+already the isolation boundary. The older `GUIX_P2P_E2E_NO_GUIX_SHELL=1`
+compatibility path still behaves the same way.
 
 The VM passes the raw derivation for the image-provided hello output as the
 build target. After Node A seeds the nar,
@@ -92,7 +106,8 @@ boots a writable copy so the proof is isolated from the host.
 
 ## Expected Proof
 
-The smoke command must pass all strict checks before it holds the dashboards:
+The smoke command must pass all strict checks before the guest prints
+`GUIX_P2P_E2E_RESULT=PASS` and powers off:
 
 - `guix build /gnu/store/...-hello-....drv` exits successfully through Node B's isolated daemon.
 - Node A `/api/seeds` includes the seeded nar.
@@ -105,6 +120,12 @@ Dashboard ports are forwarded to the host:
 
 - Node A: `http://127.0.0.1:3031`
 - Node B: `http://127.0.0.1:3032`
+
+Dashboard hold mode is opt-in:
+
+```sh
+GUIX_P2P_E2E_HOLD=1 scripts/e2e-vm.sh run
+```
 
 Guest log:
 
@@ -125,6 +146,11 @@ Harness state and per-process logs:
 - `GUIX_P2P_E2E_VM_MEMORY`: QEMU memory in MB, default `4096`.
 - `GUIX_P2P_E2E_VM_CPUS`: QEMU CPU count, default `2`.
 - `GUIX_P2P_E2E_VM_DISPLAY`: QEMU display backend, default `none`.
+- `GUIX_P2P_E2E_GUIX_URL`: Guix channel URL for time-machine image builds,
+  default `https://codeberg.org/guix/guix.git`.
+- `GUIX_P2P_E2E_GUIX_COMMIT`: Guix commit for time-machine image builds,
+  default `7c0cd7e45b0240b842b4f3e767599501eac42ee1`.
+- `GUIX_P2P_E2E_HOLD`: keep dashboards running after success, default `0`.
 - `GUIX_P2P_E2E_LOG_DIR`: shell log directory, default `target/guix-p2p-vm/logs`.
 - `GUIX_P2P_E2E_HEARTBEAT_SECS`: long command heartbeat interval, default `30`.
 
@@ -139,6 +165,7 @@ Host-side wrapper logs:
 target/guix-p2p-vm/logs/e2e-vm.log
 target/guix-p2p-vm/logs/image-build.log
 target/guix-p2p-vm/logs/payload-build.log
+target/guix-p2p-vm/logs/qemu-serial.log
 ```
 
 Guest-side logs:
@@ -170,10 +197,10 @@ scripts/e2e-vm.sh run
 If an old QEMU process still holds the qcow2 lock, stop that process and rerun
 the command.
 
-If `guix system image` reports that `/gnu/store/... is not valid`, treat that
-as a host Guix store integrity issue. The VM runner stops immediately and does
-not auto-repair host store paths. Repair the exact path or run a broader store
-verification before retrying:
+If `guix time-machine ... -- system image` reports that `/gnu/store/... is not
+valid`, treat that as a host Guix store integrity issue. The VM runner stops
+immediately and does not auto-repair host store paths. Repair the exact path or
+run a broader store verification before retrying:
 
 ```sh
 sudo guix build --repair /gnu/store/...-source.tar.xz

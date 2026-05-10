@@ -42,8 +42,8 @@ and host network access (`-N`).
 - No root needed. Fast startup. Easy cleanup.
 
 The dashboard-first prototype boots a full qcow2 Guix image with
-`scripts/e2e-vm.sh run`, shares this checkout into the guest, and runs
-`container-smoke --dashboard-bind 0.0.0.0 --hold` there. This avoids
+`scripts/e2e-vm.sh run`, shares the static payload into the guest, and runs
+`container-smoke --dashboard-bind 0.0.0.0 --vm-direct` there. This avoids
 `guix system vm`, which shares the host store and can inherit a read-only
 `/gnu/store`.
 

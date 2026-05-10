@@ -99,6 +99,9 @@ enum Commands {
         /// Existing guix-p2p binary to use instead of target/release/guix-p2p
         #[arg(long)]
         guix_p2p_bin: Option<PathBuf>,
+        /// Run processes directly because a disposable VM is the isolation boundary
+        #[arg(long)]
+        vm_direct: bool,
         /// Keep daemons and dashboards running after validation until Ctrl-C
         #[arg(long)]
         hold: bool,
@@ -214,6 +217,7 @@ async fn main() -> anyhow::Result<()> {
             node_b_dashboard_port,
             dashboard_bind,
             guix_p2p_bin,
+            vm_direct,
             hold,
             keep_temp,
         } => {
@@ -228,6 +232,7 @@ async fn main() -> anyhow::Result<()> {
                 node_b_dashboard_port,
                 dashboard_bind,
                 guix_p2p_bin,
+                vm_direct,
                 hold,
                 keep_temp,
             })
@@ -959,6 +964,7 @@ struct ContainerSmokeOptions {
     node_b_dashboard_port: u16,
     dashboard_bind: String,
     guix_p2p_bin: Option<PathBuf>,
+    vm_direct: bool,
     hold: bool,
     keep_temp: bool,
 }
@@ -995,6 +1001,7 @@ struct P2pBuildSpec<'a> {
     node_b_policy: &'a str,
     strict_p2p_evidence: bool,
     hold_after_success: bool,
+    vm_direct: bool,
     tools: &'a HarnessTools,
 }
 
@@ -1080,7 +1087,7 @@ async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> 
     let base = absolutize_path(&project_root(), &opts.base);
     reset_dir(&base)?;
     std::fs::create_dir_all(base.join("logs"))?;
-    ensure_container_guix_store_writable(&tools, &base)?;
+    ensure_container_guix_store_writable(&tools, &base, opts.vm_direct)?;
 
     let store_path = match opts.store_path {
         Some(path) => {
@@ -1113,6 +1120,7 @@ async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> 
         node_b_policy: "p2p-only",
         strict_p2p_evidence: true,
         hold_after_success: opts.hold,
+        vm_direct: opts.vm_direct,
         tools: &tools,
     })
     .await?;
@@ -1158,7 +1166,7 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
     std::fs::create_dir_all(&base)?;
     let tmp_root = base.join("tmp");
     reset_dir(&tmp_root)?;
-    ensure_container_guix_store_writable(&tools, &tmp_root)?;
+    ensure_container_guix_store_writable(&tools, &tmp_root, false)?;
 
     let mut packages = Vec::new();
     for package in &opts.packages {
@@ -1216,6 +1224,7 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                             node_b_policy: policy,
                             strict_p2p_evidence: *mode == BenchmarkMode::P2pOnly,
                             hold_after_success: false,
+                            vm_direct: false,
                             tools: &tools,
                         })
                         .await
@@ -1322,8 +1331,12 @@ fn build_release_binary(cargo: &std::path::Path) -> anyhow::Result<()> {
     checked_status(command, "cargo build --release")
 }
 
-fn guix_container_command(tools: &HarnessTools, base: &std::path::Path) -> std::process::Command {
-    if std::env::var_os("GUIX_P2P_E2E_NO_GUIX_SHELL").is_some() {
+fn guix_container_command(
+    tools: &HarnessTools,
+    base: &std::path::Path,
+    vm_direct: bool,
+) -> std::process::Command {
+    if vm_direct || std::env::var_os("GUIX_P2P_E2E_NO_GUIX_SHELL").is_some() {
         if let Some(env) = find_on_path("env") {
             return std::process::Command::new(env);
         }
@@ -1361,8 +1374,9 @@ fn guix_container_command(tools: &HarnessTools, base: &std::path::Path) -> std::
 fn ensure_container_guix_store_writable(
     tools: &HarnessTools,
     base: &std::path::Path,
+    vm_direct: bool,
 ) -> anyhow::Result<()> {
-    if std::env::var_os("GUIX_P2P_E2E_NO_GUIX_SHELL").is_some() {
+    if vm_direct || std::env::var_os("GUIX_P2P_E2E_NO_GUIX_SHELL").is_some() {
         let probe = std::path::Path::new("/gnu/store/.guix-p2p-e2e-write-test");
         std::fs::write(probe, b"probe").map_err(|e| {
             anyhow::anyhow!(
@@ -1373,7 +1387,7 @@ fn ensure_container_guix_store_writable(
         return Ok(());
     }
 
-    let mut command = guix_container_command(tools, base);
+    let mut command = guix_container_command(tools, base, vm_direct);
     command.args([
         "/bin/sh",
         "-c",
@@ -1446,7 +1460,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
 
     let mut processes = ProcessSet::default();
 
-    let mut node_a_cmd = guix_container_command(spec.tools, spec.base);
+    let mut node_a_cmd = guix_container_command(spec.tools, spec.base, spec.vm_direct);
     node_a_cmd
         .arg(&spec.tools.guix_p2p)
         .arg("--daemon")
@@ -1492,7 +1506,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         seed_paths: &[],
     })?;
 
-    let mut node_b_cmd = guix_container_command(spec.tools, spec.base);
+    let mut node_b_cmd = guix_container_command(spec.tools, spec.base, spec.vm_direct);
     node_b_cmd
         .arg(&spec.tools.guix_p2p)
         .arg("--daemon")
@@ -1520,7 +1534,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
     wait_unix_socket(&node_b_socket, "node B relay socket")?;
 
     let guix_state = prepare_guix_daemon_state(&node_b_dir)?;
-    let mut daemon_cmd = guix_container_command(spec.tools, spec.base);
+    let mut daemon_cmd = guix_container_command(spec.tools, spec.base, spec.vm_direct);
     daemon_cmd
         .arg(&spec.tools.raw_guix_daemon)
         .arg("--disable-chroot")
@@ -1539,6 +1553,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         spec.package,
         &daemon_socket,
         &logs_dir.join("build.log"),
+        spec.vm_direct,
     )?;
 
     let seeds = dashboard_json(spec.node_a_dashboard_port, "/api/seeds")?;
@@ -1631,7 +1646,7 @@ fn run_http_benchmark(
     let guix_state = prepare_guix_daemon_state(run_dir)?;
     let mut processes = ProcessSet::default();
 
-    let mut daemon_cmd = guix_container_command(tools, run_dir);
+    let mut daemon_cmd = guix_container_command(tools, run_dir, false);
     daemon_cmd
         .arg(&tools.raw_guix_daemon)
         .arg("--disable-chroot")
@@ -1649,6 +1664,7 @@ fn run_http_benchmark(
         package,
         &daemon_socket,
         &logs_dir.join("build.log"),
+        false,
     )?;
     drop(processes);
     Ok(elapsed_ms)
@@ -1775,11 +1791,12 @@ fn run_guix_build_logged(
     package: &str,
     daemon_socket: &std::path::Path,
     log_path: &std::path::Path,
+    vm_direct: bool,
 ) -> anyhow::Result<u128> {
     let log = std::fs::OpenOptions::new().create(true).append(true).open(log_path)?;
     let stderr = log.try_clone()?;
     let started = std::time::Instant::now();
-    let mut command = guix_container_command(tools, base);
+    let mut command = guix_container_command(tools, base, vm_direct);
     command.arg(&tools.guix).arg("build").arg(package).env("GUIX_DAEMON_SOCKET", daemon_socket);
     tracing::debug!("running build command: {:?}", command);
     let status = command

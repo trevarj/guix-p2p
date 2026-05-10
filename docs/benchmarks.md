@@ -107,9 +107,9 @@ strict proof:
 scripts/e2e-vm.sh run
 ```
 
-The runner builds a qcow2 image, boots a writable copy under QEMU, shares the
-checkout into the guest, forwards dashboard ports `3031` and `3032`, and runs
-the same `container-smoke --hold` command inside the VM.
+The runner builds a pinned qcow2 image, boots a fresh writable copy under QEMU,
+shares the static payload into the guest, forwards dashboard ports `3031` and
+`3032`, and runs `container-smoke --vm-direct` inside the VM.
 
 This path can download `linux-libre` because it builds a full Guix system
 image. Use `scripts/e2e-fast-demo.sh` when you need a quick dashboard demo.

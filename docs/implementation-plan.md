@@ -383,8 +383,8 @@
   and client build through `guix shell -CN` containers. Writable `/gnu/store`
   inside the test container is a hard prerequisite.
 - Dashboard-first local proof now uses `scripts/e2e-vm.sh run` to boot a
-  disposable qcow2 Guix VM, share the checkout, and run
-  `container-smoke --dashboard-bind 0.0.0.0 --hold` with a writable guest
+  disposable pinned qcow2 Guix VM, share the static payload, and run
+  `container-smoke --dashboard-bind 0.0.0.0 --vm-direct` with a writable guest
   store.
 
 ### See Also

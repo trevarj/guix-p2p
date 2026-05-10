@@ -425,6 +425,11 @@ proofs. It supports `--dashboard-bind` for VM port forwarding and `--hold` to
 keep validated smoke-test dashboards running until Ctrl-C. These flags do not
 change production daemon configuration.
 
+The disposable VM path uses `container-smoke --vm-direct` so the harness runs
+peer and daemon processes directly inside the writable qcow2 guest instead of
+nesting `guix shell -CN`. `GUIX_P2P_E2E_HOLD=1` is the VM wrapper switch for
+interactive dashboard inspection after validation.
+
 ### Future: Upstream Guile Patch
 
 If upstream merges a patch to `guix/scripts/substitute.scm`, the PATH

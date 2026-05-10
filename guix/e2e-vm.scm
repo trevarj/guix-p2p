@@ -51,11 +51,29 @@
              (emit-line (format #f "command failed: ~s" args))
              (exit 1))))
 
+       (define (run/status . args)
+         (emit-line (format #f "running: ~s" args))
+         (let* ((port (open-command args))
+                (_ (copy-output port)))
+           (close-pipe port)))
+
        (define (try-run . args)
          (let* ((port (open-command args))
                 (_ (copy-output port))
                 (status (close-pipe port)))
            (zero? status)))
+
+       (define (finish status)
+         (if (zero? status)
+             (emit-line "GUIX_P2P_E2E_RESULT=PASS")
+             (emit-line (format #f "GUIX_P2P_E2E_RESULT=FAIL status=~a"
+                                status)))
+         (try-run "/run/current-system/profile/bin/sync")
+         (unless (string=? (or (getenv "GUIX_P2P_E2E_HOLD") "0") "1")
+           (or (try-run "/run/current-system/profile/sbin/poweroff" "-f")
+               (try-run "/run/current-system/profile/bin/poweroff" "-f")
+               (try-run "poweroff" "-f")))
+         (exit status))
 
        (define payload "/mnt/guix-p2p-bin")
        (define profile "/run/current-system/profile/bin/")
@@ -66,13 +84,12 @@
        ;; substituted nars into /gnu/store, so the harness must be able to write.
        (try-run (string-append profile "mount") "-o" "remount,rw" "/gnu/store")
        (unless (try-run (string-append profile "test") "-w" "/gnu/store")
-         (format (current-error-port)
-                 "/gnu/store is not writable in the disposable E2E VM~%")
-         (exit 1))
+         (emit-line "/gnu/store is not writable in the disposable E2E VM")
+         (finish 1))
 
        (setenv "GUIX_P2P_E2E_PACKAGE" #$(raw-derivation-file hello))
        (setenv "GUIX_P2P_E2E_STORE_PATH" #$hello)
-       (run (string-append payload "/run-e2e-service.sh")))))
+       (finish (run/status (string-append payload "/run-e2e-service.sh"))))))
 
 (define guix-p2p-e2e-service
   (shepherd-service
