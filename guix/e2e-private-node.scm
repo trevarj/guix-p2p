@@ -77,7 +77,7 @@
                   "DASHBOARD_PORT=\"${GUIX_P2P_E2E_A_DASHBOARD_PORT:-3031}\"\n"
                   "mkdir -p \"$CACHE_DIR\" \"$HOME/.config/guix-p2p\"\n"
                   "printf 'min_providers = 1\\n' > \"$HOME/.config/guix-p2p/config.toml\"\n"
-                  "STORE_PATH=\"$(guix build --substitute-urls=\"$SUBSTITUTE_URLS\" \"$PACKAGE\")\"\n"
+                  "STORE_PATH=\"$(guix build --no-grafts --substitute-urls=\"$SUBSTITUTE_URLS\" \"$PACKAGE\")\"\n"
                   "STORE_HASH=\"${STORE_PATH#/gnu/store/}\"\n"
                   "STORE_HASH=\"${STORE_HASH%%-*}\"\n"
                   "NARINFO_URL=''\n"

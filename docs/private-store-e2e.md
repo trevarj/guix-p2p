@@ -86,10 +86,12 @@ On Node A, build and seed the package under test:
 guix-p2p-e2e-node-a hello
 ```
 
-The Node A helper builds with the configured substitute URLs and verifies that
-one of them serves signed narinfo for the selected store path. The command
-prints `store_path=...`, `narinfo_url=...`, and `peer_id=...`; pass the store
-path and peer ID to Node B:
+The Node A helper builds with `--no-grafts` and the configured substitute URLs,
+then verifies that one of those URLs serves signed narinfo for the selected
+store path. `--no-grafts` keeps the test on the substitutable output instead of
+a locally grafted output that may not have public narinfo. The command prints
+`store_path=...`, `narinfo_url=...`, and `peer_id=...`; pass the store path and
+peer ID to Node B:
 
 ```sh
 guix-p2p-e2e-node-b /gnu/store/...-hello-... 12D3...
