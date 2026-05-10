@@ -27,6 +27,13 @@
            (device (file-system-label "Guix_image"))
            (type "ext4"))
          %base-file-systems))
+  (users (cons (user-account
+                (name "e2e")
+                (comment "E2E test user")
+                (password (crypt "e2e" "$6$e2e"))
+                (group "users")
+                (supplementary-groups '("wheel" "netdev")))
+               %base-user-accounts))
   (packages
    (append
     (list bash hello openssh-sans-x)

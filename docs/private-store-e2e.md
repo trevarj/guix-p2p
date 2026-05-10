@@ -51,6 +51,13 @@ The launch commands forward:
 | A | `2221` | `3031` | `6881` |
 | B | `2222` | `3032` | `6882` |
 
+Both images include a test login:
+
+```text
+user: e2e
+password: e2e
+```
+
 Serial logs are written under:
 
 ```sh
