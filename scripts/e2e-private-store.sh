@@ -58,6 +58,8 @@ Steps:
   image-b         Build and copy Node B qcow2 to target state
   launch-a        Print QEMU command for Node A
   launch-b        Print QEMU command for Node B
+  run-a           Run Node A under QEMU in the foreground
+  run-b           Run Node B under QEMU in the foreground
   help            Show this help
 
 Environment:
@@ -134,15 +136,8 @@ build_image() {
     printf '%s\n' "$disk"
 }
 
-qemu_command() {
+qemu_ports() {
     node="$1"
-    disk="$(disk_path "$node")"
-    serial="$(serial_log "$node")"
-
-    if [ ! -f "$disk" ]; then
-        log "disk is missing; build it first with image-$node"
-        exit 1
-    fi
 
     case "$node" in
         a)
@@ -160,9 +155,59 @@ qemu_command() {
             exit 2
             ;;
     esac
+}
+
+qemu_command() {
+    node="$1"
+    disk="$(disk_path "$node")"
+    serial="$(serial_log "$node")"
+
+    if [ ! -f "$disk" ]; then
+        log "disk is missing; build it first with image-$node"
+        exit 1
+    fi
+
+    qemu_ports "$node"
 
     mkdir -p "$STATE_DIR/logs"
     printf '%s\n' "qemu-system-x86_64 -m $MEMORY -smp $CPUS -enable-kvm -nographic -serial file:$serial -drive file=$disk,if=virtio,format=qcow2 -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$ssh_port-:22,hostfwd=tcp:127.0.0.1:$dashboard_port-:$dashboard_port,hostfwd=tcp:127.0.0.1:$p2p_port-:$p2p_port"
+}
+
+run_qemu() {
+    node="$1"
+    disk="$(disk_path "$node")"
+    serial="$(serial_log "$node")"
+
+    if [ ! -f "$disk" ]; then
+        log "disk is missing; build it first with image-$node"
+        exit 1
+    fi
+
+    qemu_ports "$node"
+    mkdir -p "$STATE_DIR/logs"
+    : >"$serial"
+    log "running $(node_name "$node"); serial=$serial"
+    log "watch serial output with: tail -f $serial"
+
+    if command -v qemu-system-x86_64 >/dev/null 2>&1; then
+        exec qemu-system-x86_64 \
+            -m "$MEMORY" \
+            -smp "$CPUS" \
+            -enable-kvm \
+            -nographic \
+            -serial "file:$serial" \
+            -drive "file=$disk,if=virtio,format=qcow2" \
+            -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$ssh_port-:22,hostfwd=tcp:127.0.0.1:$dashboard_port-:$dashboard_port,hostfwd=tcp:127.0.0.1:$p2p_port-:$p2p_port"
+    fi
+
+    exec guix shell qemu -- qemu-system-x86_64 \
+        -m "$MEMORY" \
+        -smp "$CPUS" \
+        -enable-kvm \
+        -nographic \
+        -serial "file:$serial" \
+        -drive "file=$disk,if=virtio,format=qcow2" \
+        -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$ssh_port-:22,hostfwd=tcp:127.0.0.1:$dashboard_port-:$dashboard_port,hostfwd=tcp:127.0.0.1:$p2p_port-:$p2p_port"
 }
 
 case "${1:-help}" in
@@ -186,6 +231,12 @@ case "${1:-help}" in
         ;;
     launch-b)
         qemu_command b
+        ;;
+    run-a)
+        run_qemu a
+        ;;
+    run-b)
+        run_qemu b
         ;;
     *)
         usage >&2

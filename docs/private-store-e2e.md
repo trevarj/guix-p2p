@@ -37,6 +37,13 @@ scripts/e2e-private-store.sh launch-a
 scripts/e2e-private-store.sh launch-b
 ```
 
+Or run each VM in its own terminal:
+
+```sh
+scripts/e2e-private-store.sh run-a
+scripts/e2e-private-store.sh run-b
+```
+
 The launch commands forward:
 
 | Node | SSH | Dashboard | P2P TCP |
@@ -49,6 +56,9 @@ Serial logs are written under:
 ```sh
 target/guix-p2p-private-store/logs/
 ```
+
+The `launch-*` steps only print commands. The `run-*` steps actually start
+QEMU in the foreground and create the serial log file.
 
 ## Next Milestones
 
