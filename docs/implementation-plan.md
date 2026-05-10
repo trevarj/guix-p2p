@@ -343,6 +343,10 @@
 
 - [ ] Build a minimal real Guix image or VM root with a writable private
   `/gnu/store`.
+- [x] Add initial Node A and Node B qcow2 operating-system definitions for the
+  private-store proof.
+- [x] Add a thin step script for image derivation/build and QEMU launch command
+  generation.
 - [ ] Launch two isolated nodes with separate stores and Guix state.
 - [ ] Find raw C++ guix-daemon binary (not Guile wrapper) for `GUIX` env var
   override
@@ -389,7 +393,7 @@
 
 ### See Also
 
-- Future private-store E2E design doc.
+- `docs/private-store-e2e.md` — current private-store VM/image direction.
 
 ### Deliverables
 
