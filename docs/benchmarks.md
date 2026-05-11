@@ -88,6 +88,10 @@ host-store containers are not a valid full proof for that requirement.
 
 Use `scripts/e2e-fast-demo.sh` when you need a quick dashboard demo. The
 private-store VM/image proof is tracked in `docs/implementation-plan.md`.
+Current status: direct `guix-p2p --query/--substitute --socket` relay between
+two private-store VMs is passing for `hello`. Benchmarking the full
+`guix build` path should wait until Node B's raw `guix-daemon` wrapper path is
+wired.
 
 ## Benchmark
 

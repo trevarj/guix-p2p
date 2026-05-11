@@ -341,28 +341,48 @@
 - Verify Node A has the package, Node B does not, and Node B realizes it via
   P2P nar download from Node A.
 
+### Current Status
+
+The private-store VM proof has reached the direct substituter relay layer:
+Node A and Node B boot from separate writable qcow2 disks, Node A realizes and
+seeds `hello`, Node B proves it does not have that exact store path, and Node B
+successfully downloads the raw single-item NAR from Node A through
+`guix-p2p --query/--substitute --socket`.
+
+The remaining work is the final `guix-daemon` integration layer: run Node B's
+raw daemon with `GUIX` pointing at the wrapper, then drive the path with
+`guix build hello` instead of manual relay commands.
+
 ### Tasks
 
-- [ ] Build a minimal real Guix image or VM root with a writable private
+- [x] Build a minimal real Guix image or VM root with a writable private
   `/gnu/store`.
 - [x] Add initial Node A and Node B qcow2 operating-system definitions for the
   private-store proof.
 - [x] Add a thin step script for image derivation/build and QEMU launch command
   generation.
-- [ ] Launch two isolated nodes with separate stores and Guix state.
+- [x] Launch two isolated nodes with separate stores and Guix state.
+- [x] Bake `guix-p2p` and VM-local A/B helper scripts into the image.
+- [x] Add persistent test SSH keys so image rebuilds do not churn host
+  fingerprints.
+- [x] Seed raw single-item NARs, not `guix archive --export` bundles.
+- [x] Force Kademlia server mode and populate Kad peer addresses from
+  bootstrap, mDNS, and identify events.
+- [x] Phase 1: Start Node A (seeder) — guix-p2p daemon, wait for readiness,
+  capture PeerId from logs.
+- [x] Phase 2: Start Node B (builder) — guix-p2p daemon with
+  `--bootstrap-peers` pointing to Node A.
+- [x] Phase 4: Seed hello on Node A via `--seed` flag.
+- [x] Phase 5: Prove Node B does not already have the seeded output.
+- [x] Phase 6a: Manually exercise Node B's `have` and `substitute` relay
+  commands against the daemon socket.
 - [ ] Find raw C++ guix-daemon binary (not Guile wrapper) for `GUIX` env var
   override
 - [ ] Generate per-node wrapper scripts with `GUIX_P2P_SOCKET` and
   `GUIX_P2P_BIN` env vars
-- [ ] Phase 1: Start Node A (seeder) — guix-p2p daemon, wait for readiness,
-  capture PeerId via dashboard API
-- [ ] Phase 2: Start Node B (builder) — guix-p2p daemon with
-  `--bootstrap-peers` pointing to Node A
 - [ ] Phase 3: Start guix-daemon inside Node B with private store/state and
   `GUIX` pointing to wrapper
-- [ ] Phase 4: Seed hello on Node A via `--seed` flag
-- [ ] Phase 5: Prove Node B does not already have the seeded output
-- [ ] Phase 6: Run `guix build hello` inside Node B
+- [ ] Phase 6b: Run `guix build hello` inside Node B through the raw daemon
 - [ ] Phase 7: Print dashboard catalog/seeds and propagate build exit code
 - [ ] Phase 8: Cleanup VMs/processes
 
@@ -392,6 +412,24 @@
   p2p-first timing reports from real Guix nars.
 - The real-Guix validation path must move to private writable stores. Shared
   host-store containers are no longer considered a valid full proof.
+
+### Findings Applied 2026-05-11
+
+- libp2p-kad defaults to client mode and may not auto-promote in the private
+  VM topology. guix-p2p now forces Kad server mode so providers answer lookup
+  requests.
+- Bootstrap multiaddrs ending in `/p2p/<peer-id>` must be split and inserted
+  into Kad's address book before dialing. mDNS and identify addresses are also
+  added to Kad.
+- `guix archive --export` writes a signed nar bundle, not the raw single-item
+  NAR served by substitute servers. Seeded NARs now use Guix's
+  `(guix serialization) write-file` output and are validated against the
+  filename hash when indexed.
+- Direct private-store relay proof succeeded for `hello`: Node B's `have`
+  query returned the store path, and `substitute` wrote a 282616-byte NAR with
+  SHA-256 `d4d3119688670b1299e8457d4f35439c5b427bf5ff31b5c17635f1c481d70a62`.
+- The next blocker is no longer P2P discovery or block transfer. It is
+  automating Node B's raw `guix-daemon` plus `GUIX` wrapper path.
 
 ### See Also
 

@@ -312,7 +312,7 @@ src/
 ├── dashboard.rs             # Web dashboard (optional, --dashboard flag)
 ├── http_client.rs           # Narinfo fetch (HTTP only), signature verification, cache
 ├── narinfo.rs               # Narinfo parser, ACL loader, Ed25519 verifier, NarinfoCache (with TTL eviction)
-├── nar_store.rs             # NarStore: local nar cache, block serving, seeding via guix archive --export
+├── nar_store.rs             # NarStore: local nar cache, block serving, raw single-item nar seeding
 ├── identity.rs              # Ed25519 keypair gen/persistence
 └── swarm/
     ├── mod.rs

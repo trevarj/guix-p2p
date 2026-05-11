@@ -50,8 +50,8 @@ The strict E2E proof must run Node A and Node B with separate writable Guix
 stores. Node B must not already have the package seeded by Node A, so shared
 host-store containers are not sufficient.
 
-The proof still runs Node A, Node B, Node B's raw ELF `guix-daemon`, and the
-client `guix build`. It runs the raw daemon binary directly, not the Guile
+The full proof will run Node A, Node B, Node B's raw ELF `guix-daemon`, and
+the client `guix build`. It runs the raw daemon binary directly, not the Guile
 wrapper. It sets:
 
 - `GUIX_STATE_DIRECTORY` to an isolated state tree.
@@ -60,11 +60,14 @@ wrapper. It sets:
   Node B's `guix-p2p` socket.
 - `GUIX_DAEMON_SOCKET` for the client `guix build`.
 
-This forces a real `guix build <package>` through the substitute protocol while
-keeping production Guix state untouched.
+This will force a real `guix build <package>` through the substitute protocol
+while keeping production Guix state untouched.
 
-The planned implementation should use a VM/image or equivalent private rootfs
-per node so imported nars are written to Node B's own `/gnu/store`.
+The current VM proof already covers the layer below raw `guix-daemon`: two
+qcow2 Guix System nodes with private stores, Node A seeding `hello`, and Node B
+successfully running manual `have` and `substitute` relay commands through
+`guix-p2p --socket`. The remaining step is wiring Node B's raw daemon and
+client `guix build`.
 
 ## Seeding
 
@@ -74,9 +77,11 @@ Seed local store paths with:
 guix-p2p --daemon --seed /gnu/store/...-pkg,/gnu/store/...-other
 ```
 
-Each path is exported with `guix archive --export`, hashed with
-`guix hash -S nar -f hex`, stored under `<cache_dir>/nar/`, and announced in
-the DHT.
+Each path is hashed with `guix hash -S nar -f hex`, serialized as a raw
+single-item NAR with Guix's `(guix serialization) write-file`, stored under
+`<cache_dir>/nar/`, and announced in the DHT. This intentionally avoids
+`guix archive --export`, which produces a signed nar bundle rather than the
+byte stream served by substitute servers.
 
 ## Checks
 

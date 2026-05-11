@@ -49,7 +49,7 @@ seed_paths = ["/gnu/store/...-hello"]
 | `tor_socks` | unset | `--tor-socks` | SOCKS5 proxy address for Tor. |
 | `tor_only` | `false` | `--tor-only` | Route network traffic only through Tor-capable paths. |
 | `socket_path` | `<cache_dir>/guix-p2p.sock` | `--socket` | Unix socket used by relay mode and the Guix wrapper. |
-| `seed_paths` | empty | `--seed` | Store paths exported with `guix archive --export` and announced in the DHT. |
+| `seed_paths` | empty | `--seed` | Store paths serialized as raw single-item NARs and announced in the DHT. |
 
 ## Policies
 

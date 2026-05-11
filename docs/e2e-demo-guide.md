@@ -36,9 +36,9 @@ Set `GUIX_P2P_E2E_LOG_DIR` to move these logs, or
 cargo run -p guix-p2p-e2e -- seed --paths /gnu/store/abc-linux-6.1,/gnu/store/def-firefox-115
 ```
 
-This uses `guix hash` and `guix archive --export` to compute nar hashes and
-export the nar data, then starts a single seeder node with a dashboard. Other
-guix-p2p nodes can connect and download the seeded packages.
+This uses `guix hash` to compute nar hashes and Guix's raw NAR serializer to
+export single-item nar data, then starts a single seeder node with a dashboard.
+Other guix-p2p nodes can connect and download the seeded packages.
 
 Options:
 - `--paths` (required): comma-separated `/gnu/store/` paths to seed

@@ -10,6 +10,12 @@ with its own store.
 
 ## Current Milestone
 
+Current status: the manual private-store relay proof is passing. Node B can
+query Node A for the `hello` NAR and download it through
+`guix-p2p --substitute --socket` with a matching narinfo hash. The next
+milestone is replacing the manual relay call with Node B's raw `guix-daemon`
+and `guix build hello`.
+
 Node A and Node B use separate writable qcow2 disks copied from one common
 base image:
 
@@ -157,6 +163,12 @@ The expected success line is:
 
 ```text
 success sha256:<nar-hash> <nar-size>
+```
+
+For the current `hello` proof, the observed successful output was:
+
+```text
+success sha256:d4d3119688670b1299e8457d4f35439c5b427bf5ff31b5c17635f1c481d70a62 282616
 ```
 
 Serial logs are written under:
