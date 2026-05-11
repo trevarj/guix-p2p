@@ -31,7 +31,7 @@ base image:
 Build the binary that will be embedded in the image:
 
 ```sh
-cargo build --release
+guix shell -m manifest.scm -- cargo build --release
 ```
 
 Build only the derivation first:
@@ -59,9 +59,8 @@ scripts/e2e.sh run-a
 scripts/e2e.sh run-b
 ```
 
-`run-a` and `run-b` use KVM when `/dev/kvm` is available and fall back to QEMU
-software emulation otherwise. Set `GUIX_P2P_E2E_ENABLE_KVM=false` to force
-software emulation.
+`run-a` and `run-b` use KVM when `/dev/kvm` is available to the current shell.
+Set `GUIX_P2P_E2E_ENABLE_KVM=false` to force QEMU software emulation.
 
 If the default host ports are busy, override them before running the VMs:
 
@@ -76,8 +75,17 @@ multiaddr.
 Set `GUIX_P2P_E2E_FORWARD_DASHBOARD=false` to skip dashboard host forwarding
 when only SSH and P2P access are needed.
 
-From a third terminal, wait for SSH, push the current binary, and start the two
-node helpers:
+The last verified run used alternate P2P host ports and no dashboard
+forwarding:
+
+```sh
+export GUIX_P2P_E2E_FORWARD_DASHBOARD=false
+export GUIX_P2P_E2E_A_P2P_PORT=26881
+export GUIX_P2P_E2E_B_P2P_PORT=26882
+```
+
+From a third terminal with the same environment variables, wait for SSH, push
+the current binary, and start the two node helpers:
 
 ```sh
 scripts/e2e.sh wait-ssh
@@ -101,6 +109,20 @@ Then run the full raw daemon proof:
 scripts/e2e.sh prewarm-b
 scripts/e2e.sh daemon-b
 scripts/e2e.sh prove-b
+```
+
+Verify the imported output is a restored store directory. The proof imports the
+store path; it does not install `hello` into Node B's shell profile:
+
+```sh
+eval "$(scripts/e2e.sh env)"
+scripts/e2e.sh ssh-b
+```
+
+Inside Node B, run the imported output directly:
+
+```sh
+/gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2/bin/hello
 ```
 
 Useful log tails:
@@ -138,12 +160,17 @@ GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p guix-p2p-e2e-node-a hello
 GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p guix-p2p-e2e-node-b /gnu/store/... 12D3...
 ```
 
-The launch commands forward:
+The VM commands forward:
 
 | Node | SSH | Dashboard | P2P TCP |
 |------|-----|-----------|---------|
 | A | `2221` | `3031` | `6881` |
 | B | `2222` | `3032` | `6882` |
+
+The dashboard and P2P columns are guest defaults. Host P2P ports can be
+overridden with `GUIX_P2P_E2E_A_P2P_PORT` and
+`GUIX_P2P_E2E_B_P2P_PORT`; `node-b` uses the configured Node A host P2P port
+in its bootstrap multiaddr.
 
 Both disks include a test login:
 
@@ -266,8 +293,8 @@ Serial logs are written under:
 target/guix-p2p-private-store/logs/
 ```
 
-The `launch-*` steps only print commands. The `run-*` steps actually start
-QEMU in the foreground and create the serial log file.
+The `run-*` steps start QEMU in the foreground and create the serial log file.
+Exit QEMU with `Ctrl-a x` or type `quit` at the QEMU monitor prompt.
 
 The image embeds a persistent test-only OpenSSH host key from:
 
