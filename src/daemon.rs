@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use libp2p::PeerId;
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc::UnboundedSender;
@@ -64,8 +65,8 @@ pub enum ReplyWriter {
     /// Collect all output into a buffer (no channel prefix, for direct use).
     Buffer(Vec<u8>),
     /// Collect output with channel prefix framing for socket relay.
-    /// fd4: lines → fd 4, out: lines → stdout.
-    Socket { fd4_buf: Vec<u8>, out_buf: Vec<u8> },
+    /// fd4: lines → fd 4, out: lines → stdout, nar: lines → destination file.
+    Socket { buf: Vec<u8> },
 }
 
 impl ReplyWriter {
@@ -79,7 +80,7 @@ impl ReplyWriter {
     }
 
     pub fn socket() -> Self {
-        ReplyWriter::Socket { fd4_buf: Vec::new(), out_buf: Vec::new() }
+        ReplyWriter::Socket { buf: Vec::new() }
     }
 
     /// Write a structured reply line (to fd 4 in direct mode, fd4: prefix in socket mode).
@@ -101,10 +102,10 @@ impl ReplyWriter {
                 buf.push(b'\n');
                 Ok(())
             },
-            ReplyWriter::Socket { fd4_buf, .. } => {
-                fd4_buf.extend_from_slice(b"fd4:");
-                fd4_buf.extend_from_slice(line.as_bytes());
-                fd4_buf.push(b'\n');
+            ReplyWriter::Socket { buf } => {
+                buf.extend_from_slice(b"fd4:");
+                buf.extend_from_slice(line.as_bytes());
+                buf.push(b'\n');
                 Ok(())
             },
         }
@@ -130,13 +131,34 @@ impl ReplyWriter {
                 buf.push(b'\n');
                 Ok(())
             },
-            ReplyWriter::Socket { out_buf, .. } => {
-                out_buf.extend_from_slice(b"out:");
-                out_buf.extend_from_slice(line.as_bytes());
-                out_buf.push(b'\n');
+            ReplyWriter::Socket { buf } => {
+                buf.extend_from_slice(b"out:");
+                buf.extend_from_slice(line.as_bytes());
+                buf.push(b'\n');
                 Ok(())
             },
         }
+    }
+
+    /// Send raw NAR bytes to a socket relay. The relay writes them to the
+    /// destination path while retaining the guix-daemon child privileges.
+    pub fn write_nar_data(&mut self, nar_data: &[u8]) -> io::Result<()> {
+        const CHUNK_SIZE: usize = 48 * 1024;
+
+        if let ReplyWriter::Socket { buf } = self {
+            for chunk in nar_data.chunks(CHUNK_SIZE) {
+                buf.extend_from_slice(b"nar:");
+                buf.extend_from_slice(BASE64.encode(chunk).as_bytes());
+                buf.push(b'\n');
+            }
+            buf.extend_from_slice(b"nar-end\n");
+        }
+
+        Ok(())
+    }
+
+    pub fn is_socket(&self) -> bool {
+        matches!(self, ReplyWriter::Socket { .. })
     }
 
     pub fn write_end(&mut self) -> io::Result<()> {
@@ -150,17 +172,10 @@ impl ReplyWriter {
     ) -> io::Result<()> {
         use tokio::io::AsyncWriteExt;
         match self {
-            ReplyWriter::Socket { fd4_buf, out_buf } => {
-                if !fd4_buf.is_empty() || !out_buf.is_empty() {
-                    // fd4 data first, then out data
-                    if !fd4_buf.is_empty() {
-                        writer.write_all(fd4_buf).await?;
-                        fd4_buf.clear();
-                    }
-                    if !out_buf.is_empty() {
-                        writer.write_all(out_buf).await?;
-                        out_buf.clear();
-                    }
+            ReplyWriter::Socket { buf } => {
+                if !buf.is_empty() {
+                    writer.write_all(buf).await?;
+                    buf.clear();
                     writer.flush().await?;
                 }
                 Ok(())
@@ -173,7 +188,7 @@ impl ReplyWriter {
     pub fn has_data(&self) -> bool {
         match self {
             ReplyWriter::Buffer(buf) => !buf.is_empty(),
-            ReplyWriter::Socket { fd4_buf, out_buf } => !fd4_buf.is_empty() || !out_buf.is_empty(),
+            ReplyWriter::Socket { buf } => !buf.is_empty(),
             ReplyWriter::Fd4 => false,
         }
     }
@@ -335,7 +350,17 @@ pub async fn run_query_mode(
                 .await;
             },
             DaemonCommand::Info(paths) => {
-                handle_info(config, narinfo_cache, &mut reply, &paths, client, None).await;
+                handle_info(
+                    config,
+                    query_tx,
+                    &mut notify_rx,
+                    narinfo_cache,
+                    &mut reply,
+                    &paths,
+                    client,
+                    None,
+                )
+                .await;
             },
             DaemonCommand::Substitute { .. } => {},
         }
@@ -463,8 +488,11 @@ async fn handle_have(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_info(
     config: &Config,
+    query_tx: &UnboundedSender<String>,
+    notify_rx: &mut NotifyRx,
     cache: &Mutex<NarinfoCache>,
     reply: &mut ReplyWriter,
     paths: &[String],
@@ -482,20 +510,46 @@ async fn handle_info(
 
         match crate::http_client::fetch_narinfo(config, &hash_part, cache, client).await {
             Ok(info) => {
+                let nar_hash_bytes = match extract_nar_hash_bytes(&info.nar_hash) {
+                    Some(bytes) => bytes,
+                    None => {
+                        tracing::warn!("info: skipping {} (invalid nar hash)", path);
+                        continue;
+                    },
+                };
+                let dht_key = hex::encode(nar_hash_bytes);
+                if config.substitute_policy == SubstitutePolicy::P2pOnly {
+                    let _ = query_tx.send(dht_key.clone());
+                    let query_timeout =
+                        tokio::time::Duration::from_secs(config.request_timeout_secs.min(5));
+                    let providers =
+                        wait_for_providers_for_duration(notify_rx, &dht_key, query_timeout).await;
+                    if providers.len() < config.min_providers {
+                        tracing::info!(
+                            "info: skipping {} (p2p-only, only {}/{}) providers found",
+                            path,
+                            providers.len(),
+                            config.min_providers
+                        );
+                        continue;
+                    }
+                }
+
                 if let Some(tx) = event_tx {
                     let _ = tx.send(DashboardEvent::CatalogEntry {
                         hash_part: hash_part.clone(),
                         store_path: Some(info.store_path.clone()),
                         nar_size: Some(info.nar_size),
-                        nar_hash: Some(info.nar_hash.clone()),
-                        p2p_available: false,
+                        nar_hash: Some(dht_key),
+                        p2p_available: config.substitute_policy == SubstitutePolicy::P2pOnly,
                     });
                 }
                 let _ = reply.write_line(&info.store_path);
-                let _ = reply.write_line(info.deriver.as_deref().unwrap_or(""));
+                let deriver = info.deriver.as_deref().map(guix_store_path).unwrap_or_default();
+                let _ = reply.write_line(&deriver);
                 let _ = reply.write_line(&info.references.len().to_string());
                 for r in &info.references {
-                    let _ = reply.write_line(r);
+                    let _ = reply.write_line(&guix_store_path(r));
                 }
                 let download_size = info.urls.first().map(|u| u.file_size).unwrap_or(0);
                 let _ = reply.write_line(&download_size.to_string());
@@ -508,6 +562,14 @@ async fn handle_info(
     }
 
     let _ = reply.write_end();
+}
+
+fn guix_store_path(path_or_basename: &str) -> String {
+    if path_or_basename.is_empty() || path_or_basename.starts_with("/gnu/store/") {
+        path_or_basename.to_string()
+    } else {
+        format!("/gnu/store/{path_or_basename}")
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -790,16 +852,30 @@ async fn try_swarm_substitute(
                 return;
             }
 
-            // Write verified nar to dest
-            if let Err(e) = tokio::fs::write(&dest_path, &nar_data).await {
-                tracing::error!("Failed to write nar to {}: {}", dest_path.display(), e);
-                let _ = reply.write_line("not-found");
-                let _ = event_tx.send(DashboardEvent::DownloadFailed {
-                    nar_hash: nar_hash_hex.clone(),
-                    store_path: store_path.clone(),
-                    reason: format!("write error: {}", e),
-                });
-                return;
+            if reply.is_socket() {
+                if let Err(e) = reply.write_nar_data(&nar_data) {
+                    tracing::error!("Failed to queue nar for socket relay: {}", e);
+                    let _ = reply.write_line("not-found");
+                    let _ = event_tx.send(DashboardEvent::DownloadFailed {
+                        nar_hash: nar_hash_hex.clone(),
+                        store_path: store_path.clone(),
+                        reason: format!("socket relay write error: {}", e),
+                    });
+                    return;
+                }
+            } else {
+                // Direct substitute mode runs as guix-daemon's child and can
+                // write the destination path itself.
+                if let Err(e) = tokio::fs::write(&dest_path, &nar_data).await {
+                    tracing::error!("Failed to write nar to {}: {}", dest_path.display(), e);
+                    let _ = reply.write_line("not-found");
+                    let _ = event_tx.send(DashboardEvent::DownloadFailed {
+                        nar_hash: nar_hash_hex.clone(),
+                        store_path: store_path.clone(),
+                        reason: format!("write error: {}", e),
+                    });
+                    return;
+                }
             }
 
             // Save nar to local store for re-seeding
@@ -1407,6 +1483,8 @@ async fn handle_socket_connection(
                     DaemonCommand::Info(paths) => {
                         handle_info(
                             config,
+                            query_tx,
+                            &mut notify_rx,
                             narinfo_cache,
                             &mut reply,
                             &paths,
@@ -1558,6 +1636,19 @@ mod tests {
         let hash = "d4d3119688670b1299e8457d4f35439c5b427bf5ff31b5c17635f1c481d70a62";
         let bytes = extract_nar_hash_bytes(&format!("sha256:{hash}")).unwrap();
         assert_eq!(hex::encode(bytes), hash);
+    }
+
+    #[test]
+    fn test_guix_store_path_prefixes_narinfo_basenames() {
+        assert_eq!(
+            guix_store_path("x0qpkx4qcd7pzn121bg5plm67jf0icbz-gash-utils-0.2.0.tar.gz.drv"),
+            "/gnu/store/x0qpkx4qcd7pzn121bg5plm67jf0icbz-gash-utils-0.2.0.tar.gz.drv"
+        );
+        assert_eq!(
+            guix_store_path("/gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2"),
+            "/gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2"
+        );
+        assert_eq!(guix_store_path(""), "");
     }
 
     #[test]

@@ -137,7 +137,14 @@ guix-p2p-e2e-node-b /gnu/store/...-hello-... 12D3...
 ```
 
 The Node B helper refuses to continue if that exact store path already exists
-locally.
+locally. For the full `guix-daemon` proof, prewarm Node B with the regular
+daemon and then delete only the target output so dependencies are present while
+the package under test is absent:
+
+```sh
+guix build --no-grafts hello
+guix gc -D /gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2
+```
 
 Rerunning either helper stops the previous helper-started daemon for that node
 before starting a new one, avoiding stale dashboard or socket listeners.
@@ -165,10 +172,33 @@ The expected success line is:
 success sha256:<nar-hash> <nar-size>
 ```
 
-For the current `hello` proof, the observed successful output was:
+For the direct relay `hello` proof, the observed successful output was:
 
 ```text
 success sha256:d4d3119688670b1299e8457d4f35439c5b427bf5ff31b5c17635f1c481d70a62 282616
+```
+
+For the full raw `guix-daemon` proof on Node B, the target was absent before
+the build, then `GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build
+--no-grafts hello` returned:
+
+```text
+/gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2
+IMPORTED_HELLO_IN_NODE_B_STORE
+```
+
+Node B's `guix-p2p` log showed:
+
+```text
+Found 1 P2P providers for d4d3119688670b1299e8457d4f35439c5b427bf5ff31b5c17635f1c481d70a62
+Handshake with 12D3KooWFWpapCwJbvM7m11YVMjp452oZzJKEhc6sC2jz46fjERt: 2 blocks available
+Substitute download succeeded for /gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2
+```
+
+Node A's log showed it served the NAR:
+
+```text
+serving 2 block(s): hash=d4d3119688670b12..
 ```
 
 Serial logs are written under:
@@ -202,5 +232,5 @@ ssh-keygen -R '[127.0.0.1]:2222'
 - Share the project payload into both VMs or bake it into the images. Done.
 - Start `guix-p2p` on both nodes with fixed TCP/dashboard ports. Done.
 - Verify direct P2P substitute relay from Node A to Node B. Done.
-- Start Node B's raw `guix-daemon` with the `GUIX` wrapper.
-- Run `guix build hello` on Node B and require p2p-only substitution from Node A.
+- Start Node B's raw `guix-daemon` with the `GUIX` wrapper. Done.
+- Run `guix build hello` on Node B and require p2p-only substitution from Node A. Done.

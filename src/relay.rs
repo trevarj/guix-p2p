@@ -1,4 +1,5 @@
 use anyhow::Context;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 /// Connect to the daemon's Unix socket, forward stdin bytes to it,
@@ -29,15 +30,39 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
         .await
         .context("failed to send mode header to daemon")?;
 
-    // Forward stdin → socket in a background task
-    let copy_task =
-        tokio::spawn(
-            async move { tokio::io::copy(&mut tokio::io::stdin(), &mut socket_write).await },
-        );
+    let (dest_tx, mut dest_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let copy_task = if matches!(mode, RelayMode::Query) {
+        Some(tokio::spawn(async move {
+            tokio::io::copy(&mut tokio::io::stdin(), &mut socket_write).await
+        }))
+    } else {
+        Some(tokio::spawn(async move {
+            let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
+            let mut stdin_line = String::new();
+            loop {
+                stdin_line.clear();
+                let n = stdin.read_line(&mut stdin_line).await?;
+                if n == 0 {
+                    break;
+                }
+
+                if let Some(dest) = substitute_destination(stdin_line.trim_end()) {
+                    let _ = dest_tx.send(dest.to_string());
+                }
+
+                socket_write.write_all(stdin_line.as_bytes()).await?;
+                socket_write.flush().await?;
+            }
+
+            Ok::<u64, std::io::Error>(0)
+        }))
+    };
 
     // Read socket replies → demux to fd 4 or stdout
     let mut reader = tokio::io::BufReader::new(socket_read);
     let mut line = String::new();
+    let mut nar_dest: Option<String> = None;
+    let mut nar_file: Option<tokio::fs::File> = None;
 
     loop {
         line.clear();
@@ -70,6 +95,36 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
                     ));
                 }
             }
+        } else if let Some(data) = line.strip_prefix("nar:") {
+            if nar_file.is_none() {
+                let dest = dest_rx
+                    .recv()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("received nar data without a destination"))?;
+                let file = tokio::fs::OpenOptions::new()
+                    .create(true)
+                    .truncate(true)
+                    .write(true)
+                    .open(&dest)
+                    .await
+                    .with_context(|| format!("failed to open substitute destination {dest}"))?;
+                nar_dest = Some(dest);
+                nar_file = Some(file);
+            }
+
+            let decoded = BASE64
+                .decode(data.trim_end())
+                .context("failed to decode nar chunk from daemon socket")?;
+            if let Some(file) = nar_file.as_mut() {
+                file.write_all(&decoded)
+                    .await
+                    .context("failed to write nar chunk to substitute destination")?;
+            }
+        } else if line == "nar-end\n" || line == "nar-end\r\n" {
+            if let Some(mut file) = nar_file.take() {
+                file.flush().await.context("failed to flush substitute destination")?;
+            }
+            nar_dest = None;
         } else {
             // Legacy unprefixed line → treat as fd 4 data for backward compat
             tracing::warn!("unprefixed socket line (treating as fd4): {:?}", line.trim());
@@ -86,12 +141,39 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
         }
     }
 
-    let _ = copy_task.await;
+    if let Some(dest) = nar_dest {
+        return Err(anyhow::anyhow!("daemon socket closed before finishing nar for {dest}"));
+    }
+
+    if let Some(task) = copy_task {
+        let _ = task.await;
+    }
     Ok(())
+}
+
+fn substitute_destination(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("substitute ")?;
+    let mut parts = rest.splitn(2, ' ');
+    let _store_path = parts.next()?;
+    parts.next().filter(|dest| !dest.is_empty())
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum RelayMode {
     Query,
     Substitute,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::substitute_destination;
+
+    #[test]
+    fn parses_substitute_destination() {
+        assert_eq!(
+            substitute_destination("substitute /gnu/store/abc-foo /gnu/store/abc-foo"),
+            Some("/gnu/store/abc-foo")
+        );
+        assert_eq!(substitute_destination("have /gnu/store/abc-foo"), None);
+    }
 }

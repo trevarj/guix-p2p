@@ -131,10 +131,14 @@ The daemon protocol follows guix-daemon's substituter pipe protocol exactly.
 The Unix socket between daemon and relay uses channel prefix framing:
 - `fd4:<line>\n` — structured reply data (have paths, info metadata, success/not-found)
 - `out:<line>\n` — trace output (`@ download-started`, `@ download-succeeded`)
+- `nar:<base64-chunk>\n` / `nar-end\n` — verified NAR bytes for the current
+  substitute request
 
 The relay demuxes these: `fd4:` lines are written to fd 4, `out:` lines to
-stdout (fd 1). This matches guix-daemon's expectation that the substituter
-process writes structured replies on fd 4 and progress traces on stdout.
+stdout (fd 1), and `nar:` chunks are written to the destination path from the
+`substitute <store-path> <dest>` command. Destination writes happen in the relay
+process spawned by `guix-daemon`, not in the long-lived user daemon. This keeps
+the warm swarm architecture while matching guix-daemon's permission model.
 
 ### Query protocol
 
@@ -142,6 +146,9 @@ process writes structured replies on fd 4 and progress traces on stdout.
   path on a separate line, terminated by blank line.
 - **info**: daemon writes `info <path1> ...\n`. Reply per path: store_path,
   deriver, ref_count, refs, download_size, nar_size, then blank line.
+  Narinfo derivers and references are returned as full `/gnu/store/...` paths.
+  In `p2p-only` mode, info is returned only when the corresponding NarHash has
+  enough P2P providers.
 
 ### Substitute protocol
 

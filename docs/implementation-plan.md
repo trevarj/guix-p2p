@@ -343,15 +343,11 @@
 
 ### Current Status
 
-The private-store VM proof has reached the direct substituter relay layer:
-Node A and Node B boot from separate writable qcow2 disks, Node A realizes and
-seeds `hello`, Node B proves it does not have that exact store path, and Node B
-successfully downloads the raw single-item NAR from Node A through
-`guix-p2p --query/--substitute --socket`.
-
-The remaining work is the final `guix-daemon` integration layer: run Node B's
-raw daemon with `GUIX` pointing at the wrapper, then drive the path with
-`guix build hello` instead of manual relay commands.
+The private-store VM proof now passes through the raw `guix-daemon` integration
+layer. Node A and Node B boot from separate writable qcow2 disks, Node A
+realizes and seeds `hello`, Node B proves it does not have that exact store
+path, and `GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build --no-grafts
+hello` on Node B imports the NAR from Node A through `guix-p2p`.
 
 ### Tasks
 
@@ -376,13 +372,13 @@ raw daemon with `GUIX` pointing at the wrapper, then drive the path with
 - [x] Phase 5: Prove Node B does not already have the seeded output.
 - [x] Phase 6a: Manually exercise Node B's `have` and `substitute` relay
   commands against the daemon socket.
-- [ ] Find raw C++ guix-daemon binary (not Guile wrapper) for `GUIX` env var
+- [x] Find raw C++ guix-daemon binary (not Guile wrapper) for `GUIX` env var
   override
-- [ ] Generate per-node wrapper scripts with `GUIX_P2P_SOCKET` and
+- [x] Generate per-node wrapper scripts with `GUIX_P2P_SOCKET` and
   `GUIX_P2P_BIN` env vars
-- [ ] Phase 3: Start guix-daemon inside Node B with private store/state and
+- [x] Phase 3: Start guix-daemon inside Node B with private store/state and
   `GUIX` pointing to wrapper
-- [ ] Phase 6b: Run `guix build hello` inside Node B through the raw daemon
+- [x] Phase 6b: Run `guix build hello` inside Node B through the raw daemon
 - [ ] Phase 7: Print dashboard catalog/seeds and propagate build exit code
 - [ ] Phase 8: Cleanup VMs/processes
 
@@ -428,8 +424,20 @@ raw daemon with `GUIX` pointing at the wrapper, then drive the path with
 - Direct private-store relay proof succeeded for `hello`: Node B's `have`
   query returned the store path, and `substitute` wrote a 282616-byte NAR with
   SHA-256 `d4d3119688670b1299e8457d4f35439c5b427bf5ff31b5c17635f1c481d70a62`.
-- The next blocker is no longer P2P discovery or block transfer. It is
-  automating Node B's raw `guix-daemon` plus `GUIX` wrapper path.
+- `guix substitute --query` requires full `/gnu/store/...` deriver and
+  reference paths. Raw narinfo basenames are rejected by guix-daemon.
+- In `p2p-only` mode, `info` must be provider-gated just like `have`.
+  Advertising official narinfo for paths with no P2P provider causes
+  guix-daemon to attempt P2P substitutions that cannot succeed.
+- Socket substitute mode must stream verified NAR bytes back to the relay.
+  The long-lived user daemon cannot write `/gnu/store`; the relay process
+  spawned by `guix-daemon` writes the destination path and then replies
+  `success` on fd 4.
+- Full raw daemon proof succeeded for `hello`: after deleting the target
+  output from Node B, `guix build --no-grafts hello` returned
+  `/gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2`, Node B's store
+  contained that path, Node B logged `Substitute download succeeded`, and Node A
+  logged `serving 2 block(s)`.
 
 ### See Also
 
