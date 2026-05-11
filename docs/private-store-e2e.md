@@ -8,13 +8,15 @@ This path uses qcow2 Guix System images because `guix system vm` shares the
 host store, while `guix system image --image-type=qcow2` creates a disk image
 with its own store.
 
+Use `scripts/e2e.sh` for this workflow. The old
+`scripts/e2e-private-store.sh` path is a compatibility wrapper.
+
 ## Current Milestone
 
-Current status: the manual private-store relay proof is passing. Node B can
-query Node A for the `hello` NAR and download it through
-`guix-p2p --substitute --socket` with a matching narinfo hash. The next
-milestone is replacing the manual relay call with Node B's raw `guix-daemon`
-and `guix build hello`.
+Current status: the full raw `guix-daemon` proof is passing. Node B can query
+Node A for the `hello` NAR, download it through `guix-p2p --substitute
+--socket`, and complete `guix build --no-grafts hello` with the NAR imported
+into Node B's private store.
 
 Node A and Node B use separate writable qcow2 disks copied from one common
 base image:
@@ -35,69 +37,70 @@ cargo build --release
 Build only the derivation first:
 
 ```sh
-scripts/e2e-private-store.sh derivation
+scripts/e2e.sh derivation
 ```
 
 Build the base image and copy it to writable Node A and Node B disks:
 
 ```sh
-scripts/e2e-private-store.sh image
+scripts/e2e.sh image
 ```
 
 Print QEMU launch commands:
 
 ```sh
-scripts/e2e-private-store.sh launch-a
-scripts/e2e-private-store.sh launch-b
+scripts/e2e.sh launch-a
+scripts/e2e.sh launch-b
 ```
 
 Or run each VM in its own terminal:
 
 ```sh
-scripts/e2e-private-store.sh run-a
-scripts/e2e-private-store.sh run-b
+scripts/e2e.sh run-a
+scripts/e2e.sh run-b
 ```
 
 From a third terminal, wait for SSH, push the current binary, and start the two
 node helpers:
 
 ```sh
-scripts/e2e-private-store.sh wait-ssh
-scripts/e2e-private-store.sh push-binary
-scripts/e2e-private-store.sh node-a hello
-scripts/e2e-private-store.sh node-b "$STORE_PATH" "$PEER_ID"
+scripts/e2e.sh wait-ssh
+scripts/e2e.sh push-binary
+scripts/e2e.sh node-a hello
+scripts/e2e.sh node-b
 ```
 
-`node-a` prints `store_path=...` and `peer_id=...`; export those values before
-running `node-b`:
+`node-a` prints `store_path=...`, `peer_id=...`, and shell export lines. It
+also saves them to `target/guix-p2p-private-store/e2e.env`, so later shortcut
+commands can use them without extra arguments. To load the values into the
+current shell anyway:
 
 ```sh
-export STORE_PATH=/gnu/store/...-hello-...
-export PEER_ID=12D3...
+eval "$(scripts/e2e.sh env)"
 ```
 
 Then run the full raw daemon proof:
 
 ```sh
-scripts/e2e-private-store.sh prewarm-b "$STORE_PATH"
-scripts/e2e-private-store.sh daemon-b
-scripts/e2e-private-store.sh prove-b "$STORE_PATH"
+scripts/e2e.sh prewarm-b
+scripts/e2e.sh daemon-b
+scripts/e2e.sh prove-b
 ```
 
 Useful log tails:
 
 ```sh
-scripts/e2e-private-store.sh logs-a
-scripts/e2e-private-store.sh logs-b
-scripts/e2e-private-store.sh daemon-log-b
+scripts/e2e.sh logs-a
+scripts/e2e.sh logs-b
+scripts/e2e.sh daemon-log-b
 ```
 
 After the first rebuild with the persistent test client key, SSH does not need
 the password:
 
 ```sh
-scripts/e2e-private-store.sh ssh-a
-scripts/e2e-private-store.sh ssh-b
+scripts/e2e.sh ssh-a
+scripts/e2e.sh ssh-b
 ```
 
 To iterate on Rust changes without rebuilding the image, rebuild the host
@@ -105,7 +108,7 @@ binary and copy it into both running VMs:
 
 ```sh
 guix shell -m manifest.scm -- cargo build --release
-scripts/e2e-private-store.sh push-binary
+scripts/e2e.sh push-binary
 ```
 
 The push step installs `/tmp/guix-p2p-real` plus a `/tmp/guix-p2p` wrapper
