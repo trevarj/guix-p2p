@@ -60,8 +60,6 @@ Steps:
   derivation      Print the base qcow2 image derivation
   image           Build the base qcow2 and copy it to Node A and Node B disks
   reset-disks     Copy base.qcow2 to fresh Node A and Node B disks
-  launch-a        Print QEMU command for Node A
-  launch-b        Print QEMU command for Node B
   run-a           Run Node A under QEMU in the foreground
   run-b           Run Node B under QEMU in the foreground
   ssh-a           SSH to Node A with the persistent test key
@@ -519,22 +517,6 @@ qemu_ports() {
     esac
 }
 
-qemu_command() {
-    node="$1"
-    disk="$(disk_path "$node")"
-    serial="$(serial_log "$node")"
-
-    if [ ! -f "$disk" ]; then
-        log "disk is missing; build it first with image"
-        exit 1
-    fi
-
-    qemu_ports "$node"
-
-    mkdir -p "$STATE_DIR/logs"
-    printf '%s\n' "qemu-system-x86_64 -m $MEMORY -smp $CPUS -enable-kvm -nographic -serial file:$serial -drive file=$disk,if=virtio,format=qcow2 -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$ssh_port-:22,hostfwd=tcp:127.0.0.1:$dashboard_port-:$dashboard_port,hostfwd=tcp:127.0.0.1:$p2p_port-:$p2p_port"
-}
-
 run_qemu() {
     node="$1"
     disk="$(disk_path "$node")"
@@ -592,12 +574,6 @@ case "${1:-help}" in
     image-a | image-b)
         log "$1 is deprecated; use image"
         build_image
-        ;;
-    launch-a)
-        qemu_command a
-        ;;
-    launch-b)
-        qemu_command b
         ;;
     run-a)
         run_qemu a

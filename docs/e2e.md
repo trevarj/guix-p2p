@@ -52,14 +52,7 @@ To rerun the proof from clean VM disks without rebuilding the base image:
 scripts/e2e.sh reset-disks
 ```
 
-Print QEMU launch commands:
-
-```sh
-scripts/e2e.sh launch-a
-scripts/e2e.sh launch-b
-```
-
-Or run each VM in its own terminal:
+Run each VM in its own terminal:
 
 ```sh
 scripts/e2e.sh run-a
