@@ -51,6 +51,10 @@ seed_paths = ["/gnu/store/...-hello"]
 | `socket_path` | `<cache_dir>/guix-p2p.sock` | `--socket` | Unix socket used by relay mode and the Guix wrapper. |
 | `seed_paths` | empty | `--seed` | Store paths serialized as raw single-item NARs and announced in the DHT. |
 
+`bootstrap_peers` is the persisted known-peer mechanism today. Peers learned
+through mDNS, identify, or normal DHT operation are added to the in-memory
+routing table but are not written back to config.
+
 ## Policies
 
 - `p2p-only`: fetch narinfo metadata, require enough P2P providers, and never use HTTP nar fallback.

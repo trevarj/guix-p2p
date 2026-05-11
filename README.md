@@ -43,12 +43,13 @@ guix shell -m manifest.scm -- \
   cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport tcp
 ```
 
-For the strict proof with separate writable stores, boot the two disposable
+For the strict proof with separate writable stores, boot the three disposable
 Guix VMs. This builds a full Guix system image and can download `linux-libre`
 the first time:
 
 ```sh
 cargo run -p guix-p2p-e2e -- vm image
+cargo run -p guix-p2p-e2e -- vm run Bootstrap
 cargo run -p guix-p2p-e2e -- vm run Alice
 cargo run -p guix-p2p-e2e -- vm run Bob
 ```

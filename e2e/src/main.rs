@@ -153,12 +153,8 @@ enum VmCommand {
         #[arg(default_value = "hello")]
         package: String,
     },
-    /// Connect a fetch node to a seeded node and start its relay daemon
-    Connect {
-        node: String,
-        #[arg(long)]
-        from: String,
-    },
+    /// Start a seedless node as the default DHT bootstrap peer
+    Bootstrap { node: String },
     /// Print saved seed metadata as shell exports
     Env { node: Option<String> },
     /// Realize dependencies and remove the target output from a fetch node
@@ -382,7 +378,10 @@ struct VmConfig {
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct VmRegistry {
+    #[serde(default)]
     nodes: Vec<VmNode>,
+    #[serde(default)]
+    default_bootstrap: Option<VmBootstrap>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -410,6 +409,12 @@ struct VmFetch {
     from: String,
     package: String,
     store_path: String,
+    peer_id: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct VmBootstrap {
+    node: String,
     peer_id: String,
 }
 
@@ -538,7 +543,7 @@ fn run_vm_command(opts: VmOptions) -> anyhow::Result<()> {
         VmCommand::WaitSsh { nodes } => vm_wait_ssh(&config, &nodes),
         VmCommand::PushBinary { node, all } => vm_push_binary(&config, node.as_deref(), all),
         VmCommand::Seed { node, package } => vm_seed(&config, &node, &package),
-        VmCommand::Connect { node, from } => vm_connect(&config, &node, &from),
+        VmCommand::Bootstrap { node } => vm_bootstrap(&config, &node),
         VmCommand::Env { node } => vm_print_env(&config, node.as_deref()),
         VmCommand::Remove { node, store_path, package } => {
             vm_remove(&config, &node, store_path.as_deref(), package.as_deref())
@@ -638,7 +643,7 @@ impl VmRegistry {
     fn load(config: &VmConfig) -> anyhow::Result<Self> {
         let path = config.registry_path();
         if !path.exists() {
-            return Ok(Self { nodes: Vec::new() });
+            return Ok(Self { nodes: Vec::new(), default_bootstrap: None });
         }
         let bytes =
             std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -712,6 +717,22 @@ impl VmRegistry {
             dashboard += 1;
             p2p += 1;
         }
+    }
+
+    fn latest_seed(&self) -> anyhow::Result<(&VmNode, &VmSeed)> {
+        self.nodes
+            .iter()
+            .rev()
+            .find_map(|node| node.last_seed.as_ref().map(|seed| (node, seed)))
+            .ok_or_else(|| anyhow::anyhow!("no saved seed found; run: vm seed <node> hello"))
+    }
+
+    fn bootstrap_multiaddr(&self) -> anyhow::Result<Option<String>> {
+        let Some(bootstrap) = &self.default_bootstrap else {
+            return Ok(None);
+        };
+        let node = self.node(&bootstrap.node)?;
+        Ok(Some(vm_peer_multiaddr(node, &bootstrap.peer_id)))
     }
 }
 
@@ -789,6 +810,10 @@ fn vm_reset(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<
     if targets.is_empty() {
         anyhow::bail!("no VM nodes are registered yet");
     }
+    let clear_bootstrap = registry
+        .default_bootstrap
+        .as_ref()
+        .is_some_and(|bootstrap| targets.iter().any(|name| name == &bootstrap.node));
     for name in targets {
         let target = registry.node_mut(&name)?;
         if let Some(pid) = target.pid {
@@ -800,6 +825,9 @@ fn vm_reset(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<
         target.last_seed = None;
         target.last_fetch = None;
         println!("{}", target.disk.display());
+    }
+    if clear_bootstrap {
+        registry.default_bootstrap = None;
     }
     registry.save(config)?;
     Ok(())
@@ -916,10 +944,24 @@ fn vm_status(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result
     }
     for target in targets {
         let running = is_pid_running(target.pid);
+        let role = if registry
+            .default_bootstrap
+            .as_ref()
+            .is_some_and(|bootstrap| bootstrap.node == target.name)
+        {
+            "bootstrap"
+        } else if target.last_seed.is_some() {
+            "seed"
+        } else if target.last_fetch.is_some() {
+            "fetch"
+        } else {
+            "-"
+        };
         println!(
-            "{} slug={} running={} pid={} ssh={} dashboard={} p2p={} disk={}",
+            "{} slug={} role={} running={} pid={} ssh={} dashboard={} p2p={} disk={}",
             target.name,
             target.slug,
+            role,
             running,
             target.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".to_string()),
             target.ssh_port,
@@ -975,10 +1017,18 @@ fn vm_push_binary(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::R
 fn vm_seed(config: &VmConfig, name: &str, package: &str) -> anyhow::Result<()> {
     let mut registry = VmRegistry::load(config)?;
     let node = registry.node(name)?.clone();
+    let bootstrap = registry.bootstrap_multiaddr()?;
+    let bootstrap_env = bootstrap
+        .as_ref()
+        .map(|addr| format!("GUIX_P2P_E2E_A_BOOTSTRAP={} ", shell_quote(addr)))
+        .unwrap_or_default();
     let output = ssh_run(
         config,
         &node,
-        &format!("GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p guix-p2p-e2e-node-a {}", shell_quote(package)),
+        &format!(
+            "GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p {bootstrap_env}guix-p2p-e2e-node-a {}",
+            shell_quote(package)
+        ),
     )?;
     print!("{output}");
     let store_path = parse_key_line(&output, "store_path")
@@ -995,35 +1045,22 @@ fn vm_seed(config: &VmConfig, name: &str, package: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn vm_connect(config: &VmConfig, name: &str, from: &str) -> anyhow::Result<()> {
+fn vm_bootstrap(config: &VmConfig, name: &str) -> anyhow::Result<()> {
     let mut registry = VmRegistry::load(config)?;
-    let seed_node = registry.node(from)?.clone();
-    let seed = seed_node.last_seed.clone().ok_or_else(|| {
-        anyhow::anyhow!(
-            "{} has no saved seed; run: vm seed {} hello",
-            seed_node.name,
-            seed_node.name
-        )
-    })?;
-    let fetch_node = registry.node(name)?.clone();
-    let bootstrap = format!("/ip4/10.0.2.2/tcp/{}/p2p/{}", seed_node.p2p_port, seed.peer_id);
+    let node = registry.node(name)?.clone();
     let command = format!(
-        "GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p GUIX_P2P_E2E_B_LISTEN=/ip4/0.0.0.0/tcp/6881 \
-         GUIX_P2P_E2E_B_DASHBOARD_PORT=3031 GUIX_P2P_E2E_B_BOOTSTRAP={} guix-p2p-e2e-node-b {} {}",
-        shell_quote(&bootstrap),
-        shell_quote(&seed.store_path),
-        shell_quote(&seed.peer_id)
+        "GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p GUIX_P2P_E2E_BOOTSTRAP_LISTEN=/ip4/0.0.0.0/tcp/6881 \
+         GUIX_P2P_E2E_BOOTSTRAP_DASHBOARD_PORT=3031 {}",
+        bootstrap_node_command()
     );
-    let output = ssh_run(config, &fetch_node, &command)?;
+    let output = ssh_run(config, &node, &command)?;
     print!("{output}");
-    registry.node_mut(name)?.last_fetch = Some(VmFetch {
-        from: seed_node.name,
-        package: seed.package,
-        store_path: seed.store_path,
-        peer_id: seed.peer_id,
-    });
+    let peer_id = parse_key_line(&output, "peer_id")
+        .ok_or_else(|| anyhow::anyhow!("bootstrap output did not include peer_id"))?;
+    registry.default_bootstrap = Some(VmBootstrap { node: node.name.clone(), peer_id });
     registry.save(config)?;
-    vm_start_daemon(config, name)
+    println!("bootstrap={}", registry.bootstrap_multiaddr()?.unwrap_or_default());
+    Ok(())
 }
 
 fn vm_print_env(config: &VmConfig, node: Option<&str>) -> anyhow::Result<()> {
@@ -1043,19 +1080,20 @@ fn vm_remove(
     store_path: Option<&str>,
     package: Option<&str>,
 ) -> anyhow::Result<()> {
-    let registry = VmRegistry::load(config)?;
-    let node = registry.node(name)?;
-    let target = resolve_fetch_store_path(node, store_path)?;
-    let package = resolve_fetch_package(node, package);
+    let mut registry = VmRegistry::load(config)?;
+    let node = registry.node(name)?.clone();
+    let target = resolve_fetch_target(&registry, &node, store_path, package)?;
+    registry.node_mut(name)?.last_fetch = Some(target.clone());
+    registry.save(config)?;
     let output = ssh_run(
         config,
-        node,
+        &node,
         &format!(
             "set -eu; guix build --no-grafts {}; guix gc -D {}; test ! -e {} && echo \
              TARGET_ABSENT_AFTER_DELETE",
-            shell_quote(&package),
-            shell_quote(&target),
-            shell_quote(&target)
+            shell_quote(&target.package),
+            shell_quote(&target.store_path),
+            shell_quote(&target.store_path)
         ),
     )?;
     print!("{output}");
@@ -1121,26 +1159,46 @@ echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
     Ok(())
 }
 
+fn vm_start_fetch_p2p(config: &VmConfig, name: &str, target: &VmFetch) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    let node = registry.node(name)?;
+    let bootstrap = registry
+        .bootstrap_multiaddr()?
+        .ok_or_else(|| anyhow::anyhow!("no bootstrap node configured; run: vm bootstrap <node>"))?;
+    let command = format!(
+        "GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p GUIX_P2P_E2E_B_LISTEN=/ip4/0.0.0.0/tcp/6881 \
+         GUIX_P2P_E2E_B_DASHBOARD_PORT=3031 GUIX_P2P_E2E_B_BOOTSTRAP={} guix-p2p-e2e-node-b {} {}",
+        shell_quote(&bootstrap),
+        shell_quote(&target.store_path),
+        shell_quote(&target.peer_id)
+    );
+    let output = ssh_run(config, node, &command)?;
+    print!("{output}");
+    Ok(())
+}
+
 fn vm_fetch(
     config: &VmConfig,
     name: &str,
     store_path: Option<&str>,
     package: Option<&str>,
 ) -> anyhow::Result<()> {
+    let mut registry = VmRegistry::load(config)?;
+    let node = registry.node(name)?.clone();
+    let target = resolve_fetch_target(&registry, &node, store_path, package)?;
+    registry.node_mut(name)?.last_fetch = Some(target.clone());
+    registry.save(config)?;
+    vm_start_fetch_p2p(config, name, &target)?;
     vm_start_daemon(config, name)?;
-    let registry = VmRegistry::load(config)?;
-    let node = registry.node(name)?;
-    let target = resolve_fetch_store_path(node, store_path)?;
-    let package = resolve_fetch_package(node, package);
     let output = ssh_run(
         config,
-        node,
+        &node,
         &format!(
             "set -eu; test ! -e {}; GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build \
              --no-grafts {}; test -d {} && echo IMPORTED_OUTPUT_IN_NODE_STORE",
-            shell_quote(&target),
-            shell_quote(&package),
-            shell_quote(&target)
+            shell_quote(&target.store_path),
+            shell_quote(&target.package),
+            shell_quote(&target.store_path)
         ),
     )?;
     print!("{output}");
@@ -1152,6 +1210,13 @@ fn vm_tail_log(config: &VmConfig, name: &str, kind: &str) -> anyhow::Result<()> 
     let node = registry.node(name)?;
     let path = match kind {
         "daemon" => "/tmp/e2e-guix-daemon.log",
+        _ if registry
+            .default_bootstrap
+            .as_ref()
+            .is_some_and(|bootstrap| bootstrap.node == node.name) =>
+        {
+            "/tmp/guix-p2p-bootstrap.log"
+        },
         _ if node.last_fetch.is_some() => "/tmp/guix-p2p-b.log",
         _ => "/tmp/guix-p2p-a.log",
     };
@@ -2625,24 +2690,76 @@ fn print_vm_env(seed: &VmSeed) {
     println!("export E2E_PACKAGE={}", shell_quote(&seed.package));
 }
 
-fn resolve_fetch_store_path(node: &VmNode, explicit: Option<&str>) -> anyhow::Result<String> {
-    if let Some(path) = explicit {
-        return Ok(path.to_string());
+fn resolve_fetch_target(
+    registry: &VmRegistry,
+    node: &VmNode,
+    explicit_store_path: Option<&str>,
+    explicit_package: Option<&str>,
+) -> anyhow::Result<VmFetch> {
+    if let Some(existing) = &node.last_fetch {
+        let mut target = existing.clone();
+        if let Some(path) = explicit_store_path {
+            target.store_path = path.to_string();
+        }
+        if let Some(package) = explicit_package {
+            target.package = package.to_string();
+        }
+        return Ok(target);
     }
-    node.last_fetch.as_ref().map(|fetch| fetch.store_path.clone()).ok_or_else(|| {
-        anyhow::anyhow!(
-            "{} has no saved fetch target; run: vm connect {} --from <seed-node>",
-            node.name,
-            node.name
-        )
+
+    let (seed_node, seed) = registry.latest_seed()?;
+    Ok(VmFetch {
+        from: seed_node.name.clone(),
+        package: explicit_package.unwrap_or(&seed.package).to_string(),
+        store_path: explicit_store_path.unwrap_or(&seed.store_path).to_string(),
+        peer_id: seed.peer_id.clone(),
     })
 }
 
-fn resolve_fetch_package(node: &VmNode, explicit: Option<&str>) -> String {
-    explicit
-        .map(str::to_string)
-        .or_else(|| node.last_fetch.as_ref().map(|fetch| fetch.package.clone()))
-        .unwrap_or_else(|| "hello".to_string())
+fn vm_peer_multiaddr(node: &VmNode, peer_id: &str) -> String {
+    format!("/ip4/10.0.2.2/tcp/{}/p2p/{peer_id}", node.p2p_port)
+}
+
+fn bootstrap_node_command() -> &'static str {
+    r#"
+set -eu
+P2P="${GUIX_P2P_E2E_P2P_BIN:-guix-p2p}"
+CACHE_DIR="${GUIX_P2P_E2E_BOOTSTRAP_CACHE:-/tmp/guix-p2p-bootstrap}"
+LOG="${GUIX_P2P_E2E_BOOTSTRAP_LOG:-/tmp/guix-p2p-bootstrap.log}"
+SOCKET="${GUIX_P2P_E2E_BOOTSTRAP_SOCKET:-$CACHE_DIR/guix-p2p.sock}"
+LISTEN="${GUIX_P2P_E2E_BOOTSTRAP_LISTEN:-/ip4/0.0.0.0/tcp/6881}"
+DASHBOARD_BIND="${GUIX_P2P_E2E_BOOTSTRAP_DASHBOARD_BIND:-0.0.0.0}"
+DASHBOARD_PORT="${GUIX_P2P_E2E_BOOTSTRAP_DASHBOARD_PORT:-3031}"
+mkdir -p "$CACHE_DIR" "$HOME/.config/guix-p2p"
+printf 'min_providers = 1\n' > "$HOME/.config/guix-p2p/config.toml"
+if [ -f /tmp/guix-p2p-bootstrap.pid ]; then
+  OLD_PID="$(cat /tmp/guix-p2p-bootstrap.pid 2>/dev/null || true)"
+  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+    kill "$OLD_PID" 2>/dev/null || true
+    sleep 1
+  fi
+fi
+rm -f "$SOCKET"
+RUST_LOG="${RUST_LOG:-info}" "$P2P" --daemon \
+  --cache-dir "$CACHE_DIR" \
+  --listen-addr "$LISTEN" \
+  --socket "$SOCKET" \
+  --dashboard --dashboard-bind "$DASHBOARD_BIND" --dashboard-port "$DASHBOARD_PORT" \
+  > "$LOG" 2>&1 &
+PID="$!"
+printf '%s\n' "$PID" > /tmp/guix-p2p-bootstrap.pid
+PEER_ID=''
+i=0
+while [ "$i" -lt 30 ]; do
+  PEER_ID="$(sed -n 's/.*Peer ID: //p' "$LOG" 2>/dev/null | tail -n 1)"
+  [ -n "$PEER_ID" ] && break
+  i=$((i + 1))
+  sleep 1
+done
+[ -n "$PEER_ID" ] && printf '%s\n' "$PEER_ID" > /tmp/guix-p2p-bootstrap-peer-id
+printf 'peer_id=%s\n' "$PEER_ID"
+printf 'pid=%s\nlog=%s\nsocket=%s\ndashboard=http://127.0.0.1:%s\n' "$PID" "$LOG" "$SOCKET" "$DASHBOARD_PORT"
+"#
 }
 
 fn store_hash_part(store_path: &str) -> Option<String> {
@@ -2727,6 +2844,7 @@ mod tests {
     #[test]
     fn unique_slug_appends_suffix_for_collisions() {
         let registry = VmRegistry {
+            default_bootstrap: None,
             nodes: vec![VmNode {
                 name: "Alice".to_string(),
                 slug: "alice".to_string(),
@@ -2743,7 +2861,12 @@ mod tests {
     }
 
     #[test]
-    fn fetch_package_prefers_explicit_then_saved_then_default() {
+    fn fetch_target_prefers_explicit_then_saved_then_latest_seed() {
+        let alice_seed = VmSeed {
+            package: "hello".to_string(),
+            store_path: "/gnu/store/example-hello".to_string(),
+            peer_id: "12D3KooWalice".to_string(),
+        };
         let mut node = VmNode {
             name: "Bob".to_string(),
             slug: "bob".to_string(),
@@ -2755,7 +2878,27 @@ mod tests {
             last_seed: None,
             last_fetch: None,
         };
-        assert_eq!(resolve_fetch_package(&node, None), "hello");
+        let registry = VmRegistry {
+            default_bootstrap: None,
+            nodes: vec![
+                VmNode {
+                    name: "Alice".to_string(),
+                    slug: "alice".to_string(),
+                    ssh_port: 2221,
+                    dashboard_port: 3031,
+                    p2p_port: 6881,
+                    disk: PathBuf::from("alice.qcow2"),
+                    pid: None,
+                    last_seed: Some(alice_seed.clone()),
+                    last_fetch: None,
+                },
+                node.clone(),
+            ],
+        };
+        let target = resolve_fetch_target(&registry, &node, None, None).unwrap();
+        assert_eq!(target.from, "Alice");
+        assert_eq!(target.package, "hello");
+        assert_eq!(target.store_path, alice_seed.store_path);
 
         node.last_fetch = Some(VmFetch {
             from: "Alice".to_string(),
@@ -2763,7 +2906,34 @@ mod tests {
             store_path: "/gnu/store/example-git".to_string(),
             peer_id: "12D3KooWexample".to_string(),
         });
-        assert_eq!(resolve_fetch_package(&node, None), "git");
-        assert_eq!(resolve_fetch_package(&node, Some("emacs")), "emacs");
+        let target = resolve_fetch_target(&registry, &node, None, None).unwrap();
+        assert_eq!(target.package, "git");
+        let target = resolve_fetch_target(&registry, &node, None, Some("emacs")).unwrap();
+        assert_eq!(target.package, "emacs");
+    }
+
+    #[test]
+    fn bootstrap_multiaddr_uses_vm_host_forward() {
+        let registry = VmRegistry {
+            default_bootstrap: Some(VmBootstrap {
+                node: "Bootstrap".to_string(),
+                peer_id: "12D3KooWbootstrap".to_string(),
+            }),
+            nodes: vec![VmNode {
+                name: "Bootstrap".to_string(),
+                slug: "bootstrap".to_string(),
+                ssh_port: 2221,
+                dashboard_port: 3031,
+                p2p_port: 6881,
+                disk: PathBuf::from("bootstrap.qcow2"),
+                pid: None,
+                last_seed: None,
+                last_fetch: None,
+            }],
+        };
+        assert_eq!(
+            registry.bootstrap_multiaddr().unwrap().as_deref(),
+            Some("/ip4/10.0.2.2/tcp/6881/p2p/12D3KooWbootstrap")
+        );
     }
 }

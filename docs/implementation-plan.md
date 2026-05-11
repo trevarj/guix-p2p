@@ -365,8 +365,8 @@ the fetch node imports the NAR from the seed node through `guix-p2p`.
   bootstrap, mDNS, and identify events.
 - [x] Phase 1: Start a seed node — guix-p2p daemon, wait for readiness,
   capture PeerId from logs.
-- [x] Phase 2: Connect a fetch node — guix-p2p daemon with
-  `--bootstrap-peers` pointing to the seed node.
+- [x] Phase 2: Start a neutral bootstrap node and configure seed/fetch nodes
+  with `bootstrap_peers` pointing to it.
 - [x] Phase 4: Seed hello on one named node via `--seed` flag.
 - [x] Phase 5: Prove the fetch node does not already have the seeded output.
 - [x] Phase 6a: Manually exercise the fetch node's `have` and `substitute` relay

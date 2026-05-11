@@ -22,10 +22,11 @@ Build the base image:
 cargo run -p guix-p2p-e2e -- vm image
 ```
 
-Start two named nodes. Unknown names are auto-created from the base image and
+Start three named nodes. Unknown names are auto-created from the base image and
 assigned persistent ports:
 
 ```sh
+cargo run -p guix-p2p-e2e -- vm run Bootstrap
 cargo run -p guix-p2p-e2e -- vm run Alice
 cargo run -p guix-p2p-e2e -- vm run Bob
 cargo run -p guix-p2p-e2e -- vm status --all
@@ -34,23 +35,24 @@ cargo run -p guix-p2p-e2e -- vm status --all
 Run the proof:
 
 ```sh
-cargo run -p guix-p2p-e2e -- vm wait-ssh Alice Bob
+cargo run -p guix-p2p-e2e -- vm wait-ssh Bootstrap Alice Bob
 cargo run -p guix-p2p-e2e -- vm push-binary --all
+cargo run -p guix-p2p-e2e -- vm bootstrap Bootstrap
 cargo run -p guix-p2p-e2e -- vm seed Alice hello
-cargo run -p guix-p2p-e2e -- vm connect Bob --from Alice
 cargo run -p guix-p2p-e2e -- vm remove Bob
 cargo run -p guix-p2p-e2e -- vm fetch Bob
 ```
 
-`seed` saves the latest `store_path` and `peer_id` for that node. `connect`
-uses the latest seed from `--from`, starts the fetch node's P2P daemon, starts
-the fetch node's raw `guix-daemon` wrapper, and records the target package for
-later `remove` and `fetch` commands.
+`bootstrap` starts a seedless DHT node and saves it as the default bootstrap
+peer for the VM registry. `seed` uses that configured bootstrap peer, saves the
+latest `store_path` and `peer_id` for the seed node, and announces the NAR
+provider record through the DHT.
 
 `remove` realizes dependencies with the regular daemon path and deletes only
-the target output. `fetch` then runs `guix build --no-grafts` through the
-fetch node's p2p-only daemon and requires the target output to be imported as
-a store directory.
+the target output. `fetch` starts the fetch node's P2P daemon against the
+configured bootstrap peer, starts the raw `guix-daemon` wrapper, runs
+`guix build --no-grafts`, and requires the target output to be imported as a
+store directory. Bob does not receive Alice's address directly in this flow.
 
 Verify the imported output by SSHing into the fetcher and running the store
 path directly. The proof imports the output; it does not install `hello` into
@@ -66,6 +68,7 @@ Useful operations:
 ```sh
 cargo run -p guix-p2p-e2e -- vm logs Alice
 cargo run -p guix-p2p-e2e -- vm logs Bob
+cargo run -p guix-p2p-e2e -- vm logs Bootstrap
 cargo run -p guix-p2p-e2e -- vm daemon-log Bob
 cargo run -p guix-p2p-e2e -- vm stop --all
 ```
@@ -81,7 +84,7 @@ target/guix-p2p-e2e/
 Important files:
 
 - `base.qcow2`: shared base image copied to node disks
-- `nodes.json`: named node registry, ports, disks, PIDs, and latest seed/fetch metadata
+- `nodes.json`: named node registry, ports, disks, PIDs, default bootstrap, and latest seed/fetch metadata
 - `<node>.qcow2`: writable node disk
 - `<node>.env`: shell exports for the node's latest seed
 - `ssh/e2e_ed25519`: persistent test SSH client key

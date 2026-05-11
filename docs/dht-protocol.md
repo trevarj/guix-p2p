@@ -61,17 +61,11 @@ answer provider lookups.
 ### Bootstrap Peer Config
 
 ```toml
-# guix-p2p.toml (user config)
-[bootstrap]
-peers = [
-    "/ip4/p2p1.guix.example.org/udp/6881/quic-v1/p2p/12D3KooW...",
-    "/ip4/p2p2.guix.example.org/udp/6881/quic-v1/p2p/12D3KooW...",
-    "/ip4/p2p3.guix.example.org/udp/6881/quic-v1/p2p/12D3KooW...",
-]
+bootstrap_peers = "/ip4/p2p1.guix.example.org/udp/6881/quic-v1/p2p/12D3KooW...,/ip4/p2p2.guix.example.org/tcp/6881/p2p/12D3KooW..."
 ```
 
-Default bootstrap peers are hardcoded in the binary. Users can override via
-`--bootstrap-peers` CLI flag or config file.
+There are no default bootstrap peers yet. Users configure known peers via the
+`--bootstrap-peers` CLI flag or `bootstrap_peers` in the config file.
 
 ## Kademlia Parameters
 
