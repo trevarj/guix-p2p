@@ -11,6 +11,42 @@ providers through Kademlia, downloads nar blocks from peers, verifies the Guix
 nar hash, and can fall back to configured HTTP substitute servers when policy
 allows it.
 
+## How It Works
+
+`guix-daemon` already talks to substituters through the `guix substitute`
+protocol. `guix-p2p` keeps that protocol intact: a small wrapper intercepts
+`guix substitute --query` and `guix substitute --substitute`, then forwards
+those requests to a long-running `guix-p2p --daemon` over a Unix socket.
+
+The daemon answers `have` and `info` queries only when the requested store path
+has trusted narinfo metadata and enough P2P providers. For `substitute`
+requests, it downloads the NAR from peers, verifies the official Guix nar hash,
+and writes the result back through the same file descriptor that
+`guix-daemon` expects from any substituter.
+
+```text
+guix build hello
+      |
+      v
+guix-daemon
+      |
+      | spawns: guix substitute --query / --substitute
+      v
+wrapper or patched guix substitute
+      |
+      | forwards stdin/fd 4 over Unix socket
+      v
+guix-p2p --daemon
+      |
+      +-- fetch signed narinfo from official substitute URLs
+      +-- find providers in the libp2p Kademlia DHT
+      +-- download NAR blocks from peers
+      +-- verify nar hash
+      |
+      v
+reply to guix-daemon as a normal substitute
+```
+
 ## Quick Start
 
 ```sh
@@ -36,22 +72,16 @@ scripts/guix-wrapper.sh build hello
 
 ## Validation
 
-Run the real Guix smoke test:
+The strict end-to-end proof uses disposable Guix System VMs with separate
+writable stores. Follow [docs/e2e.md](docs/e2e.md) for the maintained command
+sequence.
+
+For a faster smoke test that exercises the Guix substituter path without the
+full VM proof:
 
 ```sh
 guix shell -m manifest.scm -- \
   cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport tcp
-```
-
-For the strict proof with separate writable stores, boot the three disposable
-Guix VMs. This builds a full Guix system image and can download `linux-libre`
-the first time:
-
-```sh
-cargo run -p guix-p2p-e2e -- vm image
-cargo run -p guix-p2p-e2e -- vm run Bootstrap
-cargo run -p guix-p2p-e2e -- vm run Alice
-cargo run -p guix-p2p-e2e -- vm run Bob
 ```
 
 Run local controlled benchmarks:
