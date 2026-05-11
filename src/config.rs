@@ -43,6 +43,7 @@ impl std::str::FromStr for SubstitutePolicy {
 #[serde(default)]
 struct ConfigFile {
     bootstrap_peers: Option<String>,
+    external_addresses: Option<String>,
     listen_addr: Option<String>,
     cache_dir: Option<String>,
     substitute_urls: Option<String>,
@@ -70,6 +71,7 @@ struct ConfigFile {
 #[allow(dead_code)]
 pub struct Config {
     pub bootstrap_peers: Vec<String>,
+    pub external_addresses: Vec<String>,
     pub listen_addr: String,
     pub cache_dir: PathBuf,
     pub block_size: usize,
@@ -98,6 +100,7 @@ pub struct Config {
 impl Config {
     pub fn load(
         cli_bootstrap: Option<String>,
+        cli_external_addresses: Option<String>,
         cli_listen: Option<String>,
         cli_cache: Option<String>,
         cli_substitute_urls: Option<String>,
@@ -119,6 +122,14 @@ impl Config {
                         .map(|s| s.split(',').map(str::to_string).collect())
                 })
                 .unwrap_or_else(default_bootstrap_peers),
+            external_addresses: cli_external_addresses
+                .map(|s| s.split(',').map(str::to_string).collect())
+                .or_else(|| {
+                    file.external_addresses
+                        .as_ref()
+                        .map(|s| s.split(',').map(str::to_string).collect())
+                })
+                .unwrap_or_default(),
             listen_addr: cli_listen
                 .or(file.listen_addr)
                 .unwrap_or_else(|| "/ip4/0.0.0.0/udp/6881/quic-v1".into()),
@@ -208,8 +219,10 @@ mod tests {
 
     #[test]
     fn test_default_config() {
-        let config = Config::load(None, None, Some("/tmp/guix-p2p-test".into()), None, None);
+        let config = Config::load(None, None, None, Some("/tmp/guix-p2p-test".into()), None, None);
         assert_eq!(config.block_size, 262144);
+        assert!(config.bootstrap_peers.is_empty());
+        assert!(config.external_addresses.is_empty());
         assert_eq!(config.max_peers_per_download, 8);
         assert_eq!(config.substitute_urls.len(), 2);
         assert_eq!(config.min_providers, 3);

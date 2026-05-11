@@ -32,6 +32,10 @@ struct Cli {
     #[arg(long, global = true)]
     bootstrap_peers: Option<String>,
 
+    /// Comma-separated externally reachable listener addresses to advertise
+    #[arg(long, global = true)]
+    external_addresses: Option<String>,
+
     /// Address to listen on (multiaddr format)
     #[arg(long, global = true)]
     listen_addr: Option<String>,
@@ -89,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut config = config::Config::load(
         cli.bootstrap_peers,
+        cli.external_addresses,
         cli.listen_addr,
         cli.cache_dir,
         cli.substitute_urls,
@@ -142,6 +147,13 @@ async fn main() -> anyhow::Result<()> {
     let listen_addr: libp2p::Multiaddr =
         config.listen_addr.parse().context("failed to parse listen address")?;
     swarm.listen_on(listen_addr).context("failed to listen")?;
+
+    for addr in &config.external_addresses {
+        let addr: libp2p::Multiaddr =
+            addr.parse().with_context(|| format!("failed to parse external address {addr}"))?;
+        tracing::info!("Advertising external address {}", addr);
+        swarm.add_external_address(addr);
+    }
 
     dht::bootstrap(&mut swarm, &config.bootstrap_peers)?;
 

@@ -1018,16 +1018,14 @@ fn vm_seed(config: &VmConfig, name: &str, package: &str) -> anyhow::Result<()> {
     let mut registry = VmRegistry::load(config)?;
     let node = registry.node(name)?.clone();
     let bootstrap = registry.bootstrap_multiaddr()?;
-    let bootstrap_env = bootstrap
-        .as_ref()
-        .map(|addr| format!("GUIX_P2P_E2E_A_BOOTSTRAP={} ", shell_quote(addr)))
-        .unwrap_or_default();
     let output = ssh_run(
         config,
         &node,
-        &format!(
-            "GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p {bootstrap_env}guix-p2p-e2e-node-a {}",
-            shell_quote(package)
+        &seed_node_command(
+            package,
+            bootstrap.as_deref(),
+            &config.substitute_urls,
+            &vm_external_multiaddr(&node),
         ),
     )?;
     print!("{output}");
@@ -1165,13 +1163,7 @@ fn vm_start_fetch_p2p(config: &VmConfig, name: &str, target: &VmFetch) -> anyhow
     let bootstrap = registry
         .bootstrap_multiaddr()?
         .ok_or_else(|| anyhow::anyhow!("no bootstrap node configured; run: vm bootstrap <node>"))?;
-    let command = format!(
-        "GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p GUIX_P2P_E2E_B_LISTEN=/ip4/0.0.0.0/tcp/6881 \
-         GUIX_P2P_E2E_B_DASHBOARD_PORT=3031 GUIX_P2P_E2E_B_BOOTSTRAP={} guix-p2p-e2e-node-b {} {}",
-        shell_quote(&bootstrap),
-        shell_quote(&target.store_path),
-        shell_quote(&target.peer_id)
-    );
+    let command = fetch_node_command(target, &bootstrap, &vm_external_multiaddr(node));
     let output = ssh_run(config, node, &command)?;
     print!("{output}");
     Ok(())
@@ -1189,6 +1181,7 @@ fn vm_fetch(
     registry.node_mut(name)?.last_fetch = Some(target.clone());
     registry.save(config)?;
     vm_start_fetch_p2p(config, name, &target)?;
+    vm_require_fetch_target_available(config, name, &target)?;
     vm_start_daemon(config, name)?;
     let output = ssh_run(
         config,
@@ -2633,13 +2626,14 @@ fn push_binary_to_node(
         .arg("-P")
         .arg(node.ssh_port.to_string())
         .arg(&config.guix_p2p_binary)
-        .arg("e2e@127.0.0.1:/tmp/guix-p2p-real")
+        .arg("e2e@127.0.0.1:/tmp/guix-p2p-real.next")
         .status()?;
     if !status.success() {
         anyhow::bail!("scp to {} failed with {status}", node.name);
     }
     let install = format!(
         r#"set -eu
+mv /tmp/guix-p2p-real.next /tmp/guix-p2p-real
 cat > /tmp/guix-p2p <<'EOF'
 #!/bin/sh
 set -eu
@@ -2696,28 +2690,222 @@ fn resolve_fetch_target(
     explicit_store_path: Option<&str>,
     explicit_package: Option<&str>,
 ) -> anyhow::Result<VmFetch> {
-    if let Some(existing) = &node.last_fetch {
-        let mut target = existing.clone();
-        if let Some(path) = explicit_store_path {
-            target.store_path = path.to_string();
+    let mut target = if let Ok((seed_node, seed)) = registry.latest_seed() {
+        VmFetch {
+            from: seed_node.name.clone(),
+            package: seed.package.clone(),
+            store_path: seed.store_path.clone(),
+            peer_id: seed.peer_id.clone(),
         }
-        if let Some(package) = explicit_package {
-            target.package = package.to_string();
-        }
-        return Ok(target);
-    }
+    } else if let Some(existing) = &node.last_fetch {
+        existing.clone()
+    } else {
+        anyhow::bail!("no saved seed found; run: vm seed <node> hello");
+    };
 
-    let (seed_node, seed) = registry.latest_seed()?;
-    Ok(VmFetch {
-        from: seed_node.name.clone(),
-        package: explicit_package.unwrap_or(&seed.package).to_string(),
-        store_path: explicit_store_path.unwrap_or(&seed.store_path).to_string(),
-        peer_id: seed.peer_id.clone(),
-    })
+    if let Some(path) = explicit_store_path {
+        target.store_path = path.to_string();
+    }
+    if let Some(package) = explicit_package {
+        target.package = package.to_string();
+    }
+    Ok(target)
 }
 
 fn vm_peer_multiaddr(node: &VmNode, peer_id: &str) -> String {
     format!("/ip4/10.0.2.2/tcp/{}/p2p/{peer_id}", node.p2p_port)
+}
+
+fn vm_external_multiaddr(node: &VmNode) -> String {
+    format!("/ip4/10.0.2.2/tcp/{}", node.p2p_port)
+}
+
+fn seed_node_command(
+    package: &str,
+    bootstrap: Option<&str>,
+    substitute_urls: &str,
+    external_address: &str,
+) -> String {
+    let bootstrap = bootstrap.unwrap_or("");
+    format!(
+        r#"
+set -eu
+export LD_LIBRARY_PATH="/run/current-system/profile/lib${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
+PACKAGE={package}
+BOOTSTRAP={bootstrap}
+SUBSTITUTE_URLS={substitute_urls}
+EXTERNAL_ADDRESS={external_address}
+P2P="${{GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}}"
+CACHE_DIR="${{GUIX_P2P_E2E_A_CACHE:-/tmp/guix-p2p-a}}"
+LOG="${{GUIX_P2P_E2E_A_LOG:-/tmp/guix-p2p-a.log}}"
+SOCKET="${{GUIX_P2P_E2E_A_SOCKET:-$CACHE_DIR/guix-p2p.sock}}"
+LISTEN="${{GUIX_P2P_E2E_A_LISTEN:-/ip4/0.0.0.0/tcp/6881}}"
+DASHBOARD_BIND="${{GUIX_P2P_E2E_A_DASHBOARD_BIND:-0.0.0.0}}"
+DASHBOARD_PORT="${{GUIX_P2P_E2E_A_DASHBOARD_PORT:-3031}}"
+STORE_PATH="$(guix build --no-grafts --substitute-urls="$SUBSTITUTE_URLS" "$PACKAGE")"
+STORE_HASH="${{STORE_PATH#/gnu/store/}}"
+STORE_HASH="${{STORE_HASH%%-*}}"
+NARINFO_URL=''
+for BASE_URL in $SUBSTITUTE_URLS; do
+  URL="${{BASE_URL%/}}/$STORE_HASH.narinfo"
+  if curl -fsI "$URL" >/dev/null 2>&1; then
+    NARINFO_URL="$URL"
+    break
+  fi
+done
+if [ -z "$NARINFO_URL" ]; then
+  echo "no official narinfo found for $STORE_PATH" >&2
+  echo "seed node needs signed narinfo from one of: $SUBSTITUTE_URLS" >&2
+  exit 1
+fi
+mkdir -p "$CACHE_DIR" "$HOME/.config/guix-p2p"
+printf 'min_providers = 1\n' > "$HOME/.config/guix-p2p/config.toml"
+if [ -f /tmp/guix-p2p-a.pid ]; then
+  OLD_PID="$(cat /tmp/guix-p2p-a.pid 2>/dev/null || true)"
+  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+    kill "$OLD_PID" 2>/dev/null || true
+    sleep 1
+  fi
+fi
+rm -f "$SOCKET"
+BOOTSTRAP_ARGS=''
+if [ -n "$BOOTSTRAP" ]; then
+  BOOTSTRAP_ARGS="--bootstrap-peers $BOOTSTRAP"
+fi
+RUST_LOG="${{RUST_LOG:-info}}" "$P2P" --daemon \
+  --cache-dir "$CACHE_DIR" \
+  --listen-addr "$LISTEN" \
+  --socket "$SOCKET" \
+  --dashboard --dashboard-bind "$DASHBOARD_BIND" --dashboard-port "$DASHBOARD_PORT" \
+  --external-addresses "$EXTERNAL_ADDRESS" \
+  $BOOTSTRAP_ARGS \
+  --seed "$STORE_PATH" \
+  > "$LOG" 2>&1 &
+PID="$!"
+printf '%s\n' "$PID" > /tmp/guix-p2p-a.pid
+PEER_ID=''
+i=0
+while [ "$i" -lt 30 ]; do
+  PEER_ID="$(sed -n 's/.*Peer ID: //p' "$LOG" 2>/dev/null | tail -n 1)"
+  [ -n "$PEER_ID" ] && break
+  i=$((i + 1))
+  sleep 1
+done
+[ -n "$PEER_ID" ] && printf '%s\n' "$PEER_ID" > /tmp/guix-p2p-a-peer-id
+printf 'store_path=%s\n' "$STORE_PATH"
+printf 'narinfo_url=%s\n' "$NARINFO_URL"
+printf 'peer_id=%s\n' "$PEER_ID"
+printf 'pid=%s\nlog=%s\nsocket=%s\ndashboard=http://127.0.0.1:%s\n' "$PID" "$LOG" "$SOCKET" "$DASHBOARD_PORT"
+"#,
+        package = shell_quote(package),
+        bootstrap = shell_quote(bootstrap),
+        substitute_urls = shell_quote(substitute_urls),
+        external_address = shell_quote(external_address)
+    )
+}
+
+fn fetch_target_available_command(target: &VmFetch) -> String {
+    format!(
+        r#"
+set -eu
+STORE_PATH={store_path}
+P2P="${{GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}}"
+SOCKET="${{GUIX_P2P_E2E_B_SOCKET:-/tmp/guix-p2p-b/guix-p2p.sock}}"
+LOG="${{GUIX_P2P_E2E_B_LOG:-/tmp/guix-p2p-b.log}}"
+i=0
+while [ "$i" -lt 12 ]; do
+  if [ -S "$SOCKET" ]; then
+    OUT="$(printf 'have %s\n' "$STORE_PATH" | RUST_LOG=warn "$P2P" --query --socket "$SOCKET" 4>&1 || true)"
+    printf '%s\n' "$OUT"
+    if printf '%s\n' "$OUT" | grep -F -- "$STORE_PATH" >/dev/null; then
+      echo TARGET_AVAILABLE_OVER_P2P
+      exit 0
+    fi
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+echo "TARGET_NOT_AVAILABLE_OVER_P2P: $STORE_PATH" >&2
+echo "The fetch node cannot see a provider for the target through the configured bootstrap peer." >&2
+echo "Recent fetch-node daemon log:" >&2
+tail -n 120 "$LOG" >&2 || true
+exit 1
+"#,
+        store_path = shell_quote(&target.store_path)
+    )
+}
+
+fn fetch_node_command(target: &VmFetch, bootstrap: &str, external_address: &str) -> String {
+    format!(
+        r#"
+set -eu
+STORE_PATH={store_path}
+BOOTSTRAP={bootstrap}
+EXTERNAL_ADDRESS={external_address}
+P2P="${{GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}}"
+CACHE_DIR="${{GUIX_P2P_E2E_B_CACHE:-/tmp/guix-p2p-b}}"
+LOG="${{GUIX_P2P_E2E_B_LOG:-/tmp/guix-p2p-b.log}}"
+SOCKET="${{GUIX_P2P_E2E_B_SOCKET:-$CACHE_DIR/guix-p2p.sock}}"
+LISTEN="${{GUIX_P2P_E2E_B_LISTEN:-/ip4/0.0.0.0/tcp/6881}}"
+DASHBOARD_BIND="${{GUIX_P2P_E2E_B_DASHBOARD_BIND:-0.0.0.0}}"
+DASHBOARD_PORT="${{GUIX_P2P_E2E_B_DASHBOARD_PORT:-3031}}"
+if [ -e "$STORE_PATH" ]; then
+  echo "fetch node already has $STORE_PATH; stop before mutating the proof" >&2
+  exit 1
+fi
+mkdir -p "$CACHE_DIR" "$HOME/.config/guix-p2p"
+printf 'min_providers = 1\n' > "$HOME/.config/guix-p2p/config.toml"
+if [ -f /tmp/guix-p2p-b.pid ]; then
+  OLD_PID="$(cat /tmp/guix-p2p-b.pid 2>/dev/null || true)"
+  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+    kill "$OLD_PID" 2>/dev/null || true
+    sleep 1
+  fi
+fi
+rm -f "$SOCKET"
+RUST_LOG="${{RUST_LOG:-info}}" "$P2P" --daemon \
+  --cache-dir "$CACHE_DIR" \
+  --listen-addr "$LISTEN" \
+  --socket "$SOCKET" \
+  --dashboard --dashboard-bind "$DASHBOARD_BIND" --dashboard-port "$DASHBOARD_PORT" \
+  --bootstrap-peers "$BOOTSTRAP" \
+  --external-addresses "$EXTERNAL_ADDRESS" \
+  --policy p2p-only \
+  > "$LOG" 2>&1 &
+PID="$!"
+printf '%s\n' "$PID" > /tmp/guix-p2p-b.pid
+i=0
+while [ "$i" -lt 30 ]; do
+  [ -S "$SOCKET" ] && break
+  i=$((i + 1))
+  sleep 1
+done
+printf 'store_path=%s\n' "$STORE_PATH"
+printf 'bootstrap=%s\n' "$BOOTSTRAP"
+printf 'external_address=%s\n' "$EXTERNAL_ADDRESS"
+printf 'pid=%s\nlog=%s\nsocket=%s\ndashboard=http://127.0.0.1:%s\n' "$PID" "$LOG" "$SOCKET" "$DASHBOARD_PORT"
+if [ -S "$SOCKET" ]; then
+  printf 'have_query=' && printf 'have %s\n' "$STORE_PATH" | RUST_LOG=warn "$P2P" --query --socket "$SOCKET" 4>&1
+else
+  echo "socket did not appear yet; inspect $LOG" >&2
+fi
+"#,
+        store_path = shell_quote(&target.store_path),
+        bootstrap = shell_quote(bootstrap),
+        external_address = shell_quote(external_address)
+    )
+}
+
+fn vm_require_fetch_target_available(
+    config: &VmConfig,
+    name: &str,
+    target: &VmFetch,
+) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    let node = registry.node(name)?;
+    let output = ssh_run(config, node, &fetch_target_available_command(target))?;
+    print!("{output}");
+    Ok(())
 }
 
 fn bootstrap_node_command() -> &'static str {
@@ -2861,7 +3049,7 @@ mod tests {
     }
 
     #[test]
-    fn fetch_target_prefers_explicit_then_saved_then_latest_seed() {
+    fn fetch_target_prefers_latest_seed_then_explicit_overrides() {
         let alice_seed = VmSeed {
             package: "hello".to_string(),
             store_path: "/gnu/store/example-hello".to_string(),
@@ -2907,9 +3095,23 @@ mod tests {
             peer_id: "12D3KooWexample".to_string(),
         });
         let target = resolve_fetch_target(&registry, &node, None, None).unwrap();
-        assert_eq!(target.package, "git");
+        assert_eq!(target.package, "hello");
         let target = resolve_fetch_target(&registry, &node, None, Some("emacs")).unwrap();
         assert_eq!(target.package, "emacs");
+    }
+
+    #[test]
+    fn seed_node_command_includes_bootstrap_peer() {
+        let command = seed_node_command(
+            "hello",
+            Some("/ip4/10.0.2.2/tcp/6883/p2p/12D3KooWbootstrap"),
+            "https://ci.guix.gnu.org https://bordeaux.guix.gnu.org",
+            "/ip4/10.0.2.2/tcp/6881",
+        );
+        assert!(command.contains("PACKAGE='hello'"));
+        assert!(command.contains("BOOTSTRAP='/ip4/10.0.2.2/tcp/6883/p2p/12D3KooWbootstrap'"));
+        assert!(command.contains("--bootstrap-peers $BOOTSTRAP"));
+        assert!(command.contains("--external-addresses \"$EXTERNAL_ADDRESS\""));
     }
 
     #[test]

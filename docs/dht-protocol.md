@@ -62,10 +62,16 @@ answer provider lookups.
 
 ```toml
 bootstrap_peers = "/ip4/p2p1.guix.example.org/udp/6881/quic-v1/p2p/12D3KooW...,/ip4/p2p2.guix.example.org/tcp/6881/p2p/12D3KooW..."
+external_addresses = "/dns4/node.example.org/udp/6881/quic-v1"
 ```
 
 There are no default bootstrap peers yet. Users configure known peers via the
 `--bootstrap-peers` CLI flag or `bootstrap_peers` in the config file.
+
+Nodes can also set `external_addresses` or `--external-addresses` when the
+dialable address differs from the local listen address. Those addresses are
+advertised through identify and included in provider records, which lets peers
+found through the DHT dial the provider.
 
 ## Kademlia Parameters
 

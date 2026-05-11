@@ -422,6 +422,7 @@ and CLI override.
 ```toml
 substitute_policy = "p2p-first"
 bootstrap_peers = "/ip4/1.2.3.4/udp/6881/quic-v1/p2p/QmPeer1,/ip4/5.6.7.8/udp/6881/quic-v1/p2p/QmPeer2"
+external_addresses = "/dns4/node.example.org/udp/6881/quic-v1"
 substitute_urls = "https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org"
 min_providers = 3
 request_timeout_secs = 30

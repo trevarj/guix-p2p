@@ -46,13 +46,23 @@ cargo run -p guix-p2p-e2e -- vm fetch Bob
 `bootstrap` starts a seedless DHT node and saves it as the default bootstrap
 peer for the VM registry. `seed` uses that configured bootstrap peer, saves the
 latest `store_path` and `peer_id` for the seed node, and announces the NAR
-provider record through the DHT.
+provider record through the DHT. Re-running `seed` updates the latest target
+used by later `fetch` and `remove` commands.
+
+The VM harness passes each node's host-forwarded P2P port as an
+`--external-addresses` value. This is required for QEMU user-mode networking:
+the local guest address is not dialable from the other VMs, but the
+host-forwarded address is.
 
 `remove` realizes dependencies with the regular daemon path and deletes only
 the target output. `fetch` starts the fetch node's P2P daemon against the
-configured bootstrap peer, starts the raw `guix-daemon` wrapper, runs
-`guix build --no-grafts`, and requires the target output to be imported as a
-store directory. Bob does not receive Alice's address directly in this flow.
+configured bootstrap peer and first verifies that the target is visible over
+P2P. If no provider is found, it stops before starting the private
+`guix-daemon` wrapper. Once the target is visible, `fetch` runs
+`guix build --no-grafts` through the wrapper and requires the target output to
+be imported as a store directory. Bob does not receive Alice's address directly
+as a CLI argument in this flow; it learns the provider and its advertised
+address from the DHT.
 
 Verify the imported output by SSHing into the fetcher and running the store
 path directly. The proof imports the output; it does not install `hello` into
@@ -94,6 +104,10 @@ Important files:
 ## Notes
 
 - All nodes use the same image and can act as seeder or fetcher.
+- If `fetch` reports `TARGET_NOT_AVAILABLE_OVER_P2P`, re-run `vm seed <node>
+  hello` and inspect `vm logs <seed-node>` and `vm logs <fetch-node>`. The
+  seed node must connect through the saved bootstrap peer before the fetch node
+  can discover it.
 - `run` uses KVM when available unless `--enable-kvm=false` or
   `GUIX_P2P_E2E_ENABLE_KVM=false` is set.
 - Dashboard forwarding is enabled by default. Disable it with

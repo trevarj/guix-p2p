@@ -13,6 +13,7 @@ All other tuning belongs in TOML.
 ```toml
 listen_addr = "/ip4/0.0.0.0/udp/6881/quic-v1"
 bootstrap_peers = "/ip4/bootstrap.example.org/udp/6881/quic-v1/p2p/12D3KooW..."
+external_addresses = "/dns4/node.example.org/udp/6881/quic-v1"
 cache_dir = "/var/cache/guix-p2p"
 socket_path = "/var/cache/guix-p2p/guix-p2p.sock"
 substitute_policy = "p2p-first"
@@ -29,6 +30,7 @@ seed_paths = ["/gnu/store/...-hello"]
 | Key | Default | CLI override | Purpose |
 |-----|---------|--------------|---------|
 | `bootstrap_peers` | empty | `--bootstrap-peers` | Comma-separated peer multiaddrs used for initial DHT connectivity. |
+| `external_addresses` | empty | `--external-addresses` | Comma-separated listener addresses advertised to peers and provider records when autodetection is insufficient. |
 | `listen_addr` | `/ip4/0.0.0.0/udp/6881/quic-v1` | `--listen-addr` | libp2p listen multiaddr. TCP and QUIC are both supported by the binary. |
 | `cache_dir` | `$XDG_CACHE_HOME/guix-p2p` or `~/.cache/guix-p2p` | `--cache-dir` | Identity, nar cache, and reputation storage. |
 | `substitute_urls` | `https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org` | `--substitute-urls` | HTTP substitute servers used for narinfo metadata and allowed HTTP nar fallback. |
@@ -54,6 +56,10 @@ seed_paths = ["/gnu/store/...-hello"]
 `bootstrap_peers` is the persisted known-peer mechanism today. Peers learned
 through mDNS, identify, or normal DHT operation are added to the in-memory
 routing table but are not written back to config.
+
+Use `external_addresses` when the listen address seen locally is not the
+address other peers should dial, such as port-forwarded VMs, NAT rules, or a
+public DNS name.
 
 ## Policies
 
