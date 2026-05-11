@@ -161,7 +161,7 @@
                   "DASHBOARD_PORT=\"${GUIX_P2P_E2E_B_DASHBOARD_PORT:-3032}\"\n"
                   "BOOTSTRAP=\"${GUIX_P2P_E2E_B_BOOTSTRAP:-/ip4/10.0.2.2/tcp/6881/p2p/$PEER_ID}\"\n"
                   "if [ -e \"$STORE_PATH\" ]; then\n"
-                  "  echo \"Node B already has $STORE_PATH; stop before mutating the proof\" >&2\n"
+                  "  echo \"fetch node already has $STORE_PATH; stop before mutating the proof\" >&2\n"
                   "  exit 1\n"
                   "fi\n"
                   "mkdir -p \"$CACHE_DIR\" \"$HOME/.config/guix-p2p\"\n"
@@ -233,8 +233,8 @@ two-node E2E VM image.")
                 (group "users")
                 (supplementary-groups '("wheel" "netdev")))
                %base-user-accounts))
-  ;; Keep the base image neutral. Node A will realize the package under test
-  ;; after boot so Node B starts from an identical store without that package.
+  ;; Keep the base image neutral. Scenario commands decide which node seeds
+  ;; and which node fetches the package under test.
   (packages
    (append
     (list bash curl gcc-toolchain %guix-p2p-e2e-package openssh-sans-x openssl)

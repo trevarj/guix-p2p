@@ -54,9 +54,9 @@ Guix VMs. This builds a full Guix system image and can download `linux-libre`
 the first time:
 
 ```sh
-scripts/e2e.sh image
-scripts/e2e.sh run-a  # terminal 1
-scripts/e2e.sh run-b  # terminal 2
+cargo run -p guix-p2p-e2e -- vm image
+cargo run -p guix-p2p-e2e -- vm run Alice
+cargo run -p guix-p2p-e2e -- vm run Bob
 ```
 
 Run local controlled benchmarks:

@@ -336,27 +336,26 @@
 ### Goals
 
 - Multi-node P2P substitute test with genuinely separate writable stores.
-- End-to-end `guix build hello` through Node B's Guix daemon with `GUIX`
-  pointing to the guix-p2p wrapper.
-- Verify Node A has the package, Node B does not, and Node B realizes it via
-  P2P nar download from Node A.
+- End-to-end `guix build hello` through a fetch node's Guix daemon with
+  `GUIX` pointing to the guix-p2p wrapper.
+- Verify one named node has the package, another named node does not, and the
+  fetch node realizes it via P2P nar download from the seed node.
 
 ### Current Status
 
-The E2E VM proof now passes through the raw `guix-daemon` integration
-layer. Node A and Node B boot from separate writable qcow2 disks, Node A
-realizes and seeds `hello`, Node B proves it does not have that exact store
-path, and `GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build --no-grafts
-hello` on Node B imports the NAR from Node A through `guix-p2p`.
+The E2E VM proof now passes through the raw `guix-daemon` integration layer.
+Named nodes boot from separate writable qcow2 disks, a seed node realizes and
+seeds `hello`, a fetch node proves it does not have that exact store path, and
+`GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build --no-grafts hello` on
+the fetch node imports the NAR from the seed node through `guix-p2p`.
 
 ### Tasks
 
 - [x] Build a minimal real Guix image or VM root with a writable private
   `/gnu/store`.
-- [x] Add initial Node A and Node B qcow2 operating-system definitions for the
+- [x] Add initial two-node qcow2 operating-system definitions for the
   E2E VM proof.
-- [x] Add a thin step script for image derivation/build and QEMU launch command
-  generation.
+- [x] Move the VM step runner into `guix-p2p-e2e vm` with named nodes.
 - [x] Launch two isolated nodes with separate stores and Guix state.
 - [x] Bake `guix-p2p` and VM-local A/B helper scripts into the image.
 - [x] Add persistent test SSH keys so image rebuilds do not churn host
@@ -364,34 +363,34 @@ hello` on Node B imports the NAR from Node A through `guix-p2p`.
 - [x] Seed raw single-item NARs, not `guix archive --export` bundles.
 - [x] Force Kademlia server mode and populate Kad peer addresses from
   bootstrap, mDNS, and identify events.
-- [x] Phase 1: Start Node A (seeder) — guix-p2p daemon, wait for readiness,
+- [x] Phase 1: Start a seed node — guix-p2p daemon, wait for readiness,
   capture PeerId from logs.
-- [x] Phase 2: Start Node B (builder) — guix-p2p daemon with
-  `--bootstrap-peers` pointing to Node A.
-- [x] Phase 4: Seed hello on Node A via `--seed` flag.
-- [x] Phase 5: Prove Node B does not already have the seeded output.
-- [x] Phase 6a: Manually exercise Node B's `have` and `substitute` relay
+- [x] Phase 2: Start a fetch node — guix-p2p daemon with
+  `--bootstrap-peers` pointing to the seed node.
+- [x] Phase 4: Seed hello on one named node via `--seed` flag.
+- [x] Phase 5: Prove the fetch node does not already have the seeded output.
+- [x] Phase 6a: Manually exercise the fetch node's `have` and `substitute` relay
   commands against the daemon socket.
 - [x] Find raw C++ guix-daemon binary (not Guile wrapper) for `GUIX` env var
   override
 - [x] Generate per-node wrapper scripts with `GUIX_P2P_SOCKET` and
   `GUIX_P2P_BIN` env vars
-- [x] Phase 3: Start guix-daemon inside Node B with private store/state and
+- [x] Phase 3: Start guix-daemon inside the fetch node with private store/state and
   `GUIX` pointing to wrapper
-- [x] Phase 6b: Run `guix build hello` inside Node B through the raw daemon
+- [x] Phase 6b: Run `guix build hello` inside the fetch node through the raw daemon
 - [x] Phase 7: Propagate build exit code from the raw daemon proof
 - [ ] Print dashboard catalog/seeds from the VM proof
-- [ ] Phase 8: Cleanup VMs/processes
+- [x] Phase 8: Managed VM process status/stop commands
 
 ### Key Design Decisions
 
 - `guix system container` and `guix shell -C` are not sufficient for the full
   proof because they share the host `/gnu/store`.
-- Use a VM/image or equivalent private rootfs so Node A and Node B have
+- Use a VM/image or equivalent private rootfs so named scenario nodes have
   separate writable stores.
 - Separate `GUIX_STATE_DIRECTORY` per node so daemon validity state is isolated.
 - Raw C++ `guix-daemon` binary (not Guile wrapper which overwrites `GUIX`)
-- `--max-jobs=0` for substitute-only Node B operation where appropriate.
+- `--max-jobs=0` for substitute-only fetch-node operation where appropriate.
 - `--policy p2p-only` to force pure P2P (no HTTP nar fallback)
 
 ### Findings Applied 2026-05-07
@@ -401,7 +400,7 @@ hello` on Node B imports the NAR from Node A through `guix-p2p`.
   denied in test containers.
 - `GetBlocks` now carries `nar_hash`, so multi-nar seed caches serve the
   requested nar instead of relying on prior handshake state.
-- The E2E script defaults to TCP loopback. Set `GUIX_P2P_E2E_TRANSPORT=quic`
+- The container E2E harness defaults to TCP loopback. Set `GUIX_P2P_E2E_TRANSPORT=quic`
   to exercise QUIC where UDP sockets are available.
 - `guix-p2p-e2e container-smoke` remains useful for process-level smoke tests,
   but it cannot prove absence of a package when the host store is shared.
@@ -422,7 +421,7 @@ hello` on Node B imports the NAR from Node A through `guix-p2p`.
   NAR served by substitute servers. Seeded NARs now use Guix's
   `(guix serialization) write-file` output and are validated against the
   filename hash when indexed.
-- Direct E2E relay proof succeeded for `hello`: Node B's `have`
+- Direct E2E relay proof succeeded for `hello`: the fetch node's `have`
   query returned the store path, and `substitute` wrote a 282616-byte NAR with
   SHA-256 `d4d3119688670b1299e8457d4f35439c5b427bf5ff31b5c17635f1c481d70a62`.
 - `guix substitute --query` requires full `/gnu/store/...` deriver and
@@ -437,10 +436,10 @@ hello` on Node B imports the NAR from Node A through `guix-p2p`.
   creates a regular file and breaks later profile operations with `opendir: Not
   a directory`.
 - Full raw daemon proof succeeded for `hello`: after deleting the target
-  output from Node B, `guix build --no-grafts hello` returned
-  `/gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2`, Node B's store
-  contained that path, Node B logged `Substitute download succeeded`, and Node A
-  logged `serving 2 block(s)`.
+  output from the fetch node, `guix build --no-grafts hello` returned
+  `/gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2`, the fetch
+  node's store contained that path, the fetch node logged `Substitute download
+  succeeded`, and the seed node logged `serving 2 block(s)`.
 
 ### See Also
 

@@ -1276,6 +1276,7 @@ dependencies = [
  "guix-p2p",
  "hex",
  "libp2p",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",

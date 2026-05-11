@@ -90,10 +90,10 @@ Node B can prove it does not already have the package seeded by Node A. Shared
 host-store containers are not a valid full proof for that requirement.
 
 Use `scripts/e2e-fast-demo.sh` when you need a quick dashboard demo. Use
-`scripts/e2e.sh` for the strict two-VM proof with separate writable stores.
-The VM proof currently passes for `hello` through Node B's raw `guix-daemon`
-wrapper path and verifies that the imported store path is a restored
-directory.
+`cargo run -p guix-p2p-e2e -- vm ...` for the strict named-node VM proof with
+separate writable stores. The VM proof currently passes for `hello` through a
+fetcher node's raw `guix-daemon` wrapper path and verifies that the imported
+store path is a restored directory.
 
 ## Benchmark
 

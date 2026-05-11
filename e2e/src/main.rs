@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::Context;
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use futures::StreamExt;
 use guix_p2p::{
     behaviour::{GuixP2PBehaviour, GuixP2PEvent, create_swarm_behaviour_without_mdns},
@@ -133,6 +133,107 @@ enum Commands {
         #[arg(long)]
         keep_temp: bool,
     },
+    /// Build, boot, and drive private-store VM E2E nodes
+    Vm {
+        /// State directory for images, disks, keys, logs, and node registry
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+        /// Guix system image size
+        #[arg(long)]
+        image_size: Option<String>,
+        /// QEMU memory in MB
+        #[arg(long)]
+        memory: Option<u32>,
+        /// QEMU CPU count
+        #[arg(long)]
+        cpus: Option<u32>,
+        /// KVM mode: auto, true, or false
+        #[arg(long)]
+        enable_kvm: Option<String>,
+        /// Forward dashboard host ports
+        #[arg(long)]
+        forward_dashboard: Option<bool>,
+        /// Substitute URLs passed to guix system image and VM helpers
+        #[arg(long)]
+        substitute_urls: Option<String>,
+        /// guix-p2p binary embedded in the image and pushed into VMs
+        #[arg(long)]
+        guix_p2p_binary: Option<PathBuf>,
+        #[command(subcommand)]
+        command: VmCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum VmCommand {
+    /// Print the base qcow2 image derivation
+    Derivation,
+    /// Build the base qcow2 image
+    Image,
+    /// Reset one node disk or all known node disks from base.qcow2
+    Reset {
+        node: Option<String>,
+        #[arg(long)]
+        all: bool,
+    },
+    /// Run a named node under QEMU in the background
+    Run { node: String },
+    /// Stop one named node or all known nodes
+    Stop {
+        node: Option<String>,
+        #[arg(long)]
+        all: bool,
+    },
+    /// Show one named node or all known node statuses
+    Status {
+        node: Option<String>,
+        #[arg(long)]
+        all: bool,
+    },
+    /// SSH to a named node
+    Ssh { node: String },
+    /// Wait until SSH accepts connections on named nodes, or all known nodes
+    WaitSsh { nodes: Vec<String> },
+    /// Copy target/release/guix-p2p to named nodes, or all known nodes
+    PushBinary {
+        node: Option<String>,
+        #[arg(long)]
+        all: bool,
+    },
+    /// Start a node as a seeder for a package and save seed metadata
+    Seed {
+        node: String,
+        #[arg(default_value = "hello")]
+        package: String,
+    },
+    /// Start a node as a fetcher bootstrapped to a seed node
+    Fetch {
+        node: String,
+        #[arg(long)]
+        from: String,
+    },
+    /// Print saved seed metadata as shell exports
+    Env { node: Option<String> },
+    /// Prewarm a fetcher node and delete the fetched target output
+    Prewarm {
+        node: String,
+        store_path: Option<String>,
+        #[arg(default_value = "hello")]
+        package: String,
+    },
+    /// Start temporary guix-daemon through the guix-p2p wrapper on a node
+    Daemon { node: String },
+    /// Run guix build through the temporary guix-daemon on a node
+    Prove {
+        node: String,
+        store_path: Option<String>,
+        #[arg(default_value = "hello")]
+        package: String,
+    },
+    /// Tail a node's guix-p2p log
+    Logs { node: String },
+    /// Tail a node's temporary guix-daemon log
+    DaemonLog { node: String },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -258,6 +359,27 @@ async fn main() -> anyhow::Result<()> {
             })
             .await
         },
+        Commands::Vm {
+            state_dir,
+            image_size,
+            memory,
+            cpus,
+            enable_kvm,
+            forward_dashboard,
+            substitute_urls,
+            guix_p2p_binary,
+            command,
+        } => run_vm_command(VmOptions {
+            state_dir,
+            image_size,
+            memory,
+            cpus,
+            enable_kvm,
+            forward_dashboard,
+            substitute_urls,
+            guix_p2p_binary,
+            command,
+        }),
     }
 }
 
@@ -979,6 +1101,69 @@ struct BenchmarkOptions {
     keep_temp: bool,
 }
 
+struct VmOptions {
+    state_dir: Option<PathBuf>,
+    image_size: Option<String>,
+    memory: Option<u32>,
+    cpus: Option<u32>,
+    enable_kvm: Option<String>,
+    forward_dashboard: Option<bool>,
+    substitute_urls: Option<String>,
+    guix_p2p_binary: Option<PathBuf>,
+    command: VmCommand,
+}
+
+#[derive(Debug, Clone)]
+struct VmConfig {
+    state_dir: PathBuf,
+    image_size: String,
+    memory: u32,
+    cpus: u32,
+    enable_kvm: String,
+    forward_dashboard: bool,
+    substitute_urls: String,
+    node_system: PathBuf,
+    guix_p2p_binary: PathBuf,
+    ssh_dir: PathBuf,
+    ssh_host_key: PathBuf,
+    ssh_host_key_pub: PathBuf,
+    ssh_client_key: PathBuf,
+    ssh_client_key_pub: PathBuf,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct VmRegistry {
+    nodes: Vec<VmNode>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct VmNode {
+    name: String,
+    slug: String,
+    ssh_port: u16,
+    dashboard_port: u16,
+    p2p_port: u16,
+    disk: PathBuf,
+    pid: Option<u32>,
+    last_seed: Option<VmSeed>,
+    last_fetch: Option<VmFetch>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct VmSeed {
+    package: String,
+    store_path: String,
+    peer_id: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct VmFetch {
+    from: String,
+    package: String,
+    store_path: String,
+    peer_id: String,
+}
+
 struct HarnessTools {
     guix: PathBuf,
     real_guix: PathBuf,
@@ -1080,6 +1265,652 @@ impl Drop for ProcessSet {
             }
         }
     }
+}
+
+fn run_vm_command(opts: VmOptions) -> anyhow::Result<()> {
+    let config = VmConfig::from_options(&opts)?;
+    match opts.command {
+        VmCommand::Derivation => vm_image_derivation(&config),
+        VmCommand::Image => vm_build_image(&config),
+        VmCommand::Reset { node, all } => vm_reset(&config, node.as_deref(), all),
+        VmCommand::Run { node } => {
+            let mut registry = VmRegistry::load(&config)?;
+            let node = registry.ensure_node(&config, &node)?.clone();
+            registry.save(&config)?;
+            vm_run_node(&config, &node)
+        },
+        VmCommand::Stop { node, all } => vm_stop(&config, node.as_deref(), all),
+        VmCommand::Status { node, all } => vm_status(&config, node.as_deref(), all),
+        VmCommand::Ssh { node } => {
+            let registry = VmRegistry::load(&config)?;
+            let node = registry.node(&node)?;
+            vm_ssh(&config, node)
+        },
+        VmCommand::WaitSsh { nodes } => vm_wait_ssh(&config, &nodes),
+        VmCommand::PushBinary { node, all } => vm_push_binary(&config, node.as_deref(), all),
+        VmCommand::Seed { node, package } => vm_seed(&config, &node, &package),
+        VmCommand::Fetch { node, from } => vm_fetch(&config, &node, &from),
+        VmCommand::Env { node } => vm_print_env(&config, node.as_deref()),
+        VmCommand::Prewarm { node, store_path, package } => {
+            vm_prewarm(&config, &node, store_path.as_deref(), &package)
+        },
+        VmCommand::Daemon { node } => vm_daemon(&config, &node),
+        VmCommand::Prove { node, store_path, package } => {
+            vm_prove(&config, &node, store_path.as_deref(), &package)
+        },
+        VmCommand::Logs { node } => vm_tail_log(&config, &node, "guix-p2p"),
+        VmCommand::DaemonLog { node } => vm_tail_log(&config, &node, "daemon"),
+    }
+}
+
+impl VmConfig {
+    fn from_options(opts: &VmOptions) -> anyhow::Result<Self> {
+        let root = project_root();
+        let state_dir = opts
+            .state_dir
+            .clone()
+            .or_else(|| std::env::var_os("GUIX_P2P_E2E_DIR").map(PathBuf::from))
+            .or_else(|| std::env::var_os("GUIX_P2P_E2E_PRIVATE_DIR").map(PathBuf::from))
+            .unwrap_or_else(|| root.join("target/guix-p2p-e2e"));
+        let state_dir = absolutize_path(&root, &state_dir);
+        let ssh_dir = state_dir.join("ssh");
+        let ssh_host_key = std::env::var_os("GUIX_P2P_E2E_SSH_HOST_KEY")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| ssh_dir.join("ssh_host_ed25519_key"));
+        let ssh_host_key_pub = std::env::var_os("GUIX_P2P_E2E_SSH_HOST_KEY_PUB")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| ssh_host_key.with_extension("pub"));
+        let ssh_client_key = std::env::var_os("GUIX_P2P_E2E_SSH_CLIENT_KEY")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| ssh_dir.join("e2e_ed25519"));
+        let ssh_client_key_pub = std::env::var_os("GUIX_P2P_E2E_SSH_AUTHORIZED_KEY")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| ssh_client_key.with_extension("pub"));
+        Ok(Self {
+            state_dir,
+            image_size: opts
+                .image_size
+                .clone()
+                .or_else(|| std::env::var("GUIX_P2P_E2E_IMAGE_SIZE").ok())
+                .unwrap_or_else(|| "8G".to_string()),
+            memory: opts.memory.or_else(|| env_u32("GUIX_P2P_E2E_VM_MEMORY")).unwrap_or(2048),
+            cpus: opts.cpus.or_else(|| env_u32("GUIX_P2P_E2E_VM_CPUS")).unwrap_or(2),
+            enable_kvm: opts
+                .enable_kvm
+                .clone()
+                .or_else(|| std::env::var("GUIX_P2P_E2E_ENABLE_KVM").ok())
+                .unwrap_or_else(|| "auto".to_string()),
+            forward_dashboard: opts
+                .forward_dashboard
+                .or_else(|| env_bool("GUIX_P2P_E2E_FORWARD_DASHBOARD"))
+                .unwrap_or(true),
+            substitute_urls: opts
+                .substitute_urls
+                .clone()
+                .or_else(|| std::env::var("GUIX_P2P_E2E_SUBSTITUTE_URLS").ok())
+                .unwrap_or_else(|| {
+                    "https://ci.guix.gnu.org https://bordeaux.guix.gnu.org".to_string()
+                }),
+            node_system: root.join("guix/e2e-node.scm"),
+            guix_p2p_binary: opts
+                .guix_p2p_binary
+                .clone()
+                .or_else(|| std::env::var_os("GUIX_P2P_E2E_BINARY").map(PathBuf::from))
+                .unwrap_or_else(|| root.join("target/release/guix-p2p")),
+            ssh_dir,
+            ssh_host_key,
+            ssh_host_key_pub,
+            ssh_client_key,
+            ssh_client_key_pub,
+        })
+    }
+
+    fn registry_path(&self) -> PathBuf {
+        self.state_dir.join("nodes.json")
+    }
+
+    fn logs_dir(&self) -> PathBuf {
+        self.state_dir.join("logs")
+    }
+
+    fn base_image_root(&self) -> PathBuf {
+        self.state_dir.join("base-image")
+    }
+
+    fn base_disk(&self) -> PathBuf {
+        self.state_dir.join("base.qcow2")
+    }
+
+    fn proof_env_path(&self, node: &VmNode) -> PathBuf {
+        self.state_dir.join(format!("{}.env", node.slug))
+    }
+}
+
+impl VmRegistry {
+    fn load(config: &VmConfig) -> anyhow::Result<Self> {
+        let path = config.registry_path();
+        if !path.exists() {
+            return Ok(Self { nodes: Vec::new() });
+        }
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        serde_json::from_slice(&bytes)
+            .with_context(|| format!("failed to parse {}", path.display()))
+    }
+
+    fn save(&self, config: &VmConfig) -> anyhow::Result<()> {
+        std::fs::create_dir_all(&config.state_dir)?;
+        let bytes = serde_json::to_vec_pretty(self)?;
+        std::fs::write(config.registry_path(), bytes)?;
+        Ok(())
+    }
+
+    fn node(&self, name: &str) -> anyhow::Result<&VmNode> {
+        self.nodes.iter().find(|node| node.name == name || node.slug == name).ok_or_else(|| {
+            anyhow::anyhow!("unknown VM node {name}; run it first with: vm run {name}")
+        })
+    }
+
+    fn node_mut(&mut self, name: &str) -> anyhow::Result<&mut VmNode> {
+        self.nodes.iter_mut().find(|node| node.name == name || node.slug == name).ok_or_else(|| {
+            anyhow::anyhow!("unknown VM node {name}; run it first with: vm run {name}")
+        })
+    }
+
+    fn ensure_node(&mut self, config: &VmConfig, name: &str) -> anyhow::Result<&mut VmNode> {
+        if let Some(idx) = self.nodes.iter().position(|node| node.name == name || node.slug == name)
+        {
+            return Ok(&mut self.nodes[idx]);
+        }
+        if !config.base_disk().is_file() {
+            anyhow::bail!("base disk is missing; build it first with: vm image");
+        }
+        let slug = unique_slug(name, self);
+        let (ssh_port, dashboard_port, p2p_port) = self.allocate_ports();
+        let disk = config.state_dir.join(format!("{slug}.qcow2"));
+        tracing::info!("creating VM node {name}; disk={}", disk.display());
+        std::fs::copy(config.base_disk(), &disk)?;
+        make_user_writable(&disk)?;
+        self.nodes.push(VmNode {
+            name: name.to_string(),
+            slug,
+            ssh_port,
+            dashboard_port,
+            p2p_port,
+            disk,
+            pid: None,
+            last_seed: None,
+            last_fetch: None,
+        });
+        Ok(self.nodes.last_mut().expect("node was just pushed"))
+    }
+
+    fn allocate_ports(&self) -> (u16, u16, u16) {
+        let mut ssh = 2221;
+        let mut dashboard = 3031;
+        let mut p2p = 6881;
+        loop {
+            let used = self.nodes.iter().any(|node| {
+                node.ssh_port == ssh || node.dashboard_port == dashboard || node.p2p_port == p2p
+            });
+            if !used
+                && tcp_port_available(ssh)
+                && tcp_port_available(dashboard)
+                && tcp_port_available(p2p)
+            {
+                return (ssh, dashboard, p2p);
+            }
+            ssh += 1;
+            dashboard += 1;
+            p2p += 1;
+        }
+    }
+}
+
+fn vm_image_derivation(config: &VmConfig) -> anyhow::Result<()> {
+    ensure_vm_prereqs(config)?;
+    let mut command = std::process::Command::new("guix");
+    command
+        .arg("system")
+        .arg("image")
+        .arg("--derivation")
+        .arg("--image-type=qcow2")
+        .arg(format!("--image-size={}", config.image_size))
+        .arg(format!("--substitute-urls={}", config.substitute_urls))
+        .arg(&config.node_system)
+        .env("GUIX_P2P_E2E_BINARY", &config.guix_p2p_binary)
+        .env("GUIX_P2P_E2E_SSH_HOST_KEY", &config.ssh_host_key)
+        .env("GUIX_P2P_E2E_SSH_HOST_KEY_PUB", &config.ssh_host_key_pub)
+        .env("GUIX_P2P_E2E_SSH_AUTHORIZED_KEY", &config.ssh_client_key_pub);
+    let output = checked_output(&mut command, "guix system image --derivation")?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    Ok(())
+}
+
+fn vm_build_image(config: &VmConfig) -> anyhow::Result<()> {
+    ensure_vm_prereqs(config)?;
+    std::fs::create_dir_all(config.logs_dir())?;
+    let root = config.base_image_root();
+    if root.exists() {
+        std::fs::remove_file(&root).or_else(|_| std::fs::remove_dir_all(&root)).ok();
+    }
+    let log_path = config.logs_dir().join("base-image-build.log");
+    let log =
+        std::fs::OpenOptions::new().create(true).truncate(true).write(true).open(&log_path)?;
+    let stderr = log.try_clone()?;
+    let mut command = std::process::Command::new("guix");
+    command
+        .arg("system")
+        .arg("image")
+        .arg("--image-type=qcow2")
+        .arg(format!("--image-size={}", config.image_size))
+        .arg(format!("--substitute-urls={}", config.substitute_urls))
+        .arg(format!("--root={}", root.display()))
+        .arg(&config.node_system)
+        .env("GUIX_P2P_E2E_BINARY", &config.guix_p2p_binary)
+        .env("GUIX_P2P_E2E_SSH_HOST_KEY", &config.ssh_host_key)
+        .env("GUIX_P2P_E2E_SSH_HOST_KEY_PUB", &config.ssh_host_key_pub)
+        .env("GUIX_P2P_E2E_SSH_AUTHORIZED_KEY", &config.ssh_client_key_pub)
+        .stdout(std::process::Stdio::from(log))
+        .stderr(std::process::Stdio::from(stderr));
+    tracing::info!("building base image; log={}", log_path.display());
+    let status = command.status().context("failed to run guix system image")?;
+    if !status.success() {
+        anyhow::bail!(
+            "base image build failed with {status}; log tail:\n{}",
+            read_tail(&log_path, 120)
+        );
+    }
+    let source = root.canonicalize()?;
+    std::fs::copy(&source, config.base_disk())?;
+    make_user_writable(&config.base_disk())?;
+    println!("{}", config.base_disk().display());
+    Ok(())
+}
+
+fn vm_reset(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<()> {
+    if !config.base_disk().is_file() {
+        anyhow::bail!("base disk is missing; build it first with: vm image");
+    }
+    let mut registry = VmRegistry::load(config)?;
+    let targets: Vec<String> = if all || node.is_none() {
+        registry.nodes.iter().map(|node| node.name.clone()).collect()
+    } else {
+        vec![registry.node(node.expect("checked above"))?.name.clone()]
+    };
+    if targets.is_empty() {
+        anyhow::bail!("no VM nodes are registered yet");
+    }
+    for name in targets {
+        let target = registry.node_mut(&name)?;
+        if let Some(pid) = target.pid {
+            stop_pid(pid).with_context(|| format!("failed to stop {}", target.name))?;
+        }
+        std::fs::copy(config.base_disk(), &target.disk)?;
+        make_user_writable(&target.disk)?;
+        target.pid = None;
+        target.last_seed = None;
+        target.last_fetch = None;
+        println!("{}", target.disk.display());
+    }
+    registry.save(config)?;
+    Ok(())
+}
+
+fn vm_run_node(config: &VmConfig, node: &VmNode) -> anyhow::Result<()> {
+    if is_pid_running(node.pid) {
+        tracing::info!("{} already running with pid {}", node.name, node.pid.unwrap());
+        return Ok(());
+    }
+    std::fs::create_dir_all(config.logs_dir())?;
+    let serial = config.logs_dir().join(format!("{}-serial.log", node.slug));
+    let log_path = config.logs_dir().join(format!("{}-qemu.log", node.slug));
+    let log =
+        std::fs::OpenOptions::new().create(true).truncate(true).write(true).open(&log_path)?;
+    let stderr = log.try_clone()?;
+    let mut command = qemu_command(config, node, &serial)?;
+    command.stdout(std::process::Stdio::from(log)).stderr(std::process::Stdio::from(stderr));
+    tracing::info!(
+        "starting {}; qemu log={} serial={}",
+        node.name,
+        log_path.display(),
+        serial.display()
+    );
+    let child = command.spawn().with_context(|| format!("failed to start {}", node.name))?;
+    let pid = child.id();
+    std::mem::forget(child);
+    let mut registry = VmRegistry::load(config)?;
+    registry.node_mut(&node.name)?.pid = Some(pid);
+    registry.save(config)?;
+    println!("{} pid={pid}", node.name);
+    Ok(())
+}
+
+fn qemu_command(
+    config: &VmConfig,
+    node: &VmNode,
+    serial: &std::path::Path,
+) -> anyhow::Result<std::process::Command> {
+    let mut args = Vec::<String>::new();
+    match config.enable_kvm.as_str() {
+        "true" | "yes" | "1" => args.push("-enable-kvm".to_string()),
+        "false" | "no" | "0" => {},
+        "auto" => {
+            if std::fs::OpenOptions::new().read(true).write(true).open("/dev/kvm").is_ok() {
+                args.push("-enable-kvm".to_string());
+            } else {
+                tracing::info!("KVM unavailable; using QEMU software emulation");
+            }
+        },
+        other => anyhow::bail!("invalid KVM mode {other}; expected auto, true, or false"),
+    }
+    let mut netdev =
+        format!("user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:{}-:22", node.ssh_port);
+    if config.forward_dashboard {
+        netdev.push_str(&format!(",hostfwd=tcp:127.0.0.1:{}-:3031", node.dashboard_port));
+    }
+    netdev.push_str(&format!(",hostfwd=tcp:127.0.0.1:{}-:6881", node.p2p_port));
+    args.extend([
+        "-m".to_string(),
+        config.memory.to_string(),
+        "-smp".to_string(),
+        config.cpus.to_string(),
+        "-nographic".to_string(),
+        "-serial".to_string(),
+        format!("file:{}", serial.display()),
+        "-drive".to_string(),
+        format!("file={},if=virtio,format=qcow2", node.disk.display()),
+        "-nic".to_string(),
+        netdev,
+    ]);
+    if let Some(qemu) = find_on_path("qemu-system-x86_64") {
+        let mut command = std::process::Command::new(qemu);
+        command.args(args);
+        return Ok(command);
+    }
+    let mut command = std::process::Command::new("guix");
+    command.arg("shell").arg("qemu").arg("--").arg("qemu-system-x86_64").args(args);
+    Ok(command)
+}
+
+fn vm_stop(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<()> {
+    let mut registry = VmRegistry::load(config)?;
+    let names: Vec<String> = if all || node.is_none() {
+        registry.nodes.iter().map(|node| node.name.clone()).collect()
+    } else {
+        vec![registry.node(node.expect("checked above"))?.name.clone()]
+    };
+    for name in names {
+        let target = registry.node_mut(&name)?;
+        if let Some(pid) = target.pid {
+            if is_pid_running(Some(pid)) {
+                stop_pid(pid)?;
+                println!("{} stopped", target.name);
+            }
+            target.pid = None;
+        } else {
+            println!("{} not running", target.name);
+        }
+    }
+    registry.save(config)
+}
+
+fn vm_status(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    let targets: Vec<&VmNode> = if all || node.is_none() {
+        registry.nodes.iter().collect()
+    } else {
+        vec![registry.node(node.expect("checked above"))?]
+    };
+    if targets.is_empty() {
+        println!("no VM nodes registered");
+        return Ok(());
+    }
+    for target in targets {
+        let running = is_pid_running(target.pid);
+        println!(
+            "{} slug={} running={} pid={} ssh={} dashboard={} p2p={} disk={}",
+            target.name,
+            target.slug,
+            running,
+            target.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".to_string()),
+            target.ssh_port,
+            target.dashboard_port,
+            target.p2p_port,
+            target.disk.display()
+        );
+    }
+    Ok(())
+}
+
+fn vm_ssh(config: &VmConfig, node: &VmNode) -> anyhow::Result<()> {
+    ensure_ssh_client_key(config)?;
+    let status = ssh_command(config, node)
+        .status()
+        .with_context(|| format!("failed to run ssh for {}", node.name))?;
+    if !status.success() {
+        anyhow::bail!("ssh {} failed with {status}", node.name);
+    }
+    Ok(())
+}
+
+fn vm_wait_ssh(config: &VmConfig, nodes: &[String]) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    let targets: Vec<&VmNode> = if nodes.is_empty() {
+        registry.nodes.iter().collect()
+    } else {
+        nodes.iter().map(|name| registry.node(name)).collect::<anyhow::Result<Vec<_>>>()?
+    };
+    for node in targets {
+        wait_ssh(config, node)?;
+        println!("{} SSH ready on port {}", node.name, node.ssh_port);
+    }
+    Ok(())
+}
+
+fn vm_push_binary(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<()> {
+    ensure_guix_p2p_binary(config)?;
+    let registry = VmRegistry::load(config)?;
+    let targets: Vec<&VmNode> = if all || node.is_none() {
+        registry.nodes.iter().collect()
+    } else {
+        vec![registry.node(node.expect("checked above"))?]
+    };
+    let libgcrypt_runtime = guix_build_last_path("libgcrypt")?;
+    for target in targets {
+        push_binary_to_node(config, target, &libgcrypt_runtime)?;
+        println!("pushed binary to {}:/tmp/guix-p2p", target.name);
+    }
+    Ok(())
+}
+
+fn vm_seed(config: &VmConfig, name: &str, package: &str) -> anyhow::Result<()> {
+    let mut registry = VmRegistry::load(config)?;
+    let node = registry.node(name)?.clone();
+    let output = ssh_run(
+        config,
+        &node,
+        &format!("GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p guix-p2p-e2e-node-a {}", shell_quote(package)),
+    )?;
+    print!("{output}");
+    let store_path = parse_key_line(&output, "store_path")
+        .ok_or_else(|| anyhow::anyhow!("seed output did not include store_path"))?;
+    let peer_id = parse_key_line(&output, "peer_id")
+        .ok_or_else(|| anyhow::anyhow!("seed output did not include peer_id"))?;
+    let seed = VmSeed { package: package.to_string(), store_path, peer_id };
+    registry.node_mut(name)?.last_seed = Some(seed.clone());
+    registry.save(config)?;
+    write_vm_env(config, &node, &seed)?;
+    println!("\n# Optional shell exports:");
+    print_vm_env(&seed);
+    println!("# Or load them with: cargo run -p guix-p2p-e2e -- vm env {}", node.name);
+    Ok(())
+}
+
+fn vm_fetch(config: &VmConfig, name: &str, from: &str) -> anyhow::Result<()> {
+    let mut registry = VmRegistry::load(config)?;
+    let seed_node = registry.node(from)?.clone();
+    let seed = seed_node.last_seed.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "{} has no saved seed; run: vm seed {} hello",
+            seed_node.name,
+            seed_node.name
+        )
+    })?;
+    let fetch_node = registry.node(name)?.clone();
+    let bootstrap = format!("/ip4/10.0.2.2/tcp/{}/p2p/{}", seed_node.p2p_port, seed.peer_id);
+    let command = format!(
+        "GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p GUIX_P2P_E2E_B_LISTEN=/ip4/0.0.0.0/tcp/6881 \
+         GUIX_P2P_E2E_B_DASHBOARD_PORT=3031 GUIX_P2P_E2E_B_BOOTSTRAP={} guix-p2p-e2e-node-b {} {}",
+        shell_quote(&bootstrap),
+        shell_quote(&seed.store_path),
+        shell_quote(&seed.peer_id)
+    );
+    let output = ssh_run(config, &fetch_node, &command)?;
+    print!("{output}");
+    registry.node_mut(name)?.last_fetch = Some(VmFetch {
+        from: seed_node.name,
+        package: seed.package,
+        store_path: seed.store_path,
+        peer_id: seed.peer_id,
+    });
+    registry.save(config)
+}
+
+fn vm_print_env(config: &VmConfig, node: Option<&str>) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    let seed = match node {
+        Some(name) => registry.node(name)?.last_seed.as_ref(),
+        None => registry.nodes.iter().rev().find_map(|node| node.last_seed.as_ref()),
+    }
+    .ok_or_else(|| anyhow::anyhow!("no saved seed found; run: vm seed <node> hello"))?;
+    print_vm_env(seed);
+    Ok(())
+}
+
+fn vm_prewarm(
+    config: &VmConfig,
+    name: &str,
+    store_path: Option<&str>,
+    package: &str,
+) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    let node = registry.node(name)?;
+    let target = resolve_fetch_store_path(node, store_path)?;
+    let output = ssh_run(
+        config,
+        node,
+        &format!(
+            "set -eu; guix build --no-grafts {}; guix gc -D {}; test ! -e {} && echo \
+             TARGET_ABSENT_AFTER_DELETE",
+            shell_quote(package),
+            shell_quote(&target),
+            shell_quote(&target)
+        ),
+    )?;
+    print!("{output}");
+    Ok(())
+}
+
+fn vm_daemon(config: &VmConfig, name: &str) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    let node = registry.node(name)?;
+    let remote = r#"
+set -eu
+cat > /tmp/e2e-guix-wrapper <<'EOF'
+#!/bin/sh
+set -eu
+SOCKET=/tmp/guix-p2p-b/guix-p2p.sock
+GUIX_P2P=/tmp/guix-p2p
+REAL_GUIX=/run/current-system/profile/bin/guix
+
+case "${1-}" in
+  substitute)
+    shift
+    case "${1-}" in
+      --query|--substitute)
+        exec "$GUIX_P2P" "$@" --socket "$SOCKET"
+        ;;
+      *)
+        exec "$REAL_GUIX" substitute "$@"
+        ;;
+    esac
+    ;;
+  *)
+    exec "$REAL_GUIX" "$@"
+    ;;
+esac
+EOF
+chmod +x /tmp/e2e-guix-wrapper
+printf "e2e\n" | sudo -S sh -c '
+mount -o remount,rw /gnu/store
+kill $(cat /tmp/e2e-guix-daemon.pid 2>/dev/null) 2>/dev/null || true
+rm -f /tmp/e2e-guix-daemon.sock /tmp/e2e-guix-daemon.log /tmp/e2e-guix-daemon.pid
+GUIX=/tmp/e2e-guix-wrapper /run/current-system/profile/bin/guix-daemon \
+  --disable-chroot \
+  --build-users-group=guixbuild \
+  --max-jobs=0 \
+  --listen=/tmp/e2e-guix-daemon.sock \
+  > /tmp/e2e-guix-daemon.log 2>&1 &
+echo $! > /tmp/e2e-guix-daemon.pid
+'
+i=0
+while [ ! -S /tmp/e2e-guix-daemon.sock ]; do
+    i=$((i + 1))
+    if [ "$i" -gt 30 ]; then
+        echo DAEMON_SOCKET_TIMEOUT
+        printf "e2e\n" | sudo -S cat /tmp/e2e-guix-daemon.log
+        exit 1
+    fi
+    sleep 1
+done
+echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
+"#;
+    let output = ssh_run(config, node, remote)?;
+    print!("{output}");
+    Ok(())
+}
+
+fn vm_prove(
+    config: &VmConfig,
+    name: &str,
+    store_path: Option<&str>,
+    package: &str,
+) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    let node = registry.node(name)?;
+    let target = resolve_fetch_store_path(node, store_path)?;
+    let output = ssh_run(
+        config,
+        node,
+        &format!(
+            "set -eu; test ! -e {}; GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build \
+             --no-grafts {}; test -d {} && echo IMPORTED_OUTPUT_IN_NODE_STORE",
+            shell_quote(&target),
+            shell_quote(package),
+            shell_quote(&target)
+        ),
+    )?;
+    print!("{output}");
+    Ok(())
+}
+
+fn vm_tail_log(config: &VmConfig, name: &str, kind: &str) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    let node = registry.node(name)?;
+    let path = match kind {
+        "daemon" => "/tmp/e2e-guix-daemon.log",
+        _ if node.last_fetch.is_some() => "/tmp/guix-p2p-b.log",
+        _ => "/tmp/guix-p2p-a.log",
+    };
+    let status = ssh_command(config, node)
+        .arg(format!("tail -f {}", shell_quote(path)))
+        .status()
+        .with_context(|| format!("failed to tail log on {}", node.name))?;
+    if !status.success() {
+        anyhow::bail!("tail log failed with {status}");
+    }
+    Ok(())
 }
 
 async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> {
@@ -2258,6 +3089,303 @@ fn reset_dir(path: &std::path::Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))
 }
 
+fn env_u32(name: &str) -> Option<u32> {
+    std::env::var(name).ok()?.parse().ok()
+}
+
+fn env_bool(name: &str) -> Option<bool> {
+    match std::env::var(name).ok()?.as_str() {
+        "true" | "yes" | "1" => Some(true),
+        "false" | "no" | "0" => Some(false),
+        _ => None,
+    }
+}
+
+fn ensure_vm_prereqs(config: &VmConfig) -> anyhow::Result<()> {
+    ensure_guix_p2p_binary(config)?;
+    ensure_ssh_host_key(config)?;
+    ensure_ssh_client_key(config)
+}
+
+fn ensure_guix_p2p_binary(config: &VmConfig) -> anyhow::Result<()> {
+    if !config.guix_p2p_binary.is_file() {
+        anyhow::bail!(
+            "guix-p2p binary is missing or not executable; build it first with: guix shell -m \
+             manifest.scm -- cargo build --release\nexpected binary: {}",
+            config.guix_p2p_binary.display()
+        );
+    }
+    Ok(())
+}
+
+fn ensure_ssh_host_key(config: &VmConfig) -> anyhow::Result<()> {
+    if config.ssh_host_key.is_file() && config.ssh_host_key_pub.is_file() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(&config.ssh_dir)?;
+    generate_ssh_key(&config.ssh_host_key, "guix-p2p-e2e")?;
+    make_mode(&config.ssh_host_key, 0o600)?;
+    make_mode(&config.ssh_host_key_pub, 0o644)
+}
+
+fn ensure_ssh_client_key(config: &VmConfig) -> anyhow::Result<()> {
+    if config.ssh_client_key.is_file() && config.ssh_client_key_pub.is_file() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(&config.ssh_dir)?;
+    generate_ssh_key(&config.ssh_client_key, "guix-p2p-e2e-client")?;
+    make_mode(&config.ssh_client_key, 0o600)?;
+    make_mode(&config.ssh_client_key_pub, 0o644)
+}
+
+fn generate_ssh_key(path: &std::path::Path, comment: &str) -> anyhow::Result<()> {
+    let mut command = if let Some(ssh_keygen) = find_on_path("ssh-keygen") {
+        std::process::Command::new(ssh_keygen)
+    } else {
+        let mut command = std::process::Command::new("guix");
+        command.arg("shell").arg("openssh").arg("--").arg("ssh-keygen");
+        command
+    };
+    command.args(["-t", "ed25519", "-N", "", "-C", comment, "-f"]).arg(path);
+    checked_status(command, &format!("ssh-keygen {}", path.display()))
+}
+
+fn make_user_writable(path: &std::path::Path) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(path)?.permissions();
+        permissions.set_mode(permissions.mode() | 0o200);
+        std::fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
+}
+
+fn make_mode(path: &std::path::Path, mode: u32) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(path)?.permissions();
+        permissions.set_mode(mode);
+        std::fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
+}
+
+fn unique_slug(name: &str, registry: &VmRegistry) -> String {
+    let base = slugify_node_name(name);
+    if !registry.nodes.iter().any(|node| node.slug == base) {
+        return base;
+    }
+    for idx in 2.. {
+        let candidate = format!("{base}-{idx}");
+        if !registry.nodes.iter().any(|node| node.slug == candidate) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+fn slugify_node_name(name: &str) -> String {
+    let mut slug = String::new();
+    let mut last_dash = false;
+    for ch in name.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash {
+            slug.push('-');
+            last_dash = true;
+        }
+    }
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() { "node".to_string() } else { slug }
+}
+
+fn tcp_port_available(port: u16) -> bool {
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+fn is_pid_running(pid: Option<u32>) -> bool {
+    let Some(pid) = pid else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        std::path::Path::new("/proc").join(pid.to_string()).exists()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
+fn stop_pid(pid: u32) -> anyhow::Result<()> {
+    let status = std::process::Command::new("kill").arg("-TERM").arg(pid.to_string()).status()?;
+    if !status.success() && !is_pid_running(Some(pid)) {
+        return Ok(());
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while is_pid_running(Some(pid)) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    if is_pid_running(Some(pid)) {
+        let _ = std::process::Command::new("kill").arg("-KILL").arg(pid.to_string()).status();
+    }
+    Ok(())
+}
+
+fn ssh_command(config: &VmConfig, node: &VmNode) -> std::process::Command {
+    ssh_command_inner(config, node, false)
+}
+
+fn ssh_batch_command(config: &VmConfig, node: &VmNode) -> std::process::Command {
+    ssh_command_inner(config, node, true)
+}
+
+fn ssh_command_inner(config: &VmConfig, node: &VmNode, batch: bool) -> std::process::Command {
+    let mut command = std::process::Command::new("ssh");
+    command
+        .arg("-i")
+        .arg(&config.ssh_client_key)
+        .arg("-o")
+        .arg(format!("UserKnownHostsFile={}", config.ssh_dir.join("known_hosts").display()))
+        .arg("-o")
+        .arg("StrictHostKeyChecking=accept-new")
+        .arg("-o")
+        .arg("ConnectTimeout=10")
+        .arg("-p")
+        .arg(node.ssh_port.to_string());
+    if batch {
+        command.arg("-o").arg("BatchMode=yes");
+    }
+    command.arg("e2e@127.0.0.1");
+    command
+}
+
+fn ssh_run(config: &VmConfig, node: &VmNode, remote: &str) -> anyhow::Result<String> {
+    ensure_ssh_client_key(config)?;
+    let output = ssh_batch_command(config, node)
+        .arg(remote)
+        .output()
+        .with_context(|| format!("failed to run SSH command on {}", node.name))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "SSH command on {} failed with {}\nstdout:\n{}\nstderr:\n{}",
+            node.name,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn wait_ssh(config: &VmConfig, node: &VmNode) -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        if ssh_batch_command(config, node).arg("true").status().is_ok_and(|s| s.success()) {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!("{} SSH did not become ready on port {}", node.name, node.ssh_port);
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+fn push_binary_to_node(
+    config: &VmConfig,
+    node: &VmNode,
+    libgcrypt_runtime: &str,
+) -> anyhow::Result<()> {
+    ensure_guix_p2p_binary(config)?;
+    ensure_ssh_client_key(config)?;
+    let status = std::process::Command::new("scp")
+        .arg("-i")
+        .arg(&config.ssh_client_key)
+        .arg("-o")
+        .arg(format!("UserKnownHostsFile={}", config.ssh_dir.join("known_hosts").display()))
+        .arg("-o")
+        .arg("StrictHostKeyChecking=accept-new")
+        .arg("-o")
+        .arg("BatchMode=yes")
+        .arg("-o")
+        .arg("ConnectTimeout=10")
+        .arg("-P")
+        .arg(node.ssh_port.to_string())
+        .arg(&config.guix_p2p_binary)
+        .arg("e2e@127.0.0.1:/tmp/guix-p2p-real")
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("scp to {} failed with {status}", node.name);
+    }
+    let install = format!(
+        r#"set -eu
+cat > /tmp/guix-p2p <<'EOF'
+#!/bin/sh
+set -eu
+LIBGCRYPT="${{GUIX_P2P_E2E_LIBGCRYPT:-{}}}"
+export LD_LIBRARY_PATH="$LIBGCRYPT/lib:/run/current-system/profile/lib${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
+exec /tmp/guix-p2p-real "$@"
+EOF
+chmod 755 /tmp/guix-p2p /tmp/guix-p2p-real
+"#,
+        libgcrypt_runtime
+    );
+    ssh_run(config, node, &install)?;
+    Ok(())
+}
+
+fn guix_build_last_path(package: &str) -> anyhow::Result<String> {
+    let output = checked_output(
+        std::process::Command::new("guix").arg("build").arg(package),
+        &format!("guix build {package}"),
+    )?;
+    String::from_utf8(output.stdout)?
+        .lines()
+        .rev()
+        .find(|line| line.starts_with("/gnu/store/"))
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("guix build {package} did not print a store path"))
+}
+
+fn parse_key_line(output: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    output.lines().filter_map(|line| line.strip_prefix(&prefix)).last().map(str::to_string)
+}
+
+fn write_vm_env(config: &VmConfig, node: &VmNode, seed: &VmSeed) -> anyhow::Result<()> {
+    let content = format!(
+        "export STORE_PATH={}\nexport PEER_ID={}\nexport E2E_PACKAGE={}\n",
+        shell_quote(&seed.store_path),
+        shell_quote(&seed.peer_id),
+        shell_quote(&seed.package)
+    );
+    std::fs::write(config.proof_env_path(node), content)?;
+    Ok(())
+}
+
+fn print_vm_env(seed: &VmSeed) {
+    println!("export STORE_PATH={}", shell_quote(&seed.store_path));
+    println!("export PEER_ID={}", shell_quote(&seed.peer_id));
+    println!("export E2E_PACKAGE={}", shell_quote(&seed.package));
+}
+
+fn resolve_fetch_store_path(node: &VmNode, explicit: Option<&str>) -> anyhow::Result<String> {
+    if let Some(path) = explicit {
+        return Ok(path.to_string());
+    }
+    node.last_fetch.as_ref().map(|fetch| fetch.store_path.clone()).ok_or_else(|| {
+        anyhow::anyhow!(
+            "{} has no saved fetch; run: vm fetch {} --from <seed-node>",
+            node.name,
+            node.name
+        )
+    })
+}
+
 fn store_hash_part(store_path: &str) -> Option<String> {
     let rest = store_path.strip_prefix("/gnu/store/")?;
     Some(rest.split_once('-')?.0.to_string())
@@ -2321,5 +3449,44 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.2} KiB", value / KIB)
     } else {
         format!("{bytes} B")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slugifies_arbitrary_node_names() {
+        assert_eq!(slugify_node_name("Alice"), "alice");
+        assert_eq!(slugify_node_name("Node 1"), "node-1");
+        assert_eq!(slugify_node_name("  !@#  "), "node");
+        assert_eq!(slugify_node_name("build.fetch"), "build-fetch");
+    }
+
+    #[test]
+    fn parses_latest_key_line() {
+        let output = "store_path=/gnu/store/old\npeer_id=one\nstore_path=/gnu/store/new\n";
+        assert_eq!(parse_key_line(output, "store_path").as_deref(), Some("/gnu/store/new"));
+        assert_eq!(parse_key_line(output, "peer_id").as_deref(), Some("one"));
+        assert_eq!(parse_key_line(output, "missing"), None);
+    }
+
+    #[test]
+    fn unique_slug_appends_suffix_for_collisions() {
+        let registry = VmRegistry {
+            nodes: vec![VmNode {
+                name: "Alice".to_string(),
+                slug: "alice".to_string(),
+                ssh_port: 2221,
+                dashboard_port: 3031,
+                p2p_port: 6881,
+                disk: PathBuf::from("alice.qcow2"),
+                pid: None,
+                last_seed: None,
+                last_fetch: None,
+            }],
+        };
+        assert_eq!(unique_slug("Alice", &registry), "alice-2");
     }
 }
