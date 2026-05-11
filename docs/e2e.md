@@ -59,6 +59,23 @@ scripts/e2e.sh run-a
 scripts/e2e.sh run-b
 ```
 
+`run-a` and `run-b` use KVM when `/dev/kvm` is available and fall back to QEMU
+software emulation otherwise. Set `GUIX_P2P_E2E_ENABLE_KVM=false` to force
+software emulation.
+
+If the default host ports are busy, override them before running the VMs:
+
+```sh
+export GUIX_P2P_E2E_A_P2P_PORT=16881
+export GUIX_P2P_E2E_B_P2P_PORT=16882
+```
+
+`node-b` uses the configured Node A host P2P port when it builds the bootstrap
+multiaddr.
+
+Set `GUIX_P2P_E2E_FORWARD_DASHBOARD=false` to skip dashboard host forwarding
+when only SSH and P2P access are needed.
+
 From a third terminal, wait for SSH, push the current binary, and start the two
 node helpers:
 

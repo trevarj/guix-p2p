@@ -87,6 +87,14 @@ Environment:
   GUIX_P2P_E2E_IMAGE_SIZE      Image size, default 8G
   GUIX_P2P_E2E_VM_MEMORY       QEMU memory in MB, default 2048
   GUIX_P2P_E2E_VM_CPUS         QEMU CPU count, default 2
+  GUIX_P2P_E2E_ENABLE_KVM      auto, true, or false; default auto
+  GUIX_P2P_E2E_A_SSH_PORT      Node A host SSH port, default 2221
+  GUIX_P2P_E2E_B_SSH_PORT      Node B host SSH port, default 2222
+  GUIX_P2P_E2E_A_DASHBOARD_PORT Node A host/dashboard port, default 3031
+  GUIX_P2P_E2E_B_DASHBOARD_PORT Node B host/dashboard port, default 3032
+  GUIX_P2P_E2E_FORWARD_DASHBOARD Forward dashboard ports, default true
+  GUIX_P2P_E2E_A_P2P_PORT      Node A host P2P port, default 6881
+  GUIX_P2P_E2E_B_P2P_PORT      Node B host P2P port, default 6882
   GUIX_P2P_E2E_SUBSTITUTE_URLS Substitute URLs, default official Guix servers
   GUIX_P2P_E2E_BINARY          guix-p2p binary embedded in the image,
                                default target/release/guix-p2p
@@ -416,7 +424,9 @@ node_a_helper() {
 node_b_helper() {
     store_path="$(resolve_store_path "${1:-}")"
     peer_id="$(resolve_peer_id "${2:-}")"
-    ssh_run b "GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p guix-p2p-e2e-node-b $(quote "$store_path") $(quote "$peer_id")"
+    qemu_ports a
+    node_a_p2p_port="$p2p_port"
+    ssh_run b "GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p GUIX_P2P_E2E_B_BOOTSTRAP=$(quote "/ip4/10.0.2.2/tcp/$node_a_p2p_port/p2p/$peer_id") guix-p2p-e2e-node-b $(quote "$store_path") $(quote "$peer_id")"
 }
 
 prewarm_b() {
@@ -501,14 +511,18 @@ qemu_ports() {
 
     case "$node" in
         a)
-            ssh_port=2221
-            dashboard_port=3031
-            p2p_port=6881
+            ssh_port="${GUIX_P2P_E2E_A_SSH_PORT:-2221}"
+            dashboard_port="${GUIX_P2P_E2E_A_DASHBOARD_PORT:-3031}"
+            p2p_port="${GUIX_P2P_E2E_A_P2P_PORT:-6881}"
+            guest_dashboard_port=3031
+            guest_p2p_port=6881
             ;;
         b)
-            ssh_port=2222
-            dashboard_port=3032
-            p2p_port=6882
+            ssh_port="${GUIX_P2P_E2E_B_SSH_PORT:-2222}"
+            dashboard_port="${GUIX_P2P_E2E_B_DASHBOARD_PORT:-3032}"
+            p2p_port="${GUIX_P2P_E2E_B_P2P_PORT:-6882}"
+            guest_dashboard_port=3032
+            guest_p2p_port=6882
             ;;
         *)
             echo "unknown node: $node" >&2
@@ -533,25 +547,56 @@ run_qemu() {
     log "running $(node_name "$node"); serial=$serial"
     log "watch serial output with: tail -f $serial"
 
-    if command -v qemu-system-x86_64 >/dev/null 2>&1; then
-        exec qemu-system-x86_64 \
-            -m "$MEMORY" \
-            -smp "$CPUS" \
-            -enable-kvm \
-            -nographic \
-            -serial "file:$serial" \
-            -drive "file=$disk,if=virtio,format=qcow2" \
-            -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$ssh_port-:22,hostfwd=tcp:127.0.0.1:$dashboard_port-:$dashboard_port,hostfwd=tcp:127.0.0.1:$p2p_port-:$p2p_port"
-    fi
+    kvm_arg=
+    case "${GUIX_P2P_E2E_ENABLE_KVM:-auto}" in
+        true | yes | 1)
+            kvm_arg=-enable-kvm
+            ;;
+        false | no | 0)
+            ;;
+        auto)
+            if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+                kvm_arg=-enable-kvm
+            else
+                log "KVM unavailable; using QEMU software emulation"
+            fi
+            ;;
+        *)
+            log "invalid GUIX_P2P_E2E_ENABLE_KVM=${GUIX_P2P_E2E_ENABLE_KVM}; expected auto, true, or false"
+            exit 2
+            ;;
+    esac
 
-    exec guix shell qemu -- qemu-system-x86_64 \
+    netdev="user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$ssh_port-:22"
+    case "${GUIX_P2P_E2E_FORWARD_DASHBOARD:-true}" in
+        true | yes | 1)
+            netdev="$netdev,hostfwd=tcp:127.0.0.1:$dashboard_port-:$guest_dashboard_port"
+            ;;
+        false | no | 0)
+            ;;
+        *)
+            log "invalid GUIX_P2P_E2E_FORWARD_DASHBOARD=${GUIX_P2P_E2E_FORWARD_DASHBOARD}; expected true or false"
+            exit 2
+            ;;
+    esac
+    netdev="$netdev,hostfwd=tcp:127.0.0.1:$p2p_port-:$guest_p2p_port"
+
+    set -- \
         -m "$MEMORY" \
         -smp "$CPUS" \
-        -enable-kvm \
         -nographic \
         -serial "file:$serial" \
         -drive "file=$disk,if=virtio,format=qcow2" \
-        -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$ssh_port-:22,hostfwd=tcp:127.0.0.1:$dashboard_port-:$dashboard_port,hostfwd=tcp:127.0.0.1:$p2p_port-:$p2p_port"
+        -nic "$netdev"
+    if [ -n "$kvm_arg" ]; then
+        set -- "$kvm_arg" "$@"
+    fi
+
+    if command -v qemu-system-x86_64 >/dev/null 2>&1; then
+        exec qemu-system-x86_64 "$@"
+    fi
+
+    exec guix shell qemu -- qemu-system-x86_64 "$@"
 }
 
 case "${1:-help}" in

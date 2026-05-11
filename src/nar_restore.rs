@@ -1,7 +1,6 @@
 use std::process::Stdio;
 
 use anyhow::Context;
-use tokio::process::Command;
 
 /// Restore a NAR into a Guix store destination path.
 ///
@@ -12,14 +11,31 @@ pub async fn restore_nar_to_destination(
     nar_path: &std::path::Path,
     dest: &std::path::Path,
 ) -> anyhow::Result<()> {
-    let _ = tokio::fs::remove_file(dest).await;
-    let _ = tokio::fs::remove_dir_all(dest).await;
+    let nar_path = nar_path.to_path_buf();
+    let dest = dest.to_path_buf();
 
-    let program = if std::path::Path::new("/run/current-system/profile/bin/guile").exists() {
-        "/run/current-system/profile/bin/guile"
+    tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        tokio::task::spawn_blocking(move || restore_nar_to_destination_sync(&nar_path, &dest)),
+    )
+    .await
+    .context("timed out restoring nar")?
+    .context("nar restore task failed")?
+}
+
+fn restore_nar_to_destination_sync(
+    nar_path: &std::path::Path,
+    dest: &std::path::Path,
+) -> anyhow::Result<()> {
+    let _ = std::fs::remove_file(dest);
+    let _ = std::fs::remove_dir_all(dest);
+
+    let program = if std::path::Path::new("/run/current-system/profile/bin/guix").exists() {
+        "/run/current-system/profile/bin/guix"
     } else {
-        "guile"
+        "guix"
     };
+    let script_path = nar_path.with_extension("restore.scm");
 
     let script = format!(
         "(use-modules (guix serialization))(let ((port (open-file {} \"rb\")))(dynamic-wind(const \
@@ -28,13 +44,18 @@ pub async fn restore_nar_to_destination(
         scheme_string(&dest.display().to_string())
     );
 
-    let output = Command::new(program)
-        .arg("-c")
-        .arg(script)
+    std::fs::write(&script_path, script)
+        .with_context(|| format!("failed to write restore helper {}", script_path.display()))?;
+
+    let output = std::process::Command::new(program)
+        .arg("repl")
+        .arg("--")
+        .arg(&script_path)
         .stdin(Stdio::null())
         .output()
-        .await
-        .with_context(|| format!("failed to run {program} to restore nar"))?;
+        .with_context(|| format!("failed to run {program} repl to restore nar"))?;
+
+    let _ = std::fs::remove_file(&script_path);
 
     if !output.status.success() {
         return Err(anyhow::anyhow!(

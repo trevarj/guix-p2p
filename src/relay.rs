@@ -38,26 +38,26 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
             tokio::io::copy(&mut tokio::io::stdin(), &mut socket_write).await
         }))
     } else {
-        Some(tokio::spawn(async move {
-            let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
-            let mut stdin_line = String::new();
-            loop {
-                stdin_line.clear();
-                let n = stdin.read_line(&mut stdin_line).await?;
-                if n == 0 {
-                    break;
-                }
+        let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
+        let mut stdin_line = String::new();
+        let n = stdin
+            .read_line(&mut stdin_line)
+            .await
+            .context("failed to read substitute command from stdin")?;
+        if n == 0 {
+            return Err(anyhow::anyhow!("stdin closed before substitute command"));
+        }
 
-                if let Some(dest) = substitute_destination(stdin_line.trim_end()) {
-                    let _ = dest_tx.send(dest.to_string());
-                }
+        if let Some(dest) = substitute_destination(stdin_line.trim_end()) {
+            let _ = dest_tx.send(dest.to_string());
+        }
 
-                socket_write.write_all(stdin_line.as_bytes()).await?;
-                socket_write.flush().await?;
-            }
-
-            Ok::<u64, std::io::Error>(0)
-        }))
+        socket_write
+            .write_all(stdin_line.as_bytes())
+            .await
+            .context("failed to forward substitute command to daemon socket")?;
+        socket_write.shutdown().await.context("failed to close daemon socket write half")?;
+        None
     };
 
     // Read socket replies → demux to fd 4 or stdout
@@ -140,7 +140,13 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
             let temp_path = nar_temp_path
                 .take()
                 .ok_or_else(|| anyhow::anyhow!("received nar-end without a temporary nar"))?;
+            tracing::info!(
+                nar = %temp_path.display(),
+                dest = %dest,
+                "restoring nar to substitute destination"
+            );
             restore_nar_to_destination(&temp_path, std::path::Path::new(&dest)).await?;
+            tracing::info!(dest = %dest, "restored nar to substitute destination");
             let _ = tokio::fs::remove_file(&temp_path).await;
         } else {
             // Legacy unprefixed line → treat as fd 4 data for backward compat
