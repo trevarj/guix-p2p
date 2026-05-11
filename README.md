@@ -102,6 +102,7 @@ report is written to `docs/benchmark-results.md`.
 | [docs/configuration.md](docs/configuration.md) | TOML keys, defaults, CLI overrides |
 | [docs/deployment.md](docs/deployment.md) | Daemon, relay, wrapper, and isolated Guix flow |
 | [docs/bootstrap-node.md](docs/bootstrap-node.md) | Shepherd-first bootstrap node operation |
+| [docs/known-tester-roadmap.md](docs/known-tester-roadmap.md) | Setup, demo, and dashboard seeding roadmap |
 | [docs/e2e.md](docs/e2e.md) | Two-node disposable VM proof |
 | [docs/benchmarks.md](docs/benchmarks.md) | Smoke and benchmark harness usage |
 | [docs/dht-protocol.md](docs/dht-protocol.md) | Kademlia DHT design |
