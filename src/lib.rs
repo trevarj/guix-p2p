@@ -8,6 +8,7 @@ pub mod dashboard;
 pub mod dht;
 pub mod http_client;
 pub mod identity;
+pub mod nar_restore;
 pub mod nar_store;
 pub mod narinfo;
 pub mod relay;

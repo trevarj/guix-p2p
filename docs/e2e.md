@@ -200,13 +200,15 @@ printf 'have %s\n' "$STORE_PATH" \
   | guix-p2p --query --socket /tmp/guix-p2p-b/guix-p2p.sock 4>&1
 ```
 
-To test the P2P substitute path without running `guix-daemon`, request a raw
-single-item NAR destination on Node B:
+To test the P2P substitute path without running `guix-daemon`, request a
+single-item destination on Node B:
 
 ```sh
-printf 'substitute %s /tmp/guix-p2p-substitute.nar\n' "$STORE_PATH" \
+rm -rf /tmp/guix-p2p-substitute
+printf 'substitute %s /tmp/guix-p2p-substitute\n' "$STORE_PATH" \
   | guix-p2p --substitute --socket /tmp/guix-p2p-b/guix-p2p.sock 4>&1
-guix hash -f hex /tmp/guix-p2p-substitute.nar
+test -d /tmp/guix-p2p-substitute
+guix hash -f hex -r /tmp/guix-p2p-substitute
 ```
 
 The expected success line is:
@@ -223,12 +225,16 @@ success sha256:d4d3119688670b1299e8457d4f35439c5b427bf5ff31b5c17635f1c481d70a62 
 
 For the full raw `guix-daemon` proof on Node B, the target was absent before
 the build, then `GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build
---no-grafts hello` returned:
+--no-grafts hello` returned and the imported store path was a directory:
 
 ```text
 /gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2
 IMPORTED_HELLO_IN_NODE_B_STORE
 ```
+
+`prove-b` intentionally checks `test -d "$STORE_PATH"` after the build. A raw
+NAR file at the store path is not a valid substitute result and will fail later
+when Guix tries to open the output as a directory.
 
 Node B's `guix-p2p` log showed:
 

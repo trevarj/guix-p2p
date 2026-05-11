@@ -431,8 +431,10 @@ hello` on Node B imports the NAR from Node A through `guix-p2p`.
   guix-daemon to attempt P2P substitutions that cannot succeed.
 - Socket substitute mode must stream verified NAR bytes back to the relay.
   The long-lived user daemon cannot write `/gnu/store`; the relay process
-  spawned by `guix-daemon` writes the destination path and then replies
-  `success` on fd 4.
+  spawned by `guix-daemon` restores the streamed NAR into the destination path
+  and then replies `success` on fd 4. Writing raw NAR bytes at the destination
+  creates a regular file and breaks later profile operations with `opendir: Not
+  a directory`.
 - Full raw daemon proof succeeded for `hello`: after deleting the target
   output from Node B, `guix build --no-grafts hello` returned
   `/gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2`, Node B's store

@@ -2,6 +2,8 @@ use anyhow::Context;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
+use crate::nar_restore::restore_nar_to_destination;
+
 /// Connect to the daemon's Unix socket, forward stdin bytes to it,
 /// read reply lines and route them to the correct file descriptor.
 ///
@@ -63,6 +65,8 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
     let mut line = String::new();
     let mut nar_dest: Option<String> = None;
     let mut nar_file: Option<tokio::fs::File> = None;
+    let mut nar_temp_path: Option<std::path::PathBuf> = None;
+    let mut nar_index = 0u64;
 
     loop {
         line.clear();
@@ -101,14 +105,20 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
                     .recv()
                     .await
                     .ok_or_else(|| anyhow::anyhow!("received nar data without a destination"))?;
+                nar_index += 1;
+                let temp_path = std::env::temp_dir()
+                    .join(format!("guix-p2p-relay-{}-{nar_index}.nar", std::process::id()));
                 let file = tokio::fs::OpenOptions::new()
                     .create(true)
                     .truncate(true)
                     .write(true)
-                    .open(&dest)
+                    .open(&temp_path)
                     .await
-                    .with_context(|| format!("failed to open substitute destination {dest}"))?;
+                    .with_context(|| {
+                        format!("failed to open temporary nar {}", temp_path.display())
+                    })?;
                 nar_dest = Some(dest);
+                nar_temp_path = Some(temp_path);
                 nar_file = Some(file);
             }
 
@@ -118,13 +128,20 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
             if let Some(file) = nar_file.as_mut() {
                 file.write_all(&decoded)
                     .await
-                    .context("failed to write nar chunk to substitute destination")?;
+                    .context("failed to write nar chunk to temporary nar")?;
             }
         } else if line == "nar-end\n" || line == "nar-end\r\n" {
             if let Some(mut file) = nar_file.take() {
-                file.flush().await.context("failed to flush substitute destination")?;
+                file.flush().await.context("failed to flush temporary nar")?;
             }
-            nar_dest = None;
+            let dest = nar_dest
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("received nar-end without a destination"))?;
+            let temp_path = nar_temp_path
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("received nar-end without a temporary nar"))?;
+            restore_nar_to_destination(&temp_path, std::path::Path::new(&dest)).await?;
+            let _ = tokio::fs::remove_file(&temp_path).await;
         } else {
             // Legacy unprefixed line → treat as fd 4 data for backward compat
             tracing::warn!("unprefixed socket line (treating as fd4): {:?}", line.trim());
@@ -142,6 +159,9 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
     }
 
     if let Some(dest) = nar_dest {
+        if let Some(temp_path) = nar_temp_path {
+            let _ = tokio::fs::remove_file(temp_path).await;
+        }
         return Err(anyhow::anyhow!("daemon socket closed before finishing nar for {dest}"));
     }
 

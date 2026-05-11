@@ -485,7 +485,7 @@ echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
 prove_b() {
     store_path="$(resolve_store_path "${1:-}")"
     package="${2:-hello}"
-    ssh_run b "set -eu; test ! -e $(quote "$store_path"); GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build --no-grafts $(quote "$package"); test -e $(quote "$store_path") && echo IMPORTED_HELLO_IN_NODE_B_STORE"
+    ssh_run b "set -eu; test ! -e $(quote "$store_path"); GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build --no-grafts $(quote "$package"); test -d $(quote "$store_path") && echo IMPORTED_HELLO_IN_NODE_B_STORE"
 }
 
 tail_log() {

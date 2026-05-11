@@ -17,6 +17,7 @@ use crate::{
     dashboard::{self, BuildRegistry, DashboardEvent, ObservedBuild},
     dht::ProviderCache,
     http_client::HttpClientError,
+    nar_restore::restore_nar_to_destination,
     nar_store::NarStore,
     narinfo::NarinfoCache,
     reputation::ReputationTracker,
@@ -65,7 +66,7 @@ pub enum ReplyWriter {
     /// Collect all output into a buffer (no channel prefix, for direct use).
     Buffer(Vec<u8>),
     /// Collect output with channel prefix framing for socket relay.
-    /// fd4: lines → fd 4, out: lines → stdout, nar: lines → destination file.
+    /// fd4: lines → fd 4, out: lines → stdout, nar: lines → restored substitute.
     Socket { buf: Vec<u8> },
 }
 
@@ -140,7 +141,7 @@ impl ReplyWriter {
         }
     }
 
-    /// Send raw NAR bytes to a socket relay. The relay writes them to the
+    /// Send raw NAR bytes to a socket relay. The relay restores them into the
     /// destination path while retaining the guix-daemon child privileges.
     pub fn write_nar_data(&mut self, nar_data: &[u8]) -> io::Result<()> {
         const CHUNK_SIZE: usize = 48 * 1024;
@@ -865,17 +866,34 @@ async fn try_swarm_substitute(
                 }
             } else {
                 // Direct substitute mode runs as guix-daemon's child and can
-                // write the destination path itself.
-                if let Err(e) = tokio::fs::write(&dest_path, &nar_data).await {
-                    tracing::error!("Failed to write nar to {}: {}", dest_path.display(), e);
+                // restore the destination path itself.
+                let temp_path = std::env::temp_dir().join(format!(
+                    "guix-p2p-direct-{}-{}.nar",
+                    std::process::id(),
+                    expected_nar_hash
+                ));
+                if let Err(e) = tokio::fs::write(&temp_path, &nar_data).await {
+                    tracing::error!("Failed to write temporary nar {}: {}", temp_path.display(), e);
                     let _ = reply.write_line("not-found");
                     let _ = event_tx.send(DashboardEvent::DownloadFailed {
                         nar_hash: nar_hash_hex.clone(),
                         store_path: store_path.clone(),
-                        reason: format!("write error: {}", e),
+                        reason: format!("temporary nar write error: {}", e),
                     });
                     return;
                 }
+                if let Err(e) = restore_nar_to_destination(&temp_path, &dest_path).await {
+                    let _ = tokio::fs::remove_file(&temp_path).await;
+                    tracing::error!("Failed to restore nar to {}: {}", dest_path.display(), e);
+                    let _ = reply.write_line("not-found");
+                    let _ = event_tx.send(DashboardEvent::DownloadFailed {
+                        nar_hash: nar_hash_hex.clone(),
+                        store_path: store_path.clone(),
+                        reason: format!("restore error: {}", e),
+                    });
+                    return;
+                }
+                let _ = tokio::fs::remove_file(&temp_path).await;
             }
 
             // Save nar to local store for re-seeding

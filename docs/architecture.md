@@ -135,10 +135,12 @@ The Unix socket between daemon and relay uses channel prefix framing:
   substitute request
 
 The relay demuxes these: `fd4:` lines are written to fd 4, `out:` lines to
-stdout (fd 1), and `nar:` chunks are written to the destination path from the
-`substitute <store-path> <dest>` command. Destination writes happen in the relay
-process spawned by `guix-daemon`, not in the long-lived user daemon. This keeps
-the warm swarm architecture while matching guix-daemon's permission model.
+stdout (fd 1), and `nar:` chunks are buffered to a temporary NAR file. At
+`nar-end`, the relay restores that NAR into the destination path from the
+`substitute <store-path> <dest>` command with Guix's NAR deserializer.
+Destination writes happen in the relay process spawned by `guix-daemon`, not in
+the long-lived user daemon. This keeps the warm swarm architecture while
+matching guix-daemon's permission model.
 
 ### Query protocol
 
