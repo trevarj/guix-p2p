@@ -46,6 +46,12 @@ Build the base image and copy it to writable Node A and Node B disks:
 scripts/e2e.sh image
 ```
 
+To rerun the proof from clean VM disks without rebuilding the base image:
+
+```sh
+scripts/e2e.sh reset-disks
+```
+
 Print QEMU launch commands:
 
 ```sh

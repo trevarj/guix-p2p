@@ -59,6 +59,7 @@ Usage: scripts/e2e.sh STEP
 Steps:
   derivation      Print the base qcow2 image derivation
   image           Build the base qcow2 and copy it to Node A and Node B disks
+  reset-disks     Copy base.qcow2 to fresh Node A and Node B disks
   launch-a        Print QEMU command for Node A
   launch-b        Print QEMU command for Node B
   run-a           Run Node A under QEMU in the foreground
@@ -215,6 +216,23 @@ build_image() {
     for node in a b; do
         disk="$(disk_path "$node")"
         log "copying writable $(node_name "$node") disk; source=$base_disk target=$disk"
+        cp -f "$base_disk" "$disk"
+        chmod u+w "$disk"
+        printf '%s\n' "$disk"
+    done
+}
+
+reset_disks() {
+    base_disk="$(base_disk_path)"
+    if [ ! -f "$base_disk" ]; then
+        log "base disk is missing; build it first with: scripts/e2e.sh image"
+        exit 1
+    fi
+
+    rm -f "$(proof_env_path)"
+    for node in a b; do
+        disk="$(disk_path "$node")"
+        log "resetting writable $(node_name "$node") disk; source=$base_disk target=$disk"
         cp -f "$base_disk" "$disk"
         chmod u+w "$disk"
         printf '%s\n' "$disk"
@@ -567,6 +585,9 @@ case "${1:-help}" in
         ;;
     image)
         build_image
+        ;;
+    reset-disks)
+        reset_disks
         ;;
     image-a | image-b)
         log "$1 is deprecated; use image"
