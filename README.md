@@ -36,12 +36,6 @@ scripts/guix-wrapper.sh build hello
 
 ## Validation
 
-Run the fast dashboard demo with synthetic nars:
-
-```sh
-scripts/e2e-fast-demo.sh
-```
-
 Run the real Guix smoke test:
 
 ```sh

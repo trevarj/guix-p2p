@@ -475,10 +475,6 @@ Add a Phase 7 entry after Phase 5 (before Phase 6):
 
 Update all references from `guix-p2p-substitute` to `guix-p2p`.
 
-**Files: `docs/e2e-demo-guide.md`**
-
-Update references to the new binary name.
-
 ---
 
 ## Global Rules
