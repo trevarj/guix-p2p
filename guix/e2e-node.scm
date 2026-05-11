@@ -21,17 +21,17 @@
 
 (define %ssh-host-key
   (local-file (or (getenv "GUIX_P2P_E2E_SSH_HOST_KEY")
-                  "target/guix-p2p-private-store/ssh/ssh_host_ed25519_key")
+                  "target/guix-p2p-e2e/ssh/ssh_host_ed25519_key")
               "ssh_host_ed25519_key"))
 
 (define %ssh-host-key.pub
   (local-file (or (getenv "GUIX_P2P_E2E_SSH_HOST_KEY_PUB")
-                  "target/guix-p2p-private-store/ssh/ssh_host_ed25519_key.pub")
+                  "target/guix-p2p-e2e/ssh/ssh_host_ed25519_key.pub")
               "ssh_host_ed25519_key.pub"))
 
 (define %ssh-authorized-key
   (local-file (or (getenv "GUIX_P2P_E2E_SSH_AUTHORIZED_KEY")
-                  "target/guix-p2p-private-store/ssh/e2e_ed25519.pub")
+                  "target/guix-p2p-e2e/ssh/e2e_ed25519.pub")
               "e2e_ed25519.pub"))
 
 (define %guix-p2p-e2e-package
@@ -201,9 +201,9 @@
                  port)))
             (chmod node-b #o555)))))
     (home-page "https://example.invalid/guix-p2p-e2e")
-    (synopsis "Locally built guix-p2p binary for private-store E2E images")
+    (synopsis "Locally built guix-p2p binary for E2E images")
     (description "This package wraps the locally built guix-p2p binary for the
-private-store E2E VM image.")
+two-node E2E VM image.")
     (license license:expat)))
 
 (operating-system

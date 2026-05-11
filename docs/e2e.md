@@ -1,4 +1,4 @@
-# Private-Store E2E
+# E2E VM Proof
 
 The strict proof requires Node A and Node B to have separate writable
 `/gnu/store` directories. Shared-store Guix containers cannot prove that Node B
@@ -8,8 +8,7 @@ This path uses qcow2 Guix System images because `guix system vm` shares the
 host store, while `guix system image --image-type=qcow2` creates a disk image
 with its own store.
 
-Use `scripts/e2e.sh` for this workflow. The old
-`scripts/e2e-private-store.sh` path is a compatibility wrapper.
+Use `scripts/e2e.sh` for this workflow.
 
 ## Current Milestone
 
@@ -26,7 +25,7 @@ base image:
   locally built `guix-p2p` binary in the system profile.
 - Node A will realize the package under test after boot.
 - Node B starts from the same base image and must obtain the package through
-  the private-store test flow.
+  the E2E substitute flow.
 
 Build the binary that will be embedded in the image:
 
@@ -95,7 +94,7 @@ scripts/e2e.sh node-b
 ```
 
 `node-a` prints `store_path=...`, `peer_id=...`, and shell export lines. It
-also saves them to `target/guix-p2p-private-store/e2e.env`, so later shortcut
+also saves them to `target/guix-p2p-e2e/e2e.env`, so later shortcut
 commands can use them without extra arguments. To load the values into the
 current shell anyway:
 
@@ -182,7 +181,7 @@ password: e2e
 The image also authorizes a persistent test SSH client key generated under:
 
 ```sh
-target/guix-p2p-private-store/ssh/e2e_ed25519
+target/guix-p2p-e2e/ssh/e2e_ed25519
 ```
 
 Inside either VM, verify the embedded binary:
@@ -290,7 +289,7 @@ serving 2 block(s): hash=d4d3119688670b12..
 Serial logs are written under:
 
 ```sh
-target/guix-p2p-private-store/logs/
+target/guix-p2p-e2e/logs/
 ```
 
 The `run-*` steps start QEMU in the foreground and create the serial log file.
@@ -299,7 +298,7 @@ Exit QEMU with `Ctrl-a x` or type `quit` at the QEMU monitor prompt.
 The image embeds a persistent test-only OpenSSH host key from:
 
 ```sh
-target/guix-p2p-private-store/ssh/ssh_host_ed25519_key
+target/guix-p2p-e2e/ssh/ssh_host_ed25519_key
 ```
 
 Rebuilding the image keeps the same SSH fingerprint. The first rebuild after

@@ -433,17 +433,17 @@ acl_path = "/etc/guix/acl"
 seed_paths = ["/gnu/store/abc-foo", "/gnu/store/def-bar"]
 ```
 
-### E2E Harness Flags
+### E2E Harnesses
 
 The `guix-p2p-e2e container-smoke` harness has its own CLI surface for local
 proofs. It supports `--dashboard-bind` for VM port forwarding and `--hold` to
 keep validated smoke-test dashboards running until Ctrl-C. These flags do not
 change production daemon configuration.
 
-The disposable VM path uses `container-smoke --vm-direct` so the harness runs
-peer and daemon processes directly inside the writable qcow2 guest instead of
-nesting `guix shell -CN`. `GUIX_P2P_E2E_HOLD=1` is the VM wrapper switch for
-interactive dashboard inspection after validation.
+The strict store-isolation proof uses `scripts/e2e.sh`, which builds one
+qcow2 Guix System base image, copies it to Node A and Node B disks, and runs
+the raw `guix-daemon` proof inside Node B. Its state defaults to
+`target/guix-p2p-e2e`.
 
 ### Future: Upstream Guile Patch
 

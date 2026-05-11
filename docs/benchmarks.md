@@ -29,13 +29,15 @@ Environment overrides:
 ## Container Smoke
 
 ```sh
-cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport tcp
+guix shell -m manifest.scm -- \
+  cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport tcp
 ```
 
 For a dashboard-first demo that keeps the validated nodes running:
 
 ```sh
-cargo run -p guix-p2p-e2e -- container-smoke \
+guix shell -m manifest.scm -- \
+  cargo run -p guix-p2p-e2e -- container-smoke \
   --package hello \
   --transport tcp \
   --dashboard-bind 0.0.0.0 \
@@ -55,7 +57,8 @@ Defaults:
 Use QUIC on hosts that allow UDP:
 
 ```sh
-cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport quic
+guix shell -m manifest.scm -- \
+  cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport quic
 ```
 
 The harness:
@@ -80,23 +83,23 @@ Acceptance checks:
 - Node B logs show p2p-only handling and a successful substitute download.
 - Node B logs do not show HTTP nar fallback in p2p-only mode.
 
-## Private-Store E2E
+## E2E VM Proof
 
 The strict proof requires Node A and Node B to have separate writable stores so
 Node B can prove it does not already have the package seeded by Node A. Shared
 host-store containers are not a valid full proof for that requirement.
 
-Use `scripts/e2e-fast-demo.sh` when you need a quick dashboard demo. The
-private-store VM/image proof is tracked in `docs/implementation-plan.md`.
-Current status: direct `guix-p2p --query/--substitute --socket` relay between
-two private-store VMs is passing for `hello`. Benchmarking the full
-`guix build` path should wait until Node B's raw `guix-daemon` wrapper path is
-wired.
+Use `scripts/e2e-fast-demo.sh` when you need a quick dashboard demo. Use
+`scripts/e2e.sh` for the strict two-VM proof with separate writable stores.
+The VM proof currently passes for `hello` through Node B's raw `guix-daemon`
+wrapper path and verifies that the imported store path is a restored
+directory.
 
 ## Benchmark
 
 ```sh
-cargo run -p guix-p2p-e2e -- benchmark --packages hello,git,emacs --iterations 3 --transport tcp
+guix shell -m manifest.scm -- \
+  cargo run -p guix-p2p-e2e -- benchmark --packages hello,git,emacs --iterations 3 --transport tcp
 ```
 
 Defaults:
@@ -126,6 +129,6 @@ Per-run temp directories are removed unless `--keep-temp` is passed.
 The smoke and benchmark harnesses require the test container to be able to
 write `/gnu/store`, because raw `guix-daemon` imports substituted nars into
 the store even with `--max-jobs=0`. If the host exposes `/gnu/store` read-only,
-the harness fails at preflight before starting nodes. The disposable VM is the
-recommended environment for the dashboard-first smoke proof. Benchmarks should
-be run after the smoke proof passes there.
+the harness fails at preflight before starting nodes. The disposable VM proof
+is the authoritative full-store-isolation check; the benchmark harness remains
+the faster controlled timing tool.

@@ -2,7 +2,7 @@
 # pipe-test.sh — Manual end-to-end test of the guix-p2p daemon protocol
 #
 # Tests the fd 4 and socket protocols without involving guix-daemon.
-# Requires: guix-p2p built (cargo build --release), socat, a running guix system
+# Requires: guix-p2p built, socat, a running guix system
 #
 # Usage:
 #   ./scripts/pipe-test.sh              # full test
@@ -57,13 +57,17 @@ echo ""
 if [ "$SKIP_BUILD" = 0 ]; then
     echo "--- Step 0: Building guix-p2p ---"
     cd "$BASEDIR"
-    cargo build --release 2>&1 | tail -1
+    if command -v cargo >/dev/null 2>&1; then
+        cargo build --release
+    else
+        guix shell -m manifest.scm -- cargo build --release
+    fi
     echo ""
 fi
 
 if [ ! -x "$BINARY" ]; then
     echo "ERROR: Binary not found at $BINARY"
-    echo "Run: cargo build --release"
+    echo "Run: guix shell -m manifest.scm -- cargo build --release"
     exit 1
 fi
 

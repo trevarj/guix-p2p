@@ -45,21 +45,25 @@ scripts/e2e-fast-demo.sh
 Run the real Guix smoke test:
 
 ```sh
-cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport tcp
+guix shell -m manifest.scm -- \
+  cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport tcp
 ```
 
-For strict local proof on a host with a read-only `/gnu/store`, boot the
-disposable Guix VM. This builds a full Guix system image and can download
-`linux-libre` the first time:
+For the strict proof with separate writable stores, boot the two disposable
+Guix VMs. This builds a full Guix system image and can download `linux-libre`
+the first time:
 
 ```sh
-scripts/e2e-vm.sh run
+scripts/e2e.sh image
+scripts/e2e.sh run-a  # terminal 1
+scripts/e2e.sh run-b  # terminal 2
 ```
 
 Run local controlled benchmarks:
 
 ```sh
-cargo run -p guix-p2p-e2e -- benchmark --packages hello,git,emacs --iterations 3 --transport tcp
+guix shell -m manifest.scm -- \
+  cargo run -p guix-p2p-e2e -- benchmark --packages hello,git,emacs --iterations 3 --transport tcp
 ```
 
 Benchmark CSV output is written under `target/guix-p2p-bench/`; the markdown
@@ -73,7 +77,7 @@ report is written to `docs/benchmark-results.md`.
 | [docs/configuration.md](docs/configuration.md) | TOML keys, defaults, CLI overrides |
 | [docs/deployment.md](docs/deployment.md) | Daemon, relay, wrapper, and isolated Guix flow |
 | [docs/bootstrap-node.md](docs/bootstrap-node.md) | Shepherd-first bootstrap node operation |
-| [docs/e2e-vm.md](docs/e2e-vm.md) | Disposable VM for the real smoke proof |
+| [docs/e2e.md](docs/e2e.md) | Two-node disposable VM proof |
 | [docs/benchmarks.md](docs/benchmarks.md) | Smoke and benchmark harness usage |
 | [docs/dht-protocol.md](docs/dht-protocol.md) | Kademlia DHT design |
 | [docs/swarm-protocol.md](docs/swarm-protocol.md) | Block exchange wire protocol |

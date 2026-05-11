@@ -8,10 +8,11 @@ The `guix-p2p-e2e` binary launches local test networks with web dashboards.
 
 ```sh
 # Launch 2 seeders + 1 downloader, dashboards on ports 3031-3033
-cargo run -p guix-p2p-e2e -- run
+guix shell -m manifest.scm -- cargo run -p guix-p2p-e2e -- run
 
 # Custom configuration
-cargo run -p guix-p2p-e2e -- run --seeders 3 --downloaders 2 --nar-kb 512 --dashboard-port 4000
+guix shell -m manifest.scm -- \
+  cargo run -p guix-p2p-e2e -- run --seeders 3 --downloaders 2 --nar-kb 512 --dashboard-port 4000
 ```
 
 Seeders generate synthetic nars and announce them in the DHT. Downloaders
@@ -33,7 +34,8 @@ Set `GUIX_P2P_E2E_LOG_DIR` to move these logs, or
 
 ```sh
 # Seed linux and firefox from the local Guix store
-cargo run -p guix-p2p-e2e -- seed --paths /gnu/store/abc-linux-6.1,/gnu/store/def-firefox-115
+guix shell -m manifest.scm -- \
+  cargo run -p guix-p2p-e2e -- seed --paths /gnu/store/abc-linux-6.1,/gnu/store/def-firefox-115
 ```
 
 This uses `guix hash` to compute nar hashes and Guix's raw NAR serializer to
@@ -58,16 +60,17 @@ Options:
 ## Running E2E Tests
 
 ```sh
-cargo test -p guix-p2p-e2e
+guix shell -m manifest.scm -- cargo test -p guix-p2p-e2e
 
 # Including ignored DHT discovery tests (need 3+ nodes)
-cargo test -p guix-p2p-e2e -- --include-ignored --test-threads=1
+guix shell -m manifest.scm -- \
+  cargo test -p guix-p2p-e2e -- --include-ignored --test-threads=1
 ```
 
 ## Running All Project Tests
 
 ```sh
-cargo test --workspace
+guix shell -m manifest.scm -- cargo test --workspace
 ```
 
 ## Architecture

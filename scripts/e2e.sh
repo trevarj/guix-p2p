@@ -1,15 +1,15 @@
 #!/bin/sh
-# Build and launch the private-store VM proof scaffolding.
+# Build and launch the two-node E2E VM proof.
 
 set -eu
 
 PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-STATE_DIR="${GUIX_P2P_E2E_PRIVATE_DIR:-$PROJECT_DIR/target/guix-p2p-private-store}"
+STATE_DIR="${GUIX_P2P_E2E_DIR:-${GUIX_P2P_E2E_PRIVATE_DIR:-$PROJECT_DIR/target/guix-p2p-e2e}}"
 IMAGE_SIZE="${GUIX_P2P_E2E_IMAGE_SIZE:-8G}"
 MEMORY="${GUIX_P2P_E2E_VM_MEMORY:-2048}"
 CPUS="${GUIX_P2P_E2E_VM_CPUS:-2}"
 SUBSTITUTE_URLS="${GUIX_P2P_E2E_SUBSTITUTE_URLS:-https://ci.guix.gnu.org https://bordeaux.guix.gnu.org}"
-NODE_SYSTEM="$PROJECT_DIR/guix/e2e-private-node.scm"
+NODE_SYSTEM="$PROJECT_DIR/guix/e2e-node.scm"
 GUIX_P2P_BINARY="${GUIX_P2P_E2E_BINARY:-$PROJECT_DIR/target/release/guix-p2p}"
 SSH_DIR="$STATE_DIR/ssh"
 SSH_HOST_KEY="${GUIX_P2P_E2E_SSH_HOST_KEY:-$SSH_DIR/ssh_host_ed25519_key}"
@@ -83,7 +83,7 @@ Steps:
   help            Show this help
 
 Environment:
-  GUIX_P2P_E2E_PRIVATE_DIR     State directory, default target/guix-p2p-private-store
+  GUIX_P2P_E2E_DIR             State directory, default target/guix-p2p-e2e
   GUIX_P2P_E2E_IMAGE_SIZE      Image size, default 8G
   GUIX_P2P_E2E_VM_MEMORY       QEMU memory in MB, default 2048
   GUIX_P2P_E2E_VM_CPUS         QEMU CPU count, default 2
@@ -99,9 +99,9 @@ Environment:
   GUIX_P2P_E2E_BINARY          guix-p2p binary embedded in the image,
                                default target/release/guix-p2p
   GUIX_P2P_E2E_SSH_HOST_KEY    Persistent test SSH host key embedded in image,
-                               default target/guix-p2p-private-store/ssh/ssh_host_ed25519_key
+                               default target/guix-p2p-e2e/ssh/ssh_host_ed25519_key
   GUIX_P2P_E2E_SSH_CLIENT_KEY  Persistent test SSH client key authorized for e2e,
-                               default target/guix-p2p-private-store/ssh/e2e_ed25519
+                               default target/guix-p2p-e2e/ssh/e2e_ed25519
 EOF
 }
 
@@ -135,7 +135,7 @@ proof_env_path() {
 
 ensure_guix_p2p_binary() {
     if [ ! -x "$GUIX_P2P_BINARY" ]; then
-        log "guix-p2p binary is missing or not executable; build it first with: cargo build --release"
+        log "guix-p2p binary is missing or not executable; build it first with: guix shell -m manifest.scm -- cargo build --release"
         log "expected binary: $GUIX_P2P_BINARY"
         exit 1
     fi
@@ -149,9 +149,9 @@ ensure_ssh_host_key() {
     mkdir -p "$SSH_DIR"
     log "generating persistent test SSH host key; key=$SSH_HOST_KEY"
     if command -v ssh-keygen >/dev/null 2>&1; then
-        ssh-keygen -t ed25519 -N "" -C "guix-p2p-e2e-private-store" -f "$SSH_HOST_KEY" >/dev/null
+        ssh-keygen -t ed25519 -N "" -C "guix-p2p-e2e" -f "$SSH_HOST_KEY" >/dev/null
     else
-        guix shell openssh -- ssh-keygen -t ed25519 -N "" -C "guix-p2p-e2e-private-store" -f "$SSH_HOST_KEY" >/dev/null
+        guix shell openssh -- ssh-keygen -t ed25519 -N "" -C "guix-p2p-e2e" -f "$SSH_HOST_KEY" >/dev/null
     fi
     chmod 600 "$SSH_HOST_KEY"
     chmod 644 "$SSH_HOST_KEY_PUB"

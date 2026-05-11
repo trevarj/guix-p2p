@@ -331,7 +331,7 @@
 
 ---
 
-## Phase 10: Private-Store E2E Proof
+## Phase 10: E2E VM Proof
 
 ### Goals
 
@@ -343,7 +343,7 @@
 
 ### Current Status
 
-The private-store VM proof now passes through the raw `guix-daemon` integration
+The E2E VM proof now passes through the raw `guix-daemon` integration
 layer. Node A and Node B boot from separate writable qcow2 disks, Node A
 realizes and seeds `hello`, Node B proves it does not have that exact store
 path, and `GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build --no-grafts
@@ -354,7 +354,7 @@ hello` on Node B imports the NAR from Node A through `guix-p2p`.
 - [x] Build a minimal real Guix image or VM root with a writable private
   `/gnu/store`.
 - [x] Add initial Node A and Node B qcow2 operating-system definitions for the
-  private-store proof.
+  E2E VM proof.
 - [x] Add a thin step script for image derivation/build and QEMU launch command
   generation.
 - [x] Launch two isolated nodes with separate stores and Guix state.
@@ -379,7 +379,8 @@ hello` on Node B imports the NAR from Node A through `guix-p2p`.
 - [x] Phase 3: Start guix-daemon inside Node B with private store/state and
   `GUIX` pointing to wrapper
 - [x] Phase 6b: Run `guix build hello` inside Node B through the raw daemon
-- [ ] Phase 7: Print dashboard catalog/seeds and propagate build exit code
+- [x] Phase 7: Propagate build exit code from the raw daemon proof
+- [ ] Print dashboard catalog/seeds from the VM proof
 - [ ] Phase 8: Cleanup VMs/processes
 
 ### Key Design Decisions
@@ -421,7 +422,7 @@ hello` on Node B imports the NAR from Node A through `guix-p2p`.
   NAR served by substitute servers. Seeded NARs now use Guix's
   `(guix serialization) write-file` output and are validated against the
   filename hash when indexed.
-- Direct private-store relay proof succeeded for `hello`: Node B's `have`
+- Direct E2E relay proof succeeded for `hello`: Node B's `have`
   query returned the store path, and `substitute` wrote a 282616-byte NAR with
   SHA-256 `d4d3119688670b1299e8457d4f35439c5b427bf5ff31b5c17635f1c481d70a62`.
 - `guix substitute --query` requires full `/gnu/store/...` deriver and
@@ -443,7 +444,7 @@ hello` on Node B imports the NAR from Node A through `guix-p2p`.
 
 ### See Also
 
-- `docs/e2e.md` — current private-store VM/image direction.
+- `docs/e2e.md` — current two-node E2E VM proof.
 
 ### Deliverables
 

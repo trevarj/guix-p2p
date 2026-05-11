@@ -44,14 +44,14 @@ guix-daemon
 
 Substitute mode follows the same path with `--substitute`.
 
-## Private-Store E2E Flow
+## E2E VM Flow
 
 The strict E2E proof must run Node A and Node B with separate writable Guix
 stores. Node B must not already have the package seeded by Node A, so shared
 host-store containers are not sufficient.
 
-The full proof will run Node A, Node B, Node B's raw ELF `guix-daemon`, and
-the client `guix build`. It runs the raw daemon binary directly, not the Guile
+The full proof runs Node A, Node B, Node B's raw ELF `guix-daemon`, and the
+client `guix build`. It runs the raw daemon binary directly, not the Guile
 wrapper. It sets:
 
 - `GUIX_STATE_DIRECTORY` to an isolated state tree.
@@ -60,14 +60,13 @@ wrapper. It sets:
   Node B's `guix-p2p` socket.
 - `GUIX_DAEMON_SOCKET` for the client `guix build`.
 
-This will force a real `guix build <package>` through the substitute protocol
+This forces a real `guix build <package>` through the substitute protocol
 while keeping production Guix state untouched.
 
-The current VM proof already covers the layer below raw `guix-daemon`: two
-qcow2 Guix System nodes with private stores, Node A seeding `hello`, and Node B
-successfully running manual `have` and `substitute` relay commands through
-`guix-p2p --socket`. The remaining step is wiring Node B's raw daemon and
-client `guix build`.
+The current VM proof covers the full path for `hello`: two qcow2 Guix System
+nodes with private stores, Node A seeding the package, Node B proving the exact
+store path is absent, and Node B importing the NAR through `guix-p2p` during
+`guix build --no-grafts hello`.
 
 ## Seeding
 
