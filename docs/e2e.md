@@ -37,15 +37,20 @@ Run the proof:
 cargo run -p guix-p2p-e2e -- vm wait-ssh Alice Bob
 cargo run -p guix-p2p-e2e -- vm push-binary --all
 cargo run -p guix-p2p-e2e -- vm seed Alice hello
-cargo run -p guix-p2p-e2e -- vm fetch Bob --from Alice
-cargo run -p guix-p2p-e2e -- vm prewarm Bob
-cargo run -p guix-p2p-e2e -- vm daemon Bob
-cargo run -p guix-p2p-e2e -- vm prove Bob
+cargo run -p guix-p2p-e2e -- vm connect Bob --from Alice
+cargo run -p guix-p2p-e2e -- vm remove Bob
+cargo run -p guix-p2p-e2e -- vm fetch Bob
 ```
 
-`seed` saves the latest `store_path` and `peer_id` for that node. `fetch`
-uses the latest seed from `--from`, starts the fetcher daemon, and records the
-target package for later `prewarm`, `daemon`, and `prove` commands.
+`seed` saves the latest `store_path` and `peer_id` for that node. `connect`
+uses the latest seed from `--from`, starts the fetch node's P2P daemon, starts
+the fetch node's raw `guix-daemon` wrapper, and records the target package for
+later `remove` and `fetch` commands.
+
+`remove` realizes dependencies with the regular daemon path and deletes only
+the target output. `fetch` then runs `guix build --no-grafts` through the
+fetch node's p2p-only daemon and requires the target output to be imported as
+a store directory.
 
 Verify the imported output by SSHing into the fetcher and running the store
 path directly. The proof imports the output; it does not install `hello` into

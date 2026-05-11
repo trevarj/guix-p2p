@@ -365,7 +365,7 @@ the fetch node imports the NAR from the seed node through `guix-p2p`.
   bootstrap, mDNS, and identify events.
 - [x] Phase 1: Start a seed node — guix-p2p daemon, wait for readiness,
   capture PeerId from logs.
-- [x] Phase 2: Start a fetch node — guix-p2p daemon with
+- [x] Phase 2: Connect a fetch node — guix-p2p daemon with
   `--bootstrap-peers` pointing to the seed node.
 - [x] Phase 4: Seed hello on one named node via `--seed` flag.
 - [x] Phase 5: Prove the fetch node does not already have the seeded output.
@@ -375,8 +375,8 @@ the fetch node imports the NAR from the seed node through `guix-p2p`.
   override
 - [x] Generate per-node wrapper scripts with `GUIX_P2P_SOCKET` and
   `GUIX_P2P_BIN` env vars
-- [x] Phase 3: Start guix-daemon inside the fetch node with private store/state and
-  `GUIX` pointing to wrapper
+- [x] Phase 3: Start guix-daemon automatically inside the fetch node with
+  private store/state and `GUIX` pointing to wrapper
 - [x] Phase 6b: Run `guix build hello` inside the fetch node through the raw daemon
 - [x] Phase 7: Propagate build exit code from the raw daemon proof
 - [ ] Print dashboard catalog/seeds from the VM proof

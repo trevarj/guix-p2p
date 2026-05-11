@@ -153,29 +153,27 @@ enum VmCommand {
         #[arg(default_value = "hello")]
         package: String,
     },
-    /// Start a node as a fetcher bootstrapped to a seed node
-    Fetch {
+    /// Connect a fetch node to a seeded node and start its relay daemon
+    Connect {
         node: String,
         #[arg(long)]
         from: String,
     },
     /// Print saved seed metadata as shell exports
     Env { node: Option<String> },
-    /// Prewarm a fetcher node and delete the fetched target output
-    Prewarm {
+    /// Realize dependencies and remove the target output from a fetch node
+    Remove {
         node: String,
         store_path: Option<String>,
-        #[arg(default_value = "hello")]
-        package: String,
+        #[arg(long)]
+        package: Option<String>,
     },
-    /// Start temporary guix-daemon through the guix-p2p wrapper on a node
-    Daemon { node: String },
-    /// Run guix build through the temporary guix-daemon on a node
-    Prove {
+    /// Fetch the target output through the node's p2p-only Guix daemon
+    Fetch {
         node: String,
         store_path: Option<String>,
-        #[arg(default_value = "hello")]
-        package: String,
+        #[arg(long)]
+        package: Option<String>,
     },
     /// Tail a node's guix-p2p log
     Logs { node: String },
@@ -540,14 +538,13 @@ fn run_vm_command(opts: VmOptions) -> anyhow::Result<()> {
         VmCommand::WaitSsh { nodes } => vm_wait_ssh(&config, &nodes),
         VmCommand::PushBinary { node, all } => vm_push_binary(&config, node.as_deref(), all),
         VmCommand::Seed { node, package } => vm_seed(&config, &node, &package),
-        VmCommand::Fetch { node, from } => vm_fetch(&config, &node, &from),
+        VmCommand::Connect { node, from } => vm_connect(&config, &node, &from),
         VmCommand::Env { node } => vm_print_env(&config, node.as_deref()),
-        VmCommand::Prewarm { node, store_path, package } => {
-            vm_prewarm(&config, &node, store_path.as_deref(), &package)
+        VmCommand::Remove { node, store_path, package } => {
+            vm_remove(&config, &node, store_path.as_deref(), package.as_deref())
         },
-        VmCommand::Daemon { node } => vm_daemon(&config, &node),
-        VmCommand::Prove { node, store_path, package } => {
-            vm_prove(&config, &node, store_path.as_deref(), &package)
+        VmCommand::Fetch { node, store_path, package } => {
+            vm_fetch(&config, &node, store_path.as_deref(), package.as_deref())
         },
         VmCommand::Logs { node } => vm_tail_log(&config, &node, "guix-p2p"),
         VmCommand::DaemonLog { node } => vm_tail_log(&config, &node, "daemon"),
@@ -998,7 +995,7 @@ fn vm_seed(config: &VmConfig, name: &str, package: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn vm_fetch(config: &VmConfig, name: &str, from: &str) -> anyhow::Result<()> {
+fn vm_connect(config: &VmConfig, name: &str, from: &str) -> anyhow::Result<()> {
     let mut registry = VmRegistry::load(config)?;
     let seed_node = registry.node(from)?.clone();
     let seed = seed_node.last_seed.clone().ok_or_else(|| {
@@ -1025,7 +1022,8 @@ fn vm_fetch(config: &VmConfig, name: &str, from: &str) -> anyhow::Result<()> {
         store_path: seed.store_path,
         peer_id: seed.peer_id,
     });
-    registry.save(config)
+    registry.save(config)?;
+    vm_start_daemon(config, name)
 }
 
 fn vm_print_env(config: &VmConfig, node: Option<&str>) -> anyhow::Result<()> {
@@ -1039,22 +1037,23 @@ fn vm_print_env(config: &VmConfig, node: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn vm_prewarm(
+fn vm_remove(
     config: &VmConfig,
     name: &str,
     store_path: Option<&str>,
-    package: &str,
+    package: Option<&str>,
 ) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
     let target = resolve_fetch_store_path(node, store_path)?;
+    let package = resolve_fetch_package(node, package);
     let output = ssh_run(
         config,
         node,
         &format!(
             "set -eu; guix build --no-grafts {}; guix gc -D {}; test ! -e {} && echo \
              TARGET_ABSENT_AFTER_DELETE",
-            shell_quote(package),
+            shell_quote(&package),
             shell_quote(&target),
             shell_quote(&target)
         ),
@@ -1063,7 +1062,7 @@ fn vm_prewarm(
     Ok(())
 }
 
-fn vm_daemon(config: &VmConfig, name: &str) -> anyhow::Result<()> {
+fn vm_start_daemon(config: &VmConfig, name: &str) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
     let remote = r#"
@@ -1122,15 +1121,17 @@ echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
     Ok(())
 }
 
-fn vm_prove(
+fn vm_fetch(
     config: &VmConfig,
     name: &str,
     store_path: Option<&str>,
-    package: &str,
+    package: Option<&str>,
 ) -> anyhow::Result<()> {
+    vm_start_daemon(config, name)?;
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
     let target = resolve_fetch_store_path(node, store_path)?;
+    let package = resolve_fetch_package(node, package);
     let output = ssh_run(
         config,
         node,
@@ -1138,7 +1139,7 @@ fn vm_prove(
             "set -eu; test ! -e {}; GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build \
              --no-grafts {}; test -d {} && echo IMPORTED_OUTPUT_IN_NODE_STORE",
             shell_quote(&target),
-            shell_quote(package),
+            shell_quote(&package),
             shell_quote(&target)
         ),
     )?;
@@ -2630,11 +2631,18 @@ fn resolve_fetch_store_path(node: &VmNode, explicit: Option<&str>) -> anyhow::Re
     }
     node.last_fetch.as_ref().map(|fetch| fetch.store_path.clone()).ok_or_else(|| {
         anyhow::anyhow!(
-            "{} has no saved fetch; run: vm fetch {} --from <seed-node>",
+            "{} has no saved fetch target; run: vm connect {} --from <seed-node>",
             node.name,
             node.name
         )
     })
+}
+
+fn resolve_fetch_package(node: &VmNode, explicit: Option<&str>) -> String {
+    explicit
+        .map(str::to_string)
+        .or_else(|| node.last_fetch.as_ref().map(|fetch| fetch.package.clone()))
+        .unwrap_or_else(|| "hello".to_string())
 }
 
 fn store_hash_part(store_path: &str) -> Option<String> {
@@ -2732,5 +2740,30 @@ mod tests {
             }],
         };
         assert_eq!(unique_slug("Alice", &registry), "alice-2");
+    }
+
+    #[test]
+    fn fetch_package_prefers_explicit_then_saved_then_default() {
+        let mut node = VmNode {
+            name: "Bob".to_string(),
+            slug: "bob".to_string(),
+            ssh_port: 2222,
+            dashboard_port: 3032,
+            p2p_port: 6882,
+            disk: PathBuf::from("bob.qcow2"),
+            pid: None,
+            last_seed: None,
+            last_fetch: None,
+        };
+        assert_eq!(resolve_fetch_package(&node, None), "hello");
+
+        node.last_fetch = Some(VmFetch {
+            from: "Alice".to_string(),
+            package: "git".to_string(),
+            store_path: "/gnu/store/example-git".to_string(),
+            peer_id: "12D3KooWexample".to_string(),
+        });
+        assert_eq!(resolve_fetch_package(&node, None), "git");
+        assert_eq!(resolve_fetch_package(&node, Some("emacs")), "emacs");
     }
 }
