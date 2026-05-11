@@ -58,6 +58,40 @@ scripts/e2e-private-store.sh run-a
 scripts/e2e-private-store.sh run-b
 ```
 
+From a third terminal, wait for SSH, push the current binary, and start the two
+node helpers:
+
+```sh
+scripts/e2e-private-store.sh wait-ssh
+scripts/e2e-private-store.sh push-binary
+scripts/e2e-private-store.sh node-a hello
+scripts/e2e-private-store.sh node-b "$STORE_PATH" "$PEER_ID"
+```
+
+`node-a` prints `store_path=...` and `peer_id=...`; export those values before
+running `node-b`:
+
+```sh
+export STORE_PATH=/gnu/store/...-hello-...
+export PEER_ID=12D3...
+```
+
+Then run the full raw daemon proof:
+
+```sh
+scripts/e2e-private-store.sh prewarm-b "$STORE_PATH"
+scripts/e2e-private-store.sh daemon-b
+scripts/e2e-private-store.sh prove-b "$STORE_PATH"
+```
+
+Useful log tails:
+
+```sh
+scripts/e2e-private-store.sh logs-a
+scripts/e2e-private-store.sh logs-b
+scripts/e2e-private-store.sh daemon-log-b
+```
+
 After the first rebuild with the persistent test client key, SSH does not need
 the password:
 

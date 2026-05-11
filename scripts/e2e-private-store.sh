@@ -65,9 +65,21 @@ Steps:
   run-b           Run Node B under QEMU in the foreground
   ssh-a           SSH to Node A with the persistent test key
   ssh-b           SSH to Node B with the persistent test key
+  wait-ssh        Wait until SSH accepts connections on both nodes
   push-binary     Copy target/release/guix-p2p to /tmp/guix-p2p on both nodes
   push-binary-a   Copy target/release/guix-p2p to /tmp/guix-p2p on Node A
   push-binary-b   Copy target/release/guix-p2p to /tmp/guix-p2p on Node B
+  node-a [PKG]    Start Node A helper and seed PKG, default hello
+  node-b PATH PEER
+                  Start Node B helper for PATH, bootstrapped to PEER
+  prewarm-b PATH [PKG]
+                  Build PKG normally on Node B, then delete PATH
+  daemon-b        Start temporary Node B guix-daemon through guix-p2p wrapper
+  prove-b PATH [PKG]
+                  Run guix build PKG through temporary Node B daemon
+  logs-a          Tail Node A guix-p2p log
+  logs-b          Tail Node B guix-p2p log
+  daemon-log-b    Tail temporary Node B guix-daemon log
   help            Show this help
 
 Environment:
@@ -217,6 +229,44 @@ ssh_node() {
         e2e@127.0.0.1
 }
 
+quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+ssh_run() {
+    node="$1"
+    shift
+    ensure_ssh_client_key
+    qemu_ports "$node"
+    ssh \
+        -i "$SSH_CLIENT_KEY" \
+        -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+        -o StrictHostKeyChecking=accept-new \
+        -o BatchMode=yes \
+        -o ConnectTimeout=10 \
+        -p "$ssh_port" \
+        e2e@127.0.0.1 \
+        "$@"
+}
+
+wait_ssh_node() {
+    node="$1"
+    qemu_ports "$node"
+    i=0
+    while :; do
+        if ssh_run "$node" "true" >/dev/null 2>&1; then
+            log "$(node_name "$node") SSH ready on port $ssh_port"
+            return
+        fi
+        i=$((i + 1))
+        if [ "$i" -gt 120 ]; then
+            log "$(node_name "$node") SSH did not become ready on port $ssh_port"
+            exit 1
+        fi
+        sleep 1
+    done
+}
+
 push_binary() {
     node="$1"
     ensure_guix_p2p_binary
@@ -253,6 +303,94 @@ chmod 755 /tmp/guix-p2p /tmp/guix-p2p-real
         e2e@127.0.0.1 \
         "$remote_install"
     log "pushed binary to $(node_name "$node"):/tmp/guix-p2p"
+}
+
+node_a_helper() {
+    package="${1:-hello}"
+    ssh_run a "GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p guix-p2p-e2e-node-a $(quote "$package")"
+}
+
+node_b_helper() {
+    store_path="${1:?usage: scripts/e2e-private-store.sh node-b STORE_PATH PEER_ID}"
+    peer_id="${2:?usage: scripts/e2e-private-store.sh node-b STORE_PATH PEER_ID}"
+    ssh_run b "GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p guix-p2p-e2e-node-b $(quote "$store_path") $(quote "$peer_id")"
+}
+
+prewarm_b() {
+    store_path="${1:?usage: scripts/e2e-private-store.sh prewarm-b STORE_PATH [PACKAGE]}"
+    package="${2:-hello}"
+    ssh_run b "set -eu; guix build --no-grafts $(quote "$package"); guix gc -D $(quote "$store_path"); test ! -e $(quote "$store_path") && echo TARGET_ABSENT_AFTER_DELETE"
+}
+
+daemon_b() {
+    remote='
+set -eu
+cat > /tmp/e2e-guix-wrapper <<'"'"'EOF'"'"'
+#!/bin/sh
+set -eu
+SOCKET=/tmp/guix-p2p-b/guix-p2p.sock
+GUIX_P2P=/tmp/guix-p2p
+REAL_GUIX=/run/current-system/profile/bin/guix
+
+case "${1-}" in
+  substitute)
+    shift
+    case "${1-}" in
+      --query|--substitute)
+        exec "$GUIX_P2P" "$@" --socket "$SOCKET"
+        ;;
+      *)
+        exec "$REAL_GUIX" substitute "$@"
+        ;;
+    esac
+    ;;
+  *)
+    exec "$REAL_GUIX" "$@"
+    ;;
+esac
+EOF
+chmod +x /tmp/e2e-guix-wrapper
+printf "e2e\n" | sudo -S sh -c '"'"'
+mount -o remount,rw /gnu/store
+kill $(cat /tmp/e2e-guix-daemon.pid 2>/dev/null) 2>/dev/null || true
+rm -f /tmp/e2e-guix-daemon.sock /tmp/e2e-guix-daemon.log /tmp/e2e-guix-daemon.pid
+GUIX=/tmp/e2e-guix-wrapper /run/current-system/profile/bin/guix-daemon \
+  --disable-chroot \
+  --build-users-group=guixbuild \
+  --max-jobs=0 \
+  --listen=/tmp/e2e-guix-daemon.sock \
+  > /tmp/e2e-guix-daemon.log 2>&1 &
+echo $! > /tmp/e2e-guix-daemon.pid
+'"'"'
+i=0
+while [ ! -S /tmp/e2e-guix-daemon.sock ]; do
+    i=$((i + 1))
+    if [ "$i" -gt 30 ]; then
+        echo DAEMON_SOCKET_TIMEOUT
+        printf "e2e\n" | sudo -S cat /tmp/e2e-guix-daemon.log
+        exit 1
+    fi
+    sleep 1
+done
+echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
+'
+    ssh_run b "$remote"
+}
+
+prove_b() {
+    store_path="${1:?usage: scripts/e2e-private-store.sh prove-b STORE_PATH [PACKAGE]}"
+    package="${2:-hello}"
+    ssh_run b "set -eu; test ! -e $(quote "$store_path"); GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build --no-grafts $(quote "$package"); test -e $(quote "$store_path") && echo IMPORTED_HELLO_IN_NODE_B_STORE"
+}
+
+tail_log() {
+    node="$1"
+    case "$node" in
+        a) ssh_run a "tail -f /tmp/guix-p2p-a.log" ;;
+        b) ssh_run b "tail -f /tmp/guix-p2p-b.log" ;;
+        daemon-b) ssh_run b "tail -f /tmp/e2e-guix-daemon.log" ;;
+        *) echo "unknown log node: $node" >&2; exit 2 ;;
+    esac
 }
 
 qemu_ports() {
@@ -374,6 +512,34 @@ case "${1:-help}" in
         ;;
     push-binary-b)
         push_binary b
+        ;;
+    wait-ssh)
+        wait_ssh_node a
+        wait_ssh_node b
+        ;;
+    node-a)
+        node_a_helper "${2:-hello}"
+        ;;
+    node-b)
+        node_b_helper "${2:-}" "${3:-}"
+        ;;
+    prewarm-b)
+        prewarm_b "${2:-}" "${3:-hello}"
+        ;;
+    daemon-b)
+        daemon_b
+        ;;
+    prove-b)
+        prove_b "${2:-}" "${3:-hello}"
+        ;;
+    logs-a)
+        tail_log a
+        ;;
+    logs-b)
+        tail_log b
+        ;;
+    daemon-log-b)
+        tail_log daemon-b
         ;;
     *)
         usage >&2
