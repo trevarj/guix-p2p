@@ -441,7 +441,7 @@ hello` on Node B imports the NAR from Node A through `guix-p2p`.
 
 ### See Also
 
-- `docs/private-store-e2e.md` — current private-store VM/image direction.
+- `docs/e2e.md` — current private-store VM/image direction.
 
 ### Deliverables
 
