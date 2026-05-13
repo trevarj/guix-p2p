@@ -88,11 +88,11 @@ broader public network.
 
 ## Dashboard Layout
 
-- [ ] Restructure the dashboard around the known-tester workflow:
+- [x] Restructure the dashboard around the known-tester workflow:
   package picker, active seeds, then network diagnostics.
-- [ ] Make packages and seeds the primary panels.
-- [ ] Move peers, catalog, and builds into secondary diagnostic panels.
-- [ ] Keep events full-width but less dominant by default.
+- [x] Make packages and seeds the primary panels.
+- [x] Move peers, catalog, and builds into secondary diagnostic panels.
+- [x] Keep events full-width but less dominant by default.
 
 ## Dashboard Visual Guide
 

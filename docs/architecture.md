@@ -519,6 +519,9 @@ locally-seeded nars in real time:
 - The dashboard package panel consumes `/api/packages`, supports fuzzy search
   across package name, version, and store path, and shows source, output, store
   path, and seed state. Its row-level seed control calls `POST /api/seeds`.
+- The dashboard layout is organized around the known-tester seeding workflow:
+  packages and active seeds are the primary workspace, peers/catalog/builds are
+  secondary diagnostics, and events stay full-width at the bottom.
 - `POST /api/seeds` accepts `{ "store_path": "/gnu/store/..." }` only when the
   dashboard bind address is loopback. It validates the path, seeds and caches
   the NAR immediately, sends `StartProviding`, emits `SeedAdded`, and persists
