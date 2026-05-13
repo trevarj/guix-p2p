@@ -77,14 +77,14 @@ broader public network.
 
 ## Dashboard Stop Seeding
 
-- [ ] Add a dashboard action to stop seeding an active package/NAR.
-- [ ] Add an API mutation for seed removal.
-- [ ] Remove the matching store path from persisted `seed_paths`.
-- [ ] Stop serving the NAR locally or mark it inactive in the serving index.
-- [ ] Emit `SeedRemoved` after successful removal.
-- [ ] Update the package picker action from `Seed` to `Stop seeding` when
+- [x] Add a dashboard action to stop seeding an active package/NAR.
+- [x] Add an API mutation for seed removal.
+- [x] Remove the matching store path from persisted `seed_paths`.
+- [x] Stop serving the NAR locally or mark it inactive in the serving index.
+- [x] Emit `SeedRemoved` after successful removal.
+- [x] Update the package picker action from `Seed` to `Stop seeding` when
   `seeded` is true.
-- [ ] Document DHT provider withdrawal behavior or expiry limitations.
+- [x] Document DHT provider withdrawal behavior or expiry limitations.
 
 ## Dashboard Layout
 

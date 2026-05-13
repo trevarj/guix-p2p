@@ -522,11 +522,19 @@ locally-seeded nars in real time:
 - The dashboard layout is organized around the known-tester seeding workflow:
   packages and active seeds are the primary workspace, peers/catalog/builds are
   secondary diagnostics, and events stay full-width at the bottom.
+- Active seed rows display the package/store item name when store-path metadata
+  is available, with the full store path and NAR hash available in details.
 - `POST /api/seeds` accepts `{ "store_path": "/gnu/store/..." }` only when the
   dashboard bind address is loopback. It validates the path, seeds and caches
   the NAR immediately, sends `StartProviding`, emits `SeedAdded`, and persists
   the path to the user config `seed_paths` while preserving existing TOML where
   possible.
+- `DELETE /api/seeds/{hash}` stops serving a local NAR, removes its cache file,
+  removes the matching store path from persisted `seed_paths`, and emits
+  `SeedRemoved`. Already-published Kademlia provider records are not actively
+  withdrawn in this implementation; they expire according to libp2p/Kademlia
+  provider-record behavior, while the local node immediately stops serving the
+  removed NAR.
 - The dashboard server indexes catalog events internally, so `/api/catalog`
   works for automation even when no browser WebSocket is connected.
 
@@ -560,5 +568,7 @@ Dashboard API endpoints:
 - `/api/packages` returns installed system and Guix Home packages with seed
   state.
 - `POST /api/seeds` seeds an existing local store path and persists it for
+  future daemon starts.
+- `DELETE /api/seeds/{hash}` stops serving a local seed and removes it from
   future daemon starts.
 - `/api/catalog` and `/api/seeds` return deterministic sorted snapshots.

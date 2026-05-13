@@ -16,7 +16,7 @@ use axum::{
     },
     http::StatusCode,
     response::{Html, IntoResponse, Json},
-    routing::get,
+    routing::{delete, get},
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
@@ -73,6 +73,10 @@ pub enum DashboardEvent {
         nar_hash: String,
         store_path: Option<String>,
         nar_size: u64,
+    },
+    SeedRemoved {
+        nar_hash: String,
+        store_path: Option<String>,
     },
     BlockServed {
         nar_hash: String,
@@ -141,6 +145,7 @@ struct ApiSeededNar {
     nar_size: u64,
     block_count: u32,
     block_size: u32,
+    store_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -220,6 +225,7 @@ pub async fn serve(state: DashboardState, port: u16, bind: &str) {
         .route("/api/build/{hash}", get(api_build_detail))
         .route("/api/catalog", get(api_catalog))
         .route("/api/seeds", get(api_seeds).post(api_seed))
+        .route("/api/seeds/{hash}", delete(api_seed_delete))
         .route("/api/packages", get(api_packages))
         .route("/ws", get(ws_handler))
         .with_state(state);
@@ -333,6 +339,7 @@ async fn api_seeds(State(state): State<DashboardState>) -> Json<Vec<ApiSeededNar
                 nar_size: info.nar_size,
                 block_count: info.block_count,
                 block_size: info.block_size,
+                store_path: info.store_path,
             })
         })
         .collect();
@@ -419,6 +426,37 @@ async fn api_seed(
     Ok(Json(ApiSeedMutation { nar_hash, store_path, nar_size: info.nar_size }))
 }
 
+async fn api_seed_delete(
+    State(state): State<DashboardState>,
+    Path(hash): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    if !state.seed_mutation_allowed {
+        return Err(api_error(
+            StatusCode::FORBIDDEN,
+            "dashboard seed mutation requires a loopback bind address",
+        ));
+    }
+
+    let info = state
+        .nar_store
+        .lock()
+        .unwrap()
+        .remove_seed(&hash)
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "seed not found"))?;
+
+    if let Some(store_path) = &info.store_path {
+        remove_seed_path(store_path).map_err(|e| {
+            api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("persist failed: {e}"))
+        })?;
+    }
+
+    let _ = state
+        .event_bus
+        .send(DashboardEvent::SeedRemoved { nar_hash: hash, store_path: info.store_path });
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn api_build_detail(
     State(state): State<DashboardState>,
     Path(hash): Path<String>,
@@ -463,6 +501,10 @@ fn persist_seed_path(store_path: &str) -> anyhow::Result<()> {
     persist_seed_path_to_config(store_path, &user_config_path())
 }
 
+fn remove_seed_path(store_path: &str) -> anyhow::Result<()> {
+    remove_seed_path_from_config(store_path, &user_config_path())
+}
+
 fn persist_seed_path_to_config(store_path: &str, config_path: &FsPath) -> anyhow::Result<()> {
     let parent =
         config_path.parent().ok_or_else(|| anyhow::anyhow!("config path has no parent"))?;
@@ -480,6 +522,31 @@ fn persist_seed_path_to_config(store_path: &str, config_path: &FsPath) -> anyhow
     if !values.iter().any(|value| value == store_path) {
         values.push(store_path.to_string());
     }
+
+    let mut array = Array::default();
+    for value in values {
+        array.push(value);
+    }
+    doc["seed_paths"] = Item::Value(Value::Array(array));
+    fs::write(config_path, doc.to_string())?;
+    Ok(())
+}
+
+fn remove_seed_path_from_config(store_path: &str, config_path: &FsPath) -> anyhow::Result<()> {
+    let content = match fs::read_to_string(config_path) {
+        Ok(content) => content,
+        Err(_) => return Ok(()),
+    };
+    let mut doc = content.parse::<DocumentMut>().unwrap_or_else(|_| DocumentMut::new());
+    let values = match doc.get("seed_paths").and_then(Item::as_array) {
+        Some(existing) => existing
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|value| *value != store_path)
+            .map(str::to_string)
+            .collect::<Vec<_>>(),
+        None => return Ok(()),
+    };
 
     let mut array = Array::default();
     for value in values {
@@ -953,5 +1020,23 @@ mod tests {
         assert!(content.contains("# user config"));
         assert_eq!(content.matches("/gnu/store/bbbb-new").count(), 1);
         assert!(content.contains("/gnu/store/aaaa-existing"));
+    }
+
+    #[test]
+    fn seed_path_removal_updates_persisted_config() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            "# user config\nseed_paths = [\"/gnu/store/aaaa-keep\", \"/gnu/store/bbbb-remove\"]\n",
+        )
+        .unwrap();
+
+        remove_seed_path_from_config("/gnu/store/bbbb-remove", &config_path).unwrap();
+
+        let content = fs::read_to_string(config_path).unwrap();
+        assert!(content.contains("# user config"));
+        assert!(content.contains("/gnu/store/aaaa-keep"));
+        assert!(!content.contains("/gnu/store/bbbb-remove"));
     }
 }

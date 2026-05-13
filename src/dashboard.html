@@ -99,6 +99,9 @@ main{
 .build-row .path,.seed-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
 .build-row .providers{min-width:60px;text-align:right;color:var(--acc)}
 .seed-row .hash{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7;font-family:var(--font)}
+.seed-row .seed-name{flex:1;min-width:0}
+.seed-row .seed-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seed-row .seed-subtitle{font-size:10px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .seed-row .seed-meta{min-width:100px;text-align:right;font-size:11px;opacity:.8}
 .seed-row .seed-meta .sz{color:var(--fg)}
 .seed-row .seed-meta .bl{color:var(--dim);font-size:10px;margin-left:4px}
@@ -111,6 +114,7 @@ main{
 .package-hint{min-width:150px;text-align:right;font-size:10px;color:var(--dim)}
 .package-row .pkg{flex:1;min-width:0}
 .package-row .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.package-row .source-meta{color:var(--dim);font-size:10px;margin-left:6px}
 .package-row .meta{font-size:10px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .package-row .state{min-width:58px;text-align:right;font-size:10px}
 .package-row.seeded .state{color:var(--ok)}
@@ -405,18 +409,20 @@ function renderPackages(){
   if(!PACKAGES.length){el.innerHTML='<div class="empty">no installed packages found</div>';return}
   if(!arr.length){el.innerHTML='<div class="empty">no packages match</div>';return}
   arr.sort(function(a,b){
-    if(a.seeded!==b.seeded)return a.seeded?-1:1;
     return (a.name||'').localeCompare(b.name||'')
+      ||(a.version||'').localeCompare(b.version||'')
+      ||(a.source||'').localeCompare(b.source||'')
+      ||(a.store_path||'').localeCompare(b.store_path||'')
   });
   var h='';
   arr.slice(0,200).forEach(function(pkg){
     var src=pkg.source==='system'?'sys':(pkg.source==='kernel'?'kern':'home');
     var title=(pkg.name||'?')+' '+(pkg.version||'')+' ['+(pkg.output||'out')+']';
     var state=pkg.seeded?'seeded':'ready';
-    var button=pkg.seeded?'seeded':'seed';
+    var button=pkg.seeded?'stop':'seed';
     h+='<div class="package-row '+(pkg.seeded?'seeded':'')+'" title="'+attr(pkg.store_path||'')+'">'
-      +'<span class="source">'+esc(src)+'</span>'
       +'<span class="pkg"><span class="name">'+esc(title)+'</span>'
+      +'<span class="source-meta">'+esc(src)+'</span>'
       +'<span class="meta">'+esc(pkg.store_path||'')+'</span></span>'
       +'<span class="state">'+esc(state)+'</span>'
       +'<button class="seed-action" onclick="seedPackage(event,\''+jsArg(pkg.store_path||'')+'\')">'+esc(button)+'</button>'
@@ -429,6 +435,11 @@ function renderPackages(){
 function seedPackage(ev,storePath){
   ev.stopPropagation();
   if(!storePath)return;
+  var seeded=PACKAGES.some(function(pkg){return pkg.store_path===storePath&&pkg.seeded});
+  if(seeded){
+    stopPackageSeed(storePath);
+    return;
+  }
   fetch('/api/seeds',{
     method:'POST',
     headers:{'content-type':'application/json'},
@@ -447,6 +458,31 @@ function seedPackage(ev,storePath){
     addEvent('seed-add','*','Seeded '+storePath+' as '+seed.nar_hash.slice(0,16)+'...')
   }).catch(function(err){
     addEvent('dl-fail','x','Seed failed: '+((err&&err.error)||storePath))
+  });
+}
+
+function stopPackageSeed(storePath){
+  var seedHash=null;
+  Object.keys(SEEDS).some(function(hash){
+    if(SEEDS[hash].store_path===storePath){seedHash=hash;return true}
+    return false
+  });
+  if(!seedHash){
+    addEvent('dl-fail','x','Seed hash not loaded for '+storePath);
+    loadSeeds();
+    return;
+  }
+  fetch('/api/seeds/'+encodeURIComponent(seedHash),{method:'DELETE'}).then(function(r){
+    if(!r.ok)return r.json().then(function(body){throw body});
+    delete SEEDS[seedHash];
+    PACKAGES.forEach(function(pkg){
+      if(pkg.store_path===storePath)pkg.seeded=false
+    });
+    renderPackages();
+    renderSeeds();
+    addEvent('seed-add','-','Stopped seeding '+storePath)
+  }).catch(function(err){
+    addEvent('dl-fail','x','Stop seed failed: '+((err&&err.error)||storePath))
   });
 }
 
@@ -476,12 +512,21 @@ function renderSeeds(){
     var sz=fmtSize(s.nar_size||0);
     var bl=s.block_count||'?';
     var bs=s.block_size?fmtSize(s.block_size):'256KB';
+    var seedTitle=s.store_path?storePathName(s.store_path):k.slice(0,24)+'...';
+    var seedSubtitle=s.store_path?s.store_path:k;
     h+='<div class="seed-row" data-hash="'+attr(k)+'" onclick="openSeedDetail(\''+jsArg(k)+'\')">'
-      +'<span class="hash" title="'+attr(k)+'">'+esc(k.slice(0,24)+'...')+'</span>'
+      +'<span class="seed-name"><span class="seed-title">'+esc(seedTitle)+'</span>'
+      +'<span class="seed-subtitle" title="'+attr(seedSubtitle)+'">'+esc(seedSubtitle)+'</span></span>'
       +'<span class="seed-meta"><span class="sz">'+esc(sz)+'</span><span class="bl">'+esc(bl+' x '+bs)+'</span></span>'
       +'</div>';
   });
   el.innerHTML=h;
+}
+
+function storePathName(storePath){
+  if(!storePath)return'?';
+  var base=storePath.split('/').pop()||storePath;
+  return base.replace(/^[0-9a-df-np-sv-z]{32}-/,'')
 }
 
 function openSeedDetail(hash){
@@ -492,6 +537,8 @@ function openSeedDetail(hash){
   var bl=s.block_count||'?';
   var bs=s.block_size?fmtSize(s.block_size):'256KB';
   c.innerHTML='<h2>seeded nar</h2>'
+    +'<div class="field"><label>package</label><span class="val">'+esc(s.store_path?storePathName(s.store_path):'?')+'</span></div>'
+    +'<div class="field"><label>store</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(s.store_path||'?')+'</span></div>'
     +'<div class="field"><label>hash</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(hash)+'</span></div>'
     +'<div class="field"><label>size</label><span class="val">'+esc(sz)+'</span></div>'
     +'<div class="field"><label>blocks</label><span class="val">'+esc(bl+' x '+bs)+'</span></div>'
@@ -622,10 +669,24 @@ function handleEvent(e){
       break;
 
     case 'SeedAdded':
-      SEEDS[e.nar_hash]={nar_size:e.nar_size,block_count:null,block_size:null};
+      SEEDS[e.nar_hash]={nar_size:e.nar_size,block_count:null,block_size:null,store_path:e.store_path};
+      PACKAGES.forEach(function(pkg){
+        if(pkg.store_path===e.store_path)pkg.seeded=true
+      });
       addEvent('seed-add','*','Seed added: '+e.nar_hash.slice(0,16)+'... ('+fmtSize(e.nar_size)+')');
+      renderPackages();
       renderSeeds();
       loadSeeds();
+      break;
+
+    case 'SeedRemoved':
+      delete SEEDS[e.nar_hash];
+      PACKAGES.forEach(function(pkg){
+        if(pkg.store_path===e.store_path)pkg.seeded=false
+      });
+      addEvent('seed-add','-','Seed removed: '+e.nar_hash.slice(0,16)+'...');
+      renderPackages();
+      renderSeeds();
       break;
 
     case 'BlockServed':
@@ -740,7 +801,7 @@ function mergeCatalogEntry(c){
     fetch('/api/seeds').then(function(r){return r.json()}).then(function(ss){
       SEEDS={};
       ss.forEach(function(s){
-        SEEDS[s.nar_hash]={nar_size:s.nar_size,block_count:s.block_count,block_size:s.block_size}
+        SEEDS[s.nar_hash]={nar_size:s.nar_size,block_count:s.block_count,block_size:s.block_size,store_path:s.store_path}
       });
       renderSeeds()
     }).catch(function(){})

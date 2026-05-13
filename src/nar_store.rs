@@ -183,6 +183,20 @@ impl NarStore {
         })
     }
 
+    /// Stop serving a nar and remove the cached nar file from disk.
+    pub fn remove_seed(&mut self, nar_hash_hex: &str) -> Option<SeededNarInfo> {
+        let entry = self.index.remove(nar_hash_hex)?;
+        if let Err(e) = std::fs::remove_file(&entry.path) {
+            tracing::warn!("failed to remove cached nar {}: {}", entry.path.display(), e);
+        }
+        Some(SeededNarInfo {
+            nar_size: entry.nar_size,
+            block_count: entry.block_info.block_count,
+            block_size: self.block_size as u32,
+            store_path: entry.store_path,
+        })
+    }
+
     /// Handle an incoming block request. Returns None if we don't have this nar.
     pub fn handle_request(&self, request: &BlockRequest) -> Option<BlockResponse> {
         match request {
