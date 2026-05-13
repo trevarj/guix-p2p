@@ -524,6 +524,9 @@ locally-seeded nars in real time:
   secondary diagnostics, and events stay full-width at the bottom.
 - Active seed rows display the package/store item name when store-path metadata
   is available, with the full store path and NAR hash available in details.
+  Each active seed row can stop seeding directly by NAR hash, which works even
+  when older cached seeds do not have store-path metadata. Package rows remain
+  seed-only; removal is intentionally centralized in Active Seeds.
 - The transfer path panel is driven by dashboard events and tracks the latest
   observed package/NAR through package observation, narinfo trust, provider
   discovery, block movement, verification/import, and local re-seeding.

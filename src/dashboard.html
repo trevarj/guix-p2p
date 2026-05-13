@@ -107,6 +107,11 @@ main{
 .seed-row .seed-meta{min-width:100px;text-align:right;font-size:11px;opacity:.8}
 .seed-row .seed-meta .sz{color:var(--fg)}
 .seed-row .seed-meta .bl{color:var(--dim);font-size:10px;margin-left:4px}
+.seed-row .stop-seed{
+  background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
+  padding:2px 6px;font-family:var(--font);font-size:10px;cursor:pointer
+}
+.seed-row .stop-seed:hover{border-color:var(--acc);color:var(--err)}
 .package-tools{display:flex;gap:8px;align-items:center;margin-bottom:6px}
 .package-search{
   width:100%;background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
@@ -444,7 +449,7 @@ function renderPackages(){
     var src=pkg.source==='system'?'sys':(pkg.source==='kernel'?'kern':'home');
     var title=(pkg.name||'?')+' '+(pkg.version||'')+' ['+(pkg.output||'out')+']';
     var state=pkg.seeded?'seeded':'ready';
-    var button=pkg.seeded?'stop':'seed';
+    var button=pkg.seeded?'seeded':'seed';
     h+='<div class="package-row '+(pkg.seeded?'seeded':'')+'" title="'+attr(pkg.store_path||'')+'">'
       +'<span class="pkg"><span class="name">'+esc(title)+'</span>'
       +'<span class="source-meta">'+esc(src)+'</span>'
@@ -522,7 +527,7 @@ function seedPackage(ev,storePath){
   if(!storePath)return;
   var seeded=PACKAGES.some(function(pkg){return pkg.store_path===storePath&&pkg.seeded});
   if(seeded){
-    stopPackageSeed(storePath);
+    addEvent('seed-add','!','Already seeded; remove it from Active Seeds');
     return;
   }
   fetch('/api/seeds',{
@@ -546,28 +551,18 @@ function seedPackage(ev,storePath){
   });
 }
 
-function stopPackageSeed(storePath){
-  var seedHash=null;
-  Object.keys(SEEDS).some(function(hash){
-    if(SEEDS[hash].store_path===storePath){seedHash=hash;return true}
-    return false
-  });
-  if(!seedHash){
-    addEvent('dl-fail','x','Seed hash not loaded for '+storePath);
-    loadSeeds();
-    return;
-  }
+function stopSeedByHash(seedHash,storePath){
   fetch('/api/seeds/'+encodeURIComponent(seedHash),{method:'DELETE'}).then(function(r){
     if(!r.ok)return r.json().then(function(body){throw body});
     delete SEEDS[seedHash];
     PACKAGES.forEach(function(pkg){
-      if(pkg.store_path===storePath)pkg.seeded=false
+      if(storePath&&pkg.store_path===storePath)pkg.seeded=false
     });
     renderPackages();
     renderSeeds();
-    addEvent('seed-add','-','Stopped seeding '+storePath)
+    addEvent('seed-add','-','Stopped seeding '+(storePath||seedHash.slice(0,16)+'...'))
   }).catch(function(err){
-    addEvent('dl-fail','x','Stop seed failed: '+((err&&err.error)||storePath))
+    addEvent('dl-fail','x','Stop seed failed: '+((err&&err.error)||storePath||seedHash))
   });
 }
 
@@ -603,6 +598,7 @@ function renderSeeds(){
       +'<span class="seed-name"><span class="seed-title">'+esc(seedTitle)+'</span>'
       +'<span class="seed-subtitle" title="'+attr(seedSubtitle)+'">'+esc(seedSubtitle)+'</span></span>'
       +'<span class="seed-meta"><span class="sz">'+esc(sz)+'</span><span class="bl">'+esc(bl+' x '+bs)+'</span></span>'
+      +'<button class="stop-seed" onclick="event.stopPropagation();stopSeedByHash(\''+jsArg(k)+'\',\''+jsArg(s.store_path||'')+'\')">stop</button>'
       +'</div>';
   });
   el.innerHTML=h;
