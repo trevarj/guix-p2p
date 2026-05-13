@@ -440,7 +440,10 @@ pub fn seed_mutation_allowed_for_bind(bind: &str) -> bool {
 }
 
 fn package_profiles() -> Vec<(String, PathBuf)> {
-    let mut profiles = vec![("system".to_string(), PathBuf::from("/run/current-system/profile"))];
+    let mut profiles = vec![
+        ("system".to_string(), PathBuf::from("/run/current-system/profile")),
+        ("kernel".to_string(), PathBuf::from("/run/current-system/kernel")),
+    ];
     if let Some(home) = env::var_os("HOME") {
         profiles.push(("home".to_string(), PathBuf::from(home).join(".guix-home/profile")));
     }

@@ -386,7 +386,7 @@ function renderPackages(){
   });
   var h='';
   arr.slice(0,200).forEach(function(pkg){
-    var src=pkg.source==='system'?'sys':'home';
+    var src=pkg.source==='system'?'sys':(pkg.source==='kernel'?'kern':'home');
     var title=(pkg.name||'?')+' '+(pkg.version||'')+' ['+(pkg.output||'out')+']';
     var state=pkg.seeded?'seeded':'ready';
     var button=pkg.seeded?'seeded':'seed';

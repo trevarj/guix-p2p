@@ -40,6 +40,7 @@ broader public network.
 - [x] Add `GET /api/packages`.
 - [x] Source packages from:
   - `/run/current-system/profile`
+  - `/run/current-system/kernel`
   - `$HOME/.guix-home/profile`
 - [x] Use `guix package --list-installed --profile=<profile>` without a regex.
   The Guix manual documents the regexp as optional.
@@ -73,6 +74,25 @@ broader public network.
   trigger `StartProviding`.
 - [x] Extend NAR seed metadata to retain optional `store_path` for dashboard
   display and `seeded` matching.
+
+## Dashboard Stop Seeding
+
+- [ ] Add a dashboard action to stop seeding an active package/NAR.
+- [ ] Add an API mutation for seed removal.
+- [ ] Remove the matching store path from persisted `seed_paths`.
+- [ ] Stop serving the NAR locally or mark it inactive in the serving index.
+- [ ] Emit `SeedRemoved` after successful removal.
+- [ ] Update the package picker action from `Seed` to `Stop seeding` when
+  `seeded` is true.
+- [ ] Document DHT provider withdrawal behavior or expiry limitations.
+
+## Dashboard Layout
+
+- [ ] Restructure the dashboard around the known-tester workflow:
+  package picker, active seeds, then network diagnostics.
+- [ ] Make packages and seeds the primary panels.
+- [ ] Move peers, catalog, and builds into secondary diagnostic panels.
+- [ ] Keep events full-width but less dominant by default.
 
 ## Dashboard Visual Guide
 

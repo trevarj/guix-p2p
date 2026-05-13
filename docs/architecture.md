@@ -511,7 +511,8 @@ locally-seeded nars in real time:
 - The `/api/seeds` endpoint returns the full list of seeded nars with size,
   block count, and block size.
 - The `/api/packages` endpoint lists installed packages from
-  `/run/current-system/profile` and `$HOME/.guix-home/profile` using
+  `/run/current-system/profile`, `/run/current-system/kernel`, and
+  `$HOME/.guix-home/profile` using
   `guix package --list-installed --profile=<profile>`. Each entry includes the
   source profile, package name, version, output, store path, and whether that
   store path is already seeded by the local NAR store.
