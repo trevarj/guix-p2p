@@ -110,7 +110,7 @@ broader public network.
 ## Tests And Acceptance
 
 - [x] Unit test `guix package --list-installed` tab-separated parsing.
-- [ ] Unit test missing system/home profiles are skipped cleanly.
+- [x] Unit test missing system/home profiles are skipped cleanly.
 - [x] Unit test `seed_paths` config persistence and deduplication.
 - [x] Unit test non-`/gnu/store` dashboard seed requests are rejected.
 - [x] Unit test localhost-only mutation enforcement.

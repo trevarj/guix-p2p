@@ -478,12 +478,16 @@ pub fn seed_mutation_allowed_for_bind(bind: &str) -> bool {
 }
 
 fn package_profiles() -> Vec<(String, PathBuf)> {
+    package_profiles_for_home(env::var_os("HOME").map(PathBuf::from))
+}
+
+fn package_profiles_for_home(home: Option<PathBuf>) -> Vec<(String, PathBuf)> {
     let mut profiles = vec![
         ("system".to_string(), PathBuf::from("/run/current-system/profile")),
         ("kernel".to_string(), PathBuf::from("/run/current-system/kernel")),
     ];
-    if let Some(home) = env::var_os("HOME") {
-        profiles.push(("home".to_string(), PathBuf::from(home).join(".guix-home/profile")));
+    if let Some(home) = home {
+        profiles.push(("home".to_string(), home.join(".guix-home/profile")));
     }
     profiles
 }
@@ -971,6 +975,36 @@ mod tests {
                 seeded: true,
             }
         );
+    }
+
+    #[test]
+    fn package_profiles_include_system_kernel_and_home_sources() {
+        let profiles = package_profiles_for_home(Some(PathBuf::from("/home/tester")));
+
+        assert_eq!(
+            profiles[0],
+            ("system".to_string(), PathBuf::from("/run/current-system/profile"))
+        );
+        assert_eq!(
+            profiles[1],
+            ("kernel".to_string(), PathBuf::from("/run/current-system/kernel"))
+        );
+        assert_eq!(
+            profiles[2],
+            ("home".to_string(), PathBuf::from("/home/tester/.guix-home/profile"))
+        );
+    }
+
+    #[test]
+    fn missing_package_profiles_are_skipped_cleanly() {
+        let seeded_store_paths = HashSet::new();
+        let packages = installed_packages_from_profile(
+            "missing",
+            FsPath::new("/gnu/store/definitely-not-a-dashboard-test-profile"),
+            &seeded_store_paths,
+        );
+
+        assert!(packages.is_empty());
     }
 
     #[test]
