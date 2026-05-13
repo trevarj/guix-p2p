@@ -50,9 +50,9 @@ broader public network.
   - `output`
   - `store_path`
   - `seeded`
-- [ ] Add a fuzzy-search package picker to the dashboard.
-- [ ] Search across package name, version, and store path.
-- [ ] Show source, package name, version, output, store path, and seed state.
+- [x] Add a fuzzy-search package picker to the dashboard.
+- [x] Search across package name, version, and store path.
+- [x] Show source, package name, version, output, store path, and seed state.
 - [ ] Add a per-row `Seed` action.
 
 ## Dashboard Seed Mutation

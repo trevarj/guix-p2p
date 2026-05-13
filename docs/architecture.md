@@ -515,6 +515,10 @@ locally-seeded nars in real time:
   `guix package --list-installed --profile=<profile>`. Each entry includes the
   source profile, package name, version, output, store path, and whether that
   store path is already seeded by the local NAR store.
+- The dashboard package panel consumes `/api/packages`, supports fuzzy search
+  across package name, version, and store path, and shows source, output, store
+  path, and seed state. The row-level seed control is present but remains a
+  placeholder until `POST /api/seeds` is implemented.
 - The dashboard server indexes catalog events internally, so `/api/catalog`
   works for automation even when no browser WebSocket is connected.
 

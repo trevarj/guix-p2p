@@ -39,7 +39,7 @@ header button{
 }
 header button:hover{border-color:var(--acc)}
 main{
-  display:grid;grid-template-columns:1fr 1fr 1fr 1fr;grid-template-rows:1fr auto;
+  display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;grid-template-rows:1fr auto;
   flex:1;overflow:hidden;gap:0
 }
 .panel{
@@ -69,19 +69,19 @@ main{
 
 @keyframes slidein{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
 
-.peer-row,.build-row,.seed-row{
+.peer-row,.build-row,.seed-row,.package-row{
   display:flex;align-items:center;gap:6px;padding:3px 0;
   border-bottom:1px solid var(--dim);font-size:12px
 }
-.peer-row .flag,.build-row .flag,.seed-row .flag{font-size:14px;min-width:24px}
+.peer-row .flag,.build-row .flag,.seed-row .flag,.package-row .source{font-size:14px;min-width:24px}
 .peer-row .peer-id{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .peer-row .bar,.build-row .bar{flex:1;height:6px;background:var(--bg3)}
 .peer-row .bar-inner,.build-row .bar-inner{height:100%;background:var(--acc)}
 .peer-row .meta{min-width:90px;text-align:right;font-size:11px;opacity:.8}
 .peer-row.offline{opacity:.55}
-.catalog-row,.build-row,.seed-row{cursor:pointer}
-.catalog-row:hover,.build-row:hover,.seed-row:hover{background:var(--bg2)}
-.catalog-row .path,.build-row .path,.seed-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
+.catalog-row,.build-row,.seed-row,.package-row{cursor:pointer}
+.catalog-row:hover,.build-row:hover,.seed-row:hover,.package-row:hover{background:var(--bg2)}
+.catalog-row .path,.build-row .path,.seed-row .path,.package-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
 .catalog-row .size{min-width:70px;text-align:right;font-size:11px;opacity:.6}
 .catalog-row .p2p{min-width:40px;text-align:center;font-size:10px}
 .catalog-row .p2p.yes{color:var(--ok)}
@@ -92,6 +92,21 @@ main{
 .seed-row .seed-meta{min-width:100px;text-align:right;font-size:11px;opacity:.8}
 .seed-row .seed-meta .sz{color:var(--fg)}
 .seed-row .seed-meta .bl{color:var(--dim);font-size:10px;margin-left:4px}
+.package-search{
+  width:100%;background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
+  padding:5px 6px;margin-bottom:6px;font-family:var(--font);font-size:11px
+}
+.package-search:focus{outline:none;border-color:var(--acc)}
+.package-row .pkg{flex:1;min-width:0}
+.package-row .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.package-row .meta{font-size:10px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.package-row .state{min-width:58px;text-align:right;font-size:10px}
+.package-row.seeded .state{color:var(--ok)}
+.package-row .seed-action{
+  background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
+  padding:2px 6px;font-family:var(--font);font-size:10px;cursor:not-allowed
+}
+.package-row.seeded .seed-action{color:var(--dim)}
 
 /* transfer flash animation */
 .seed-row.flash{animation:flash .6s ease}
@@ -132,7 +147,7 @@ main{
 @media (max-width:1100px){
   header{align-items:flex-start;flex-wrap:wrap}
   header .stats{flex-wrap:wrap;gap:10px 16px}
-  main{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr auto}
+  main{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr 1fr auto}
 }
 @media (max-width:720px){
   body{overflow:auto}
@@ -153,6 +168,7 @@ main{
     <div>CONN <span id="connected">0</span></div>
     <div>PEERS <span id="total-peers">0</span></div>
     <div>DHT <span id="dht-entries">0</span></div>
+    <div>PACKAGES <span id="package-count">0</span></div>
     <div>CATALOG <span id="catalog-count">0</span></div>
     <div>SEEDS <span id="seed-count">0</span></div>
     <div>UPTIME <span id="uptime">00:00:00</span></div>
@@ -169,6 +185,11 @@ main{
   <div class="panel catalog-panel">
     <h2>catalog <span class="badge" id="catalog-badge">0</span></h2>
     <div id="catalog-list"><div class="empty">no packages discovered</div></div>
+  </div>
+  <div class="panel packages-panel">
+    <h2>packages <span class="badge" id="package-badge">0</span></h2>
+    <input class="package-search" id="package-search" placeholder="search name, version, store path">
+    <div id="packages-list"><div class="empty">loading packages</div></div>
   </div>
   <div class="panel builds-panel">
     <h2>builds</h2>
@@ -197,6 +218,7 @@ var EVENT_IDX=0;
 var PEERS={};
 var BUILDS={};
 var CATALOG={};
+var PACKAGES=[];
 var SEEDS={};
 var WS=null;
 var WS_RETRY=1000;
@@ -339,6 +361,49 @@ function renderCatalog(){
       +'</div>';
   });
   el.innerHTML=h;
+}
+
+function packageMatches(pkg,q){
+  if(!q)return true;
+  q=q.toLowerCase();
+  return (pkg.name||'').toLowerCase().indexOf(q)>=0
+    ||(pkg.version||'').toLowerCase().indexOf(q)>=0
+    ||(pkg.store_path||'').toLowerCase().indexOf(q)>=0
+}
+
+function renderPackages(){
+  var el=document.getElementById('packages-list');
+  var q=(document.getElementById('package-search').value||'').trim();
+  var arr=PACKAGES.filter(function(pkg){return packageMatches(pkg,q)});
+  document.getElementById('package-count').textContent=PACKAGES.length;
+  document.getElementById('package-badge').textContent=arr.length;
+  if(!PACKAGES.length){el.innerHTML='<div class="empty">no installed packages found</div>';return}
+  if(!arr.length){el.innerHTML='<div class="empty">no packages match</div>';return}
+  arr.sort(function(a,b){
+    if(a.seeded!==b.seeded)return a.seeded?-1:1;
+    return (a.name||'').localeCompare(b.name||'')
+  });
+  var h='';
+  arr.slice(0,200).forEach(function(pkg){
+    var src=pkg.source==='system'?'sys':'home';
+    var title=(pkg.name||'?')+' '+(pkg.version||'')+' ['+(pkg.output||'out')+']';
+    var state=pkg.seeded?'seeded':'ready';
+    var button=pkg.seeded?'seeded':'seed';
+    h+='<div class="package-row '+(pkg.seeded?'seeded':'')+'" title="'+attr(pkg.store_path||'')+'">'
+      +'<span class="source">'+esc(src)+'</span>'
+      +'<span class="pkg"><span class="name">'+esc(title)+'</span>'
+      +'<span class="meta">'+esc(pkg.store_path||'')+'</span></span>'
+      +'<span class="state">'+esc(state)+'</span>'
+      +'<button class="seed-action" onclick="seedPackage(event,\''+jsArg(pkg.store_path||'')+'\')" title="Dashboard seed mutation is the next roadmap slice">'+esc(button)+'</button>'
+      +'</div>';
+  });
+  if(arr.length>200)h+='<div class="empty">showing 200 of '+arr.length+' matches, refine search</div>';
+  el.innerHTML=h;
+}
+
+function seedPackage(ev,storePath){
+  ev.stopPropagation();
+  addEvent('seed-add','!','Dashboard seed mutation is not implemented yet: '+storePath);
 }
 
 function flashSeedRow(narHash){
@@ -637,6 +702,15 @@ function mergeCatalogEntry(c){
     }).catch(function(){})
   };
 
+  function loadPackages(){
+    fetch('/api/packages').then(function(r){return r.json()}).then(function(ps){
+      PACKAGES=ps||[];
+      renderPackages()
+    }).catch(function(){
+      document.getElementById('packages-list').innerHTML='<div class="empty">failed to load packages</div>'
+    })
+  }
+
   function loadCatalog(){
     fetch('/api/catalog').then(function(r){return r.json()}).then(function(cs){
       cs.forEach(function(c){
@@ -649,12 +723,15 @@ function mergeCatalogEntry(c){
   setInterval(loadPeers,10000);
   setInterval(loadBuilds,10000);
   setInterval(loadSeeds,15000);
+  setInterval(loadPackages,30000);
   setInterval(loadCatalog,10000);
 
   loadPeers();
   loadBuilds();
   loadSeeds();
+  loadPackages();
   loadCatalog();
+  document.getElementById('package-search').addEventListener('input',renderPackages);
   connectWS();
 })();
 </script>
