@@ -13,10 +13,10 @@ broader public network.
 - [x] Nodes can use a manually shared bootstrap multiaddr.
 - [x] Explicit `--seed` and `seed_paths` can seed store paths at daemon startup.
 - [x] Successful downloads are cached and re-announced for re-seeding.
-- [ ] Setup docs are complete enough for known testers.
-- [ ] Dashboard can seed packages interactively.
-- [ ] Dashboard clearly shows the live P2P benefit path.
-- [ ] Public network readiness is not claimed yet.
+- [x] Setup docs are complete enough for known testers.
+- [x] Dashboard can seed packages interactively.
+- [x] Dashboard clearly shows the live P2P benefit path.
+- [x] Public network readiness is not claimed yet.
 
 ## Setup Docs
 
@@ -114,7 +114,7 @@ broader public network.
 - [x] Unit test `seed_paths` config persistence and deduplication.
 - [x] Unit test non-`/gnu/store` dashboard seed requests are rejected.
 - [x] Unit test localhost-only mutation enforcement.
-- [ ] API test `GET /api/packages`.
+- [x] API test `GET /api/packages`.
 - [ ] API test `POST /api/seeds` seeds, announces, emits `SeedAdded`, and
   persists config.
 - [x] API test `DELETE /api/seeds/{hash}` removes cached seeds without

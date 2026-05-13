@@ -924,6 +924,24 @@ mod tests {
         assert_eq!(peers[0].bytes_served, 4096);
     }
 
+    #[tokio::test]
+    async fn packages_api_returns_sorted_snapshot() {
+        let (state, _tmp) = dashboard_state();
+
+        let packages = api_packages(State(state)).await.0;
+
+        let mut sorted = packages.clone();
+        sorted.sort_by(|a, b| {
+            a.source
+                .cmp(&b.source)
+                .then_with(|| a.name.cmp(&b.name))
+                .then_with(|| a.version.cmp(&b.version))
+                .then_with(|| a.output.cmp(&b.output))
+                .then_with(|| a.store_path.cmp(&b.store_path))
+        });
+        assert_eq!(packages, sorted);
+    }
+
     #[test]
     fn catalog_upsert_preserves_known_fields_and_latches_p2p_availability() {
         let catalog = Arc::new(Mutex::new(HashMap::new()));
