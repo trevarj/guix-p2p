@@ -115,13 +115,13 @@ broader public network.
 - [x] Unit test non-`/gnu/store` dashboard seed requests are rejected.
 - [x] Unit test localhost-only mutation enforcement.
 - [x] API test `GET /api/packages`.
-- [ ] API test `POST /api/seeds` seeds, announces, emits `SeedAdded`, and
+- [x] API test `POST /api/seeds` seeds, announces, emits `SeedAdded`, and
   persists config.
 - [x] API test `DELETE /api/seeds/{hash}` removes cached seeds without
   store-path metadata.
-- [ ] Run `cargo fmt`.
-- [ ] Run `cargo clippy --all-targets --all-features -- -D warnings`.
-- [ ] Run `cargo test`.
+- [x] Run `cargo fmt`.
+- [x] Run `cargo clippy --all-targets --all-features -- -D warnings`.
+- [x] Run `cargo test`.
 - [ ] Run the strict VM proof from `docs/e2e.md`.
 
 ## Decisions Locked

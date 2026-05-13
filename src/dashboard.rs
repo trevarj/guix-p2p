@@ -409,19 +409,7 @@ async fn api_seed(
         .seed_info(&nar_hash)
         .ok_or_else(|| api_error(StatusCode::INTERNAL_SERVER_ERROR, "seed metadata missing"))?;
 
-    state.cmd_tx.send(SwarmCommand::StartProviding { hash: nar_hash.clone() }).map_err(|e| {
-        api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("failed to announce seed: {e}"))
-    })?;
-
-    persist_seed_path(&store_path).map_err(|e| {
-        api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("persist failed: {e}"))
-    })?;
-
-    let _ = state.event_bus.send(DashboardEvent::SeedAdded {
-        nar_hash: nar_hash.clone(),
-        store_path: Some(store_path.clone()),
-        nar_size: info.nar_size,
-    });
+    complete_seed_mutation(&state, &store_path, &nar_hash, info.nar_size, &user_config_path())?;
 
     Ok(Json(ApiSeedMutation { nar_hash, store_path, nar_size: info.nar_size }))
 }
@@ -437,22 +425,16 @@ async fn api_seed_delete(
         ));
     }
 
-    let info = state
-        .nar_store
-        .lock()
-        .unwrap()
-        .remove_seed(&hash)
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "seed not found"))?;
+    let info = state.nar_store.lock().unwrap().remove_seed(&hash);
+    let store_path = info.and_then(|info| info.store_path);
 
-    if let Some(store_path) = &info.store_path {
+    if let Some(store_path) = &store_path {
         remove_seed_path(store_path).map_err(|e| {
             api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("persist failed: {e}"))
         })?;
     }
 
-    let _ = state
-        .event_bus
-        .send(DashboardEvent::SeedRemoved { nar_hash: hash, store_path: info.store_path });
+    let _ = state.event_bus.send(DashboardEvent::SeedRemoved { nar_hash: hash, store_path });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -471,6 +453,30 @@ async fn api_build_detail(
 
 fn api_error(status: StatusCode, message: &str) -> (StatusCode, Json<ApiError>) {
     (status, Json(ApiError { error: message.to_string() }))
+}
+
+fn complete_seed_mutation(
+    state: &DashboardState,
+    store_path: &str,
+    nar_hash: &str,
+    nar_size: u64,
+    config_path: &FsPath,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    state.cmd_tx.send(SwarmCommand::StartProviding { hash: nar_hash.to_string() }).map_err(
+        |e| api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("failed to announce seed: {e}")),
+    )?;
+
+    persist_seed_path_to_config(store_path, config_path).map_err(|e| {
+        api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("persist failed: {e}"))
+    })?;
+
+    let _ = state.event_bus.send(DashboardEvent::SeedAdded {
+        nar_hash: nar_hash.to_string(),
+        store_path: Some(store_path.to_string()),
+        nar_size,
+    });
+
+    Ok(())
 }
 
 pub fn seed_mutation_allowed_for_bind(bind: &str) -> bool {
@@ -499,10 +505,6 @@ fn user_config_path() -> PathBuf {
         let home = env::var("HOME").unwrap_or_else(|_| "/tmp".into());
         PathBuf::from(home).join(".config/guix-p2p/config.toml")
     }
-}
-
-fn persist_seed_path(store_path: &str) -> anyhow::Result<()> {
-    persist_seed_path_to_config(store_path, &user_config_path())
 }
 
 fn remove_seed_path(store_path: &str) -> anyhow::Result<()> {
@@ -1072,6 +1074,47 @@ mod tests {
 
         assert_eq!(status, StatusCode::NO_CONTENT);
         assert!(!state.nar_store.lock().unwrap().has_nar(&nar_hash));
+    }
+
+    #[tokio::test]
+    async fn seed_delete_api_treats_missing_seed_as_already_removed() {
+        let (state, _tmp) = dashboard_state();
+
+        let status = api_seed_delete(State(state), Path("abcd".repeat(16))).await.unwrap();
+
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn seed_completion_announces_emits_and_persists_config() {
+        let (mut state, tmp) = dashboard_state();
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+        state.cmd_tx = cmd_tx;
+        let mut event_rx = state.event_bus.subscribe();
+        let config_path = tmp.path().join("config.toml");
+        let nar_hash = "abcd".repeat(16);
+        let store_path = "/gnu/store/abcd-package";
+
+        complete_seed_mutation(&state, store_path, &nar_hash, 42, &config_path).unwrap();
+
+        match cmd_rx.recv().await.unwrap() {
+            SwarmCommand::StartProviding { hash } => assert_eq!(hash, nar_hash),
+            other => panic!("unexpected swarm command: {other:?}"),
+        }
+        match event_rx.recv().await.unwrap() {
+            DashboardEvent::SeedAdded {
+                nar_hash: event_hash,
+                store_path: event_path,
+                nar_size,
+            } => {
+                assert_eq!(event_hash, nar_hash);
+                assert_eq!(event_path.as_deref(), Some(store_path));
+                assert_eq!(nar_size, 42);
+            },
+            other => panic!("unexpected dashboard event: {other:?}"),
+        }
+        let content = fs::read_to_string(config_path).unwrap();
+        assert!(content.contains(store_path));
     }
 
     #[test]

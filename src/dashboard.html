@@ -560,6 +560,7 @@ function stopSeedByHash(seedHash,storePath){
     });
     renderPackages();
     renderSeeds();
+    loadSeeds();
     addEvent('seed-add','-','Stopped seeding '+(storePath||seedHash.slice(0,16)+'...'))
   }).catch(function(err){
     addEvent('dl-fail','x','Stop seed failed: '+((err&&err.error)||storePath||seedHash))
