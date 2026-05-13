@@ -70,6 +70,55 @@ REAL_GUIX="$(command -v guix)" \
 scripts/guix-wrapper.sh build hello
 ```
 
+## Setup For Known Testers
+
+Build from a development shell:
+
+```sh
+guix shell -m manifest.scm
+cargo build --release
+```
+
+Start a daemon with an explicit cache directory, relay socket, and dashboard:
+
+```sh
+target/release/guix-p2p --daemon \
+    --listen-addr /ip4/0.0.0.0/udp/6881/quic-v1 \
+    --cache-dir /var/cache/guix-p2p \
+    --socket /var/cache/guix-p2p/guix-p2p.sock \
+    --dashboard \
+    --dashboard-bind 127.0.0.1 \
+    --dashboard-port 3030
+```
+
+If another tester is acting as a bootstrap node, ask them for their full
+multiaddr and pass it as `bootstrap_peers` in `~/.config/guix-p2p/config.toml`:
+
+```toml
+bootstrap_peers = "/ip4/203.0.113.10/udp/6881/quic-v1/p2p/12D3KooW..."
+```
+
+Use the wrapper flow to route a local Guix build through the daemon:
+
+```sh
+GUIX_P2P_SOCKET=/var/cache/guix-p2p/guix-p2p.sock \
+GUIX_P2P_BIN="$PWD/target/release/guix-p2p" \
+REAL_GUIX="$(command -v guix)" \
+scripts/guix-wrapper.sh build hello
+```
+
+The maintained strict validation flow is documented in
+[docs/e2e.md](docs/e2e.md). It uses disposable Guix System VMs with separate
+stores and proves the substitute import path end to end.
+
+Known public-network gaps:
+
+- Stable bootstrap infrastructure is not provided yet.
+- Guix packaging and channel distribution are not finished.
+- Remote dashboard mutation is not authenticated.
+- Operational support expectations are still for known testers, not a public
+  network.
+
 ## Validation
 
 The strict end-to-end proof uses disposable Guix System VMs with separate

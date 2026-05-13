@@ -20,16 +20,16 @@ broader public network.
 
 ## Setup Docs
 
-- [ ] Add a README `Setup` section for known testers.
-- [ ] Document the current install path: `guix shell -m manifest.scm` plus
+- [x] Add a README `Setup` section for known testers.
+- [x] Document the current install path: `guix shell -m manifest.scm` plus
   `cargo build --release`.
-- [ ] Document how to configure `bootstrap_peers` from a manually shared
+- [x] Document how to configure `bootstrap_peers` from a manually shared
   bootstrap multiaddr.
-- [ ] Document how to run `guix-p2p --daemon --dashboard` with cache and socket
+- [x] Document how to run `guix-p2p --daemon --dashboard` with cache and socket
   paths.
-- [ ] Document the current `scripts/guix-wrapper.sh` substitute flow.
-- [ ] Link strict validation to `docs/e2e.md`.
-- [ ] State known public-network gaps:
+- [x] Document the current `scripts/guix-wrapper.sh` substitute flow.
+- [x] Link strict validation to `docs/e2e.md`.
+- [x] State known public-network gaps:
   - stable bootstrap infrastructure
   - Guix packaging/channel story
   - authenticated remote dashboard mutation
