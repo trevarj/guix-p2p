@@ -447,7 +447,7 @@ function renderPackages(){
   var h='';
   arr.slice(0,200).forEach(function(pkg){
     var src=pkg.source==='system'?'sys':(pkg.source==='kernel'?'kern':'home');
-    var title=(pkg.name||'?')+' '+(pkg.version||'')+' ['+(pkg.output||'out')+']';
+    var title=(pkg.name||'?')+' '+(pkg.version||'');
     var state=pkg.seeded?'seeded':'ready';
     var button=pkg.seeded?'seeded':'seed';
     h+='<div class="package-row '+(pkg.seeded?'seeded':'')+'" title="'+attr(pkg.store_path||'')+'">'

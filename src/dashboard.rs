@@ -428,13 +428,7 @@ async fn api_seed_delete(
     let info = state.nar_store.lock().unwrap().remove_seed(&hash);
     let store_path = info.and_then(|info| info.store_path);
 
-    if let Some(store_path) = &store_path {
-        remove_seed_path(store_path).map_err(|e| {
-            api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("persist failed: {e}"))
-        })?;
-    }
-
-    let _ = state.event_bus.send(DashboardEvent::SeedRemoved { nar_hash: hash, store_path });
+    complete_seed_removal(&state, &hash, store_path, &user_config_path());
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -479,6 +473,23 @@ fn complete_seed_mutation(
     Ok(())
 }
 
+fn complete_seed_removal(
+    state: &DashboardState,
+    nar_hash: &str,
+    store_path: Option<String>,
+    config_path: &FsPath,
+) {
+    if let Some(path) = &store_path
+        && let Err(e) = remove_seed_path_from_config(path, config_path)
+    {
+        tracing::warn!("failed to remove seed path from config: {}", e);
+    }
+
+    let _ = state
+        .event_bus
+        .send(DashboardEvent::SeedRemoved { nar_hash: nar_hash.to_string(), store_path });
+}
+
 pub fn seed_mutation_allowed_for_bind(bind: &str) -> bool {
     bind.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
@@ -505,10 +516,6 @@ fn user_config_path() -> PathBuf {
         let home = env::var("HOME").unwrap_or_else(|_| "/tmp".into());
         PathBuf::from(home).join(".config/guix-p2p/config.toml")
     }
-}
-
-fn remove_seed_path(store_path: &str) -> anyhow::Result<()> {
-    remove_seed_path_from_config(store_path, &user_config_path())
 }
 
 fn persist_seed_path_to_config(store_path: &str, config_path: &FsPath) -> anyhow::Result<()> {
@@ -1077,12 +1084,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn seed_delete_api_removes_seed_with_store_metadata_and_emits_event() {
+        let (state, _tmp) = dashboard_state();
+        let mut event_rx = state.event_bus.subscribe();
+        let nar_hash = "abcd".repeat(16);
+        let store_path = "/gnu/store/abcd-package";
+        {
+            let mut store = state.nar_store.lock().unwrap();
+            store
+                .save_with_store_path(&nar_hash, b"nar bytes", Some(store_path.to_string()))
+                .unwrap();
+            assert!(store.has_nar(&nar_hash));
+        }
+
+        let status = api_seed_delete(State(state.clone()), Path(nar_hash.clone())).await.unwrap();
+
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert!(!state.nar_store.lock().unwrap().has_nar(&nar_hash));
+        match event_rx.recv().await.unwrap() {
+            DashboardEvent::SeedRemoved { nar_hash: event_hash, store_path: event_path } => {
+                assert_eq!(event_hash, nar_hash);
+                assert_eq!(event_path.as_deref(), Some(store_path));
+            },
+            other => panic!("unexpected dashboard event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn seed_delete_api_treats_missing_seed_as_already_removed() {
         let (state, _tmp) = dashboard_state();
 
         let status = api_seed_delete(State(state), Path("abcd".repeat(16))).await.unwrap();
 
         assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn seed_removal_ignores_config_cleanup_failures_after_local_remove() {
+        let (state, tmp) = dashboard_state();
+        let config_path = tmp.path().join("missing-parent/config.toml");
+        let nar_hash = "abcd".repeat(16);
+        let store_path = Some("/gnu/store/abcd-package".to_string());
+
+        complete_seed_removal(&state, &nar_hash, store_path, &config_path);
     }
 
     #[tokio::test]
