@@ -122,7 +122,7 @@ broader public network.
 - [x] Run `cargo fmt`.
 - [x] Run `cargo clippy --all-targets --all-features -- -D warnings`.
 - [x] Run `cargo test`.
-- [ ] Run the strict VM proof from `docs/e2e.md`.
+- [x] Run the strict VM proof from `docs/e2e.md`.
 
 ## Decisions Locked
 
