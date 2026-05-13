@@ -446,6 +446,13 @@ qcow2 Guix System base image and auto-creates named node disks from it. Any
 node can act as bootstrap, seeder, or fetcher for a scenario. Its state
 defaults to `target/guix-p2p-e2e`.
 
+VM nodes are assigned independent host-side port ranges for SSH (2221+),
+dashboard (3031+), and P2P (6881+). Each port type is allocated separately so
+that an occupied port in one range does not cause other ranges to skip. Inside
+each VM, the dashboard and P2P daemon always listen on fixed guest ports (3031
+and 6881 respectively), and QEMU host forwarding maps the unique host-side port
+to the fixed guest port.
+
 ### Future: Upstream Guile Patch
 
 If upstream merges a patch to `guix/scripts/substitute.scm`, the PATH

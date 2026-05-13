@@ -699,24 +699,25 @@ impl VmRegistry {
     }
 
     fn allocate_ports(&self) -> (u16, u16, u16) {
-        let mut ssh = 2221;
-        let mut dashboard = 3031;
-        let mut p2p = 6881;
-        loop {
-            let used = self.nodes.iter().any(|node| {
-                node.ssh_port == ssh || node.dashboard_port == dashboard || node.p2p_port == p2p
-            });
-            if !used
-                && tcp_port_available(ssh)
-                && tcp_port_available(dashboard)
-                && tcp_port_available(p2p)
-            {
-                return (ssh, dashboard, p2p);
-            }
-            ssh += 1;
-            dashboard += 1;
-            p2p += 1;
-        }
+        // Allocate each port type independently so that an occupied port in
+        // one range (e.g. SSH) does not cause the other ranges (dashboard,
+        // P2P) to skip over perfectly available ports.
+        const SSH_BASE: u16 = 2221;
+        const DASHBOARD_BASE: u16 = 3031;
+        const P2P_BASE: u16 = 6881;
+
+        let ssh = find_free_port(SSH_BASE, |p| self.port_used_by_node(p) || !tcp_port_available(p));
+        let dashboard =
+            find_free_port(DASHBOARD_BASE, |p| self.port_used_by_node(p) || !tcp_port_available(p));
+        let p2p = find_free_port(P2P_BASE, |p| self.port_used_by_node(p) || !tcp_port_available(p));
+
+        (ssh, dashboard, p2p)
+    }
+
+    fn port_used_by_node(&self, port: u16) -> bool {
+        self.nodes.iter().any(|node| {
+            node.ssh_port == port || node.dashboard_port == port || node.p2p_port == port
+        })
     }
 
     fn latest_seed(&self) -> anyhow::Result<(&VmNode, &VmSeed)> {
@@ -2522,6 +2523,15 @@ fn tcp_port_available(port: u16) -> bool {
     std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
+fn find_free_port(start: u16, occupied: impl Fn(u16) -> bool) -> u16 {
+    for port in start..60000 {
+        if !occupied(port) {
+            return port;
+        }
+    }
+    panic!("no free port found starting from {start}");
+}
+
 fn is_pid_running(pid: Option<u32>) -> bool {
     let Some(pid) = pid else {
         return false;
@@ -3143,5 +3153,47 @@ mod tests {
             registry.bootstrap_multiaddr().unwrap().as_deref(),
             Some("/ip4/10.0.2.2/tcp/6881/p2p/12D3KooWbootstrap")
         );
+    }
+
+    #[test]
+    fn port_used_by_node_detects_cross_field_conflicts() {
+        let registry = VmRegistry {
+            default_bootstrap: None,
+            nodes: vec![
+                VmNode {
+                    name: "Bootstrap".to_string(),
+                    slug: "bootstrap".to_string(),
+                    ssh_port: 2221,
+                    dashboard_port: 3031,
+                    p2p_port: 6881,
+                    disk: PathBuf::from("bootstrap.qcow2"),
+                    pid: None,
+                    last_seed: None,
+                    last_fetch: None,
+                },
+                VmNode {
+                    name: "Alice".to_string(),
+                    slug: "alice".to_string(),
+                    ssh_port: 2222,
+                    dashboard_port: 3032,
+                    p2p_port: 6882,
+                    disk: PathBuf::from("alice.qcow2"),
+                    pid: None,
+                    last_seed: None,
+                    last_fetch: None,
+                },
+            ],
+        };
+        // port_used_by_node should detect all assigned ports across all fields.
+        assert!(registry.port_used_by_node(2221));
+        assert!(registry.port_used_by_node(3031));
+        assert!(registry.port_used_by_node(6881));
+        assert!(registry.port_used_by_node(2222));
+        assert!(registry.port_used_by_node(3032));
+        assert!(registry.port_used_by_node(6882));
+        // Unassigned ports should return false.
+        assert!(!registry.port_used_by_node(2223));
+        assert!(!registry.port_used_by_node(3033));
+        assert!(!registry.port_used_by_node(6883));
     }
 }

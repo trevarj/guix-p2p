@@ -112,4 +112,6 @@ Important files:
   `GUIX_P2P_E2E_ENABLE_KVM=false` is set.
 - Dashboard forwarding is enabled by default. Disable it with
   `--forward-dashboard=false` or `GUIX_P2P_E2E_FORWARD_DASHBOARD=false`.
+  Each VM node gets a unique host-side dashboard port (3031, 3032, ...) mapped
+  to guest port 3031 inside the VM.
 - The VM login remains `e2e:e2e`.
