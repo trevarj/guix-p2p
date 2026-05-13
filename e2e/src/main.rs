@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{os::unix::process::CommandExt, path::PathBuf};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -845,7 +845,11 @@ fn vm_run_node(config: &VmConfig, node: &VmNode) -> anyhow::Result<()> {
         std::fs::OpenOptions::new().create(true).truncate(true).write(true).open(&log_path)?;
     let stderr = log.try_clone()?;
     let mut command = qemu_command(config, node, &serial)?;
-    command.stdout(std::process::Stdio::from(log)).stderr(std::process::Stdio::from(stderr));
+    command.process_group(0);
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(log))
+        .stderr(std::process::Stdio::from(stderr));
     tracing::info!(
         "starting {}; qemu log={} serial={}",
         node.name,
@@ -892,6 +896,8 @@ fn qemu_command(
         "-smp".to_string(),
         config.cpus.to_string(),
         "-nographic".to_string(),
+        "-monitor".to_string(),
+        "none".to_string(),
         "-serial".to_string(),
         format!("file:{}", serial.display()),
         "-drive".to_string(),
