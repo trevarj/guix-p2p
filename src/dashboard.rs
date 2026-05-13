@@ -217,24 +217,28 @@ pub async fn serve(state: DashboardState, port: u16, bind: &str) {
         maintain_catalog(catalog_state).await;
     });
 
-    let app = Router::new()
-        .route("/", get(index_html))
-        .route("/api/status", get(api_status))
-        .route("/api/peers", get(api_peers))
-        .route("/api/builds", get(api_builds))
-        .route("/api/build/{hash}", get(api_build_detail))
-        .route("/api/catalog", get(api_catalog))
-        .route("/api/seeds", get(api_seeds).post(api_seed))
-        .route("/api/seeds/{hash}", delete(api_seed_delete))
-        .route("/api/packages", get(api_packages))
-        .route("/ws", get(ws_handler))
-        .with_state(state);
+    let app = dashboard_router(state);
 
     tracing::info!("Dashboard listening on http://{}", addr);
 
     let listener =
         tokio::net::TcpListener::bind(addr).await.expect("failed to bind dashboard port");
     axum::serve(listener, app).await.expect("dashboard server error");
+}
+
+fn dashboard_router(state: DashboardState) -> Router {
+    Router::new()
+        .route("/", get(index_html))
+        .route("/api/status", get(api_status))
+        .route("/api/peers", get(api_peers))
+        .route("/api/builds", get(api_builds))
+        .route("/api/build/:hash", get(api_build_detail))
+        .route("/api/catalog", get(api_catalog))
+        .route("/api/seeds", get(api_seeds).post(api_seed))
+        .route("/api/seeds/:hash", delete(api_seed_delete))
+        .route("/api/packages", get(api_packages))
+        .route("/ws", get(ws_handler))
+        .with_state(state)
 }
 
 async fn index_html() -> Html<&'static str> {
@@ -864,6 +868,9 @@ pub fn country_flag(code: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use axum::http::{Method, Request};
+    use tower::ServiceExt;
+
     use super::*;
     use crate::{
         connection::{ConnectionConfig, ConnectionManager},
@@ -1117,6 +1124,22 @@ mod tests {
         let status = api_seed_delete(State(state), Path("abcd".repeat(16))).await.unwrap();
 
         assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn seed_delete_route_matches_hash_path() {
+        let (state, _tmp) = dashboard_state();
+        let app = dashboard_router(state);
+        let hash = "abcd".repeat(16);
+        let request = Request::builder()
+            .method(Method::DELETE)
+            .uri(format!("/api/seeds/{hash}"))
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 
     #[tokio::test]
