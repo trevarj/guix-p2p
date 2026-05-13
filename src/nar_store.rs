@@ -24,7 +24,7 @@ use crate::swarm::{
 pub struct NarStore {
     cache_dir: PathBuf,
     block_size: usize,
-    /// In-memory index: nar_hash_hex -> (file_path, nar_size, block_info)
+    /// In-memory index: nar_hash_hex -> local nar data and optional store path metadata.
     index: HashMap<String, NarEntry>,
 }
 
@@ -32,6 +32,7 @@ struct NarEntry {
     path: PathBuf,
     nar_size: u64,
     block_info: BlockInfo,
+    store_path: Option<String>,
 }
 
 /// Summary info for a seeded nar, used by the dashboard API.
@@ -40,6 +41,7 @@ pub struct SeededNarInfo {
     pub nar_size: u64,
     pub block_count: u32,
     pub block_size: u32,
+    pub store_path: Option<String>,
 }
 
 impl NarStore {
@@ -95,7 +97,7 @@ impl NarStore {
                 nar_size,
                 block_info.block_count,
             );
-            self.index.insert(stem, NarEntry { path, nar_size, block_info });
+            self.index.insert(stem, NarEntry { path, nar_size, block_info, store_path: None });
         }
 
         tracing::info!("nar store: {} nars indexed", self.index.len());
@@ -103,6 +105,16 @@ impl NarStore {
 
     /// Save a nar to the store after a successful download.
     pub fn save(&mut self, nar_hash_hex: &str, nar_data: &[u8]) -> anyhow::Result<()> {
+        self.save_with_store_path(nar_hash_hex, nar_data, None)
+    }
+
+    /// Save a nar and retain the originating store path when it is known.
+    pub fn save_with_store_path(
+        &mut self,
+        nar_hash_hex: &str,
+        nar_data: &[u8],
+        store_path: Option<String>,
+    ) -> anyhow::Result<()> {
         let path = self.cache_dir.join(format!("{}.nar", nar_hash_hex));
         let mut f = std::fs::File::create(&path).context("failed to create nar file")?;
         f.write_all(nar_data).context("failed to write nar data")?;
@@ -117,7 +129,8 @@ impl NarStore {
             block_info.block_count,
         );
 
-        self.index.insert(nar_hash_hex.to_string(), NarEntry { path, nar_size, block_info });
+        self.index
+            .insert(nar_hash_hex.to_string(), NarEntry { path, nar_size, block_info, store_path });
         Ok(())
     }
 
@@ -127,12 +140,15 @@ impl NarStore {
         let nar_hash_hex = compute_nar_hash(store_path).context("failed to compute nar hash")?;
 
         if self.index.contains_key(&nar_hash_hex) {
+            if let Some(entry) = self.index.get_mut(&nar_hash_hex) {
+                entry.store_path.get_or_insert_with(|| store_path.to_string());
+            }
             tracing::info!("nar already seeded: {}..", &nar_hash_hex[..16]);
             return Ok(nar_hash_hex);
         }
 
         let nar_data = export_nar(store_path).context("failed to export nar")?;
-        self.save(&nar_hash_hex, &nar_data)?;
+        self.save_with_store_path(&nar_hash_hex, &nar_data, Some(store_path.to_string()))?;
         Ok(nar_hash_hex)
     }
 
@@ -163,6 +179,7 @@ impl NarStore {
             nar_size: entry.nar_size,
             block_count: entry.block_info.block_count,
             block_size: self.block_size as u32,
+            store_path: entry.store_path.clone(),
         })
     }
 

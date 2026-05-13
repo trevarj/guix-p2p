@@ -901,7 +901,9 @@ async fn try_swarm_substitute(
                 let mut store = nar_store.lock().unwrap();
                 if store.has_nar(&nar_hash_hex) {
                     tracing::debug!("nar already in store, skipping save");
-                } else if let Err(e) = store.save(&nar_hash_hex, &nar_data) {
+                } else if let Err(e) =
+                    store.save_with_store_path(&nar_hash_hex, &nar_data, Some(store_path.clone()))
+                {
                     tracing::warn!("failed to save nar to store for re-seeding: {}", e);
                 } else {
                     drop(store);

@@ -37,13 +37,13 @@ broader public network.
 
 ## Dashboard Package Seeding
 
-- [ ] Add `GET /api/packages`.
-- [ ] Source packages from:
+- [x] Add `GET /api/packages`.
+- [x] Source packages from:
   - `/run/current-system/profile`
   - `$HOME/.guix-home/profile`
-- [ ] Use `guix package --list-installed --profile=<profile>` without a regex.
+- [x] Use `guix package --list-installed --profile=<profile>` without a regex.
   The Guix manual documents the regexp as optional.
-- [ ] Return package entries with:
+- [x] Return package entries with:
   - `source`
   - `name`
   - `version`
@@ -71,7 +71,7 @@ broader public network.
 - [ ] Add `toml_edit` to preserve existing user config formatting/comments.
 - [ ] Extend dashboard state with a `SwarmCommand` sender so new seeds can
   trigger `StartProviding`.
-- [ ] Extend NAR seed metadata to retain optional `store_path` for dashboard
+- [x] Extend NAR seed metadata to retain optional `store_path` for dashboard
   display and `seeded` matching.
 
 ## Dashboard Visual Guide
@@ -89,7 +89,7 @@ broader public network.
 
 ## Tests And Acceptance
 
-- [ ] Unit test `guix package --list-installed` tab-separated parsing.
+- [x] Unit test `guix package --list-installed` tab-separated parsing.
 - [ ] Unit test missing system/home profiles are skipped cleanly.
 - [ ] Unit test `seed_paths` config persistence and deduplication.
 - [ ] Unit test non-`/gnu/store` dashboard seed requests are rejected.

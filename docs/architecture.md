@@ -510,6 +510,11 @@ locally-seeded nars in real time:
   after downloads.
 - The `/api/seeds` endpoint returns the full list of seeded nars with size,
   block count, and block size.
+- The `/api/packages` endpoint lists installed packages from
+  `/run/current-system/profile` and `$HOME/.guix-home/profile` using
+  `guix package --list-installed --profile=<profile>`. Each entry includes the
+  source profile, package name, version, output, store path, and whether that
+  store path is already seeded by the local NAR store.
 - The dashboard server indexes catalog events internally, so `/api/catalog`
   works for automation even when no browser WebSocket is connected.
 
@@ -540,4 +545,6 @@ Dashboard API endpoints:
 - `/api/peers` returns full peer ids and reputation counters.
 - `/api/builds` returns observed builds with a `lookup_key` for detail links.
 - `/api/build/{hash}` accepts either the registry lookup key or the nar hash.
+- `/api/packages` returns installed system and Guix Home packages with seed
+  state.
 - `/api/catalog` and `/api/seeds` return deterministic sorted snapshots.

@@ -211,10 +211,11 @@ async fn main() -> anyhow::Result<()> {
         let store = nar_store.lock().unwrap();
         for hash in store.seeded_hashes() {
             let info = store.seed_info(&hash);
-            let nar_size = info.map_or(0, |i| i.nar_size);
+            let nar_size = info.as_ref().map_or(0, |i| i.nar_size);
+            let store_path = info.and_then(|i| i.store_path);
             let _ = event_tx.send(dashboard::DashboardEvent::SeedAdded {
                 nar_hash: hash.clone(),
-                store_path: None,
+                store_path,
                 nar_size,
             });
         }

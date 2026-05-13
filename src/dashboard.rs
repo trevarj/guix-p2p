@@ -1,6 +1,9 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
+    env,
     net::SocketAddr,
+    path::{Path as FsPath, PathBuf},
+    process::Command,
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -147,6 +150,16 @@ struct ApiCatalogEntry {
     p2p_available: bool,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct ApiPackage {
+    source: String,
+    name: String,
+    version: String,
+    output: String,
+    store_path: String,
+    seeded: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct CatalogItem {
     hash_part: String,
@@ -186,6 +199,7 @@ pub async fn serve(state: DashboardState, port: u16, bind: &str) {
         .route("/api/build/{hash}", get(api_build_detail))
         .route("/api/catalog", get(api_catalog))
         .route("/api/seeds", get(api_seeds))
+        .route("/api/packages", get(api_packages))
         .route("/ws", get(ws_handler))
         .with_state(state);
 
@@ -305,6 +319,32 @@ async fn api_seeds(State(state): State<DashboardState>) -> Json<Vec<ApiSeededNar
     Json(seeds)
 }
 
+async fn api_packages(State(state): State<DashboardState>) -> Json<Vec<ApiPackage>> {
+    let seeded_store_paths: HashSet<String> = {
+        let store = state.nar_store.lock().unwrap();
+        store
+            .seeded_hashes()
+            .into_iter()
+            .filter_map(|hash| store.seed_info(&hash).and_then(|info| info.store_path))
+            .collect()
+    };
+
+    let mut packages = Vec::new();
+    for (source, profile) in package_profiles() {
+        packages.extend(installed_packages_from_profile(&source, &profile, &seeded_store_paths));
+    }
+    packages.sort_by(|a, b| {
+        a.source
+            .cmp(&b.source)
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.version.cmp(&b.version))
+            .then_with(|| a.output.cmp(&b.output))
+            .then_with(|| a.store_path.cmp(&b.store_path))
+    });
+
+    Json(packages)
+}
+
 async fn api_build_detail(
     State(state): State<DashboardState>,
     Path(hash): Path<String>,
@@ -315,6 +355,83 @@ async fn api_build_detail(
         .or_else(|| reg.values().find(|build| build.nar_hash == hash).cloned())
         .map(Json)
         .ok_or(StatusCode::NOT_FOUND)
+}
+
+fn package_profiles() -> Vec<(String, PathBuf)> {
+    let mut profiles = vec![("system".to_string(), PathBuf::from("/run/current-system/profile"))];
+    if let Some(home) = env::var_os("HOME") {
+        profiles.push(("home".to_string(), PathBuf::from(home).join(".guix-home/profile")));
+    }
+    profiles
+}
+
+fn installed_packages_from_profile(
+    source: &str,
+    profile: &FsPath,
+    seeded_store_paths: &HashSet<String>,
+) -> Vec<ApiPackage> {
+    if !profile.exists() {
+        return Vec::new();
+    }
+
+    let output = Command::new("guix")
+        .arg("package")
+        .arg("--list-installed")
+        .arg(format!("--profile={}", profile.display()))
+        .output();
+
+    let output = match output {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
+            tracing::warn!(
+                "failed to list Guix packages for {} profile {}: status {}",
+                source,
+                profile.display(),
+                output.status,
+            );
+            return Vec::new();
+        },
+        Err(e) => {
+            tracing::warn!(
+                "failed to run guix package for {} profile {}: {}",
+                source,
+                profile.display(),
+                e,
+            );
+            return Vec::new();
+        },
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .filter_map(|line| parse_installed_package(source, line, seeded_store_paths))
+        .collect()
+}
+
+fn parse_installed_package(
+    source: &str,
+    line: &str,
+    seeded_store_paths: &HashSet<String>,
+) -> Option<ApiPackage> {
+    let mut fields = line.split('\t');
+    let name = fields.next()?.trim();
+    let version = fields.next()?.trim();
+    let output = fields.next()?.trim();
+    let store_path = fields.next()?.trim();
+
+    if name.is_empty() || version.is_empty() || output.is_empty() || store_path.is_empty() {
+        return None;
+    }
+
+    Some(ApiPackage {
+        source: source.to_string(),
+        name: name.to_string(),
+        version: version.to_string(),
+        output: output.to_string(),
+        store_path: store_path.to_string(),
+        seeded: seeded_store_paths.contains(store_path),
+    })
 }
 
 async fn ws_handler(
@@ -637,5 +754,28 @@ mod tests {
         assert_eq!(item.nar_size, Some(128));
         assert_eq!(item.nar_hash.as_deref(), Some("sha256:abcdef"));
         assert!(item.p2p_available);
+    }
+
+    #[test]
+    fn installed_package_parser_reads_tab_separated_guix_output() {
+        let seeded_store_paths = HashSet::from(["/gnu/store/hash-hello-2.12".to_string()]);
+        let package = parse_installed_package(
+            "system",
+            "hello\t2.12\tout\t/gnu/store/hash-hello-2.12",
+            &seeded_store_paths,
+        )
+        .unwrap();
+
+        assert_eq!(
+            package,
+            ApiPackage {
+                source: "system".to_string(),
+                name: "hello".to_string(),
+                version: "2.12".to_string(),
+                output: "out".to_string(),
+                store_path: "/gnu/store/hash-hello-2.12".to_string(),
+                seeded: true,
+            }
+        );
     }
 }
