@@ -96,16 +96,16 @@ broader public network.
 
 ## Dashboard Visual Guide
 
-- [ ] Add a live transfer path panel.
-- [ ] Show the latest request through these stages:
+- [x] Add a live transfer path panel.
+- [x] Show the latest request through these stages:
   - package observed
   - narinfo trusted
   - providers found
   - blocks received or served
   - verified/imported
   - re-seeded locally
-- [ ] Keep the panel operational and event-driven; avoid marketing copy.
-- [ ] Preserve existing dashboard panels for peers, catalog, builds, and seeds.
+- [x] Keep the panel operational and event-driven; avoid marketing copy.
+- [x] Preserve existing dashboard panels for peers, catalog, builds, and seeds.
 
 ## Tests And Acceptance
 

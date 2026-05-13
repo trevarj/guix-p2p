@@ -524,6 +524,9 @@ locally-seeded nars in real time:
   secondary diagnostics, and events stay full-width at the bottom.
 - Active seed rows display the package/store item name when store-path metadata
   is available, with the full store path and NAR hash available in details.
+- The transfer path panel is driven by dashboard events and tracks the latest
+  observed package/NAR through package observation, narinfo trust, provider
+  discovery, block movement, verification/import, and local re-seeding.
 - `POST /api/seeds` accepts `{ "store_path": "/gnu/store/..." }` only when the
   dashboard bind address is loopback. It validates the path, seeds and caches
   the NAR immediately, sends `StartProviding`, emits `SeedAdded`, and persists

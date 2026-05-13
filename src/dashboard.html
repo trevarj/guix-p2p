@@ -39,9 +39,10 @@ header button{
 }
 header button:hover{border-color:var(--acc)}
 main{
-  display:grid;grid-template-columns:1.4fr 1fr 1fr;grid-template-rows:minmax(0,1.35fr) minmax(0,.9fr) auto;
+  display:grid;grid-template-columns:1.4fr 1fr 1fr;grid-template-rows:minmax(0,1.1fr) minmax(0,.55fr) minmax(0,.85fr) auto;
   grid-template-areas:
     "packages packages seeds"
+    "transfer transfer transfer"
     "peers catalog builds"
     "events events events";
   flex:1;overflow:hidden;gap:0
@@ -51,6 +52,7 @@ main{
 }
 .packages-panel{grid-area:packages}
 .seeds-panel{grid-area:seeds}
+.transfer-panel{grid-area:transfer}
 .peers-panel{grid-area:peers}
 .catalog-panel{grid-area:catalog}
 .builds-panel{grid-area:builds}
@@ -124,6 +126,19 @@ main{
 }
 .package-row .seed-action:hover{border-color:var(--acc)}
 .package-row.seeded .seed-action{color:var(--dim)}
+.transfer-card{display:grid;grid-template-columns:1.2fr 2fr;gap:12px;min-height:92px}
+.transfer-subject{border-right:1px solid var(--dim);padding-right:10px;min-width:0}
+.transfer-name{font-size:13px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.transfer-hash{font-size:10px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:4px}
+.transfer-meta{font-size:10px;color:var(--acc);margin-top:6px}
+.transfer-stages{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;align-items:stretch}
+.transfer-stage{border:1px solid var(--dim);background:var(--bg3);padding:6px;min-width:0}
+.transfer-stage.done{border-color:var(--ok);box-shadow:inset 0 0 0 1px rgba(51,204,51,.2)}
+.transfer-stage.active{border-color:var(--acc)}
+.transfer-stage .label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--dim)}
+.transfer-stage.done .label{color:var(--ok)}
+.transfer-stage.active .label{color:var(--acc)}
+.transfer-stage .value{font-size:11px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* transfer flash animation */
 .seed-row.flash{animation:flash .6s ease}
@@ -165,13 +180,17 @@ main{
   header{align-items:flex-start;flex-wrap:wrap}
   header .stats{flex-wrap:wrap;gap:10px 16px}
   main{
-    grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1.25fr) minmax(0,1fr) minmax(0,.8fr) auto;
+    grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1.2fr) minmax(0,.65fr) minmax(0,1fr) minmax(0,.8fr) auto;
     grid-template-areas:
       "packages packages"
+      "transfer transfer"
       "seeds peers"
       "catalog builds"
       "events events"
   }
+  .transfer-card{grid-template-columns:1fr}
+  .transfer-subject{border-right:none;border-bottom:1px solid var(--dim);padding:0 0 8px}
+  .transfer-stages{grid-template-columns:repeat(3,1fr)}
 }
 @media (max-width:720px){
   body{overflow:auto}
@@ -181,6 +200,7 @@ main{
   .events{max-height:260px}
   .package-tools{display:block}
   .package-hint{text-align:left;margin-top:4px}
+  .transfer-stages{grid-template-columns:1fr 1fr}
 }
 </style>
 </head>
@@ -216,6 +236,10 @@ main{
     <h2>active seeds <span class="badge" id="seed-badge">0</span></h2>
     <div id="seeds-list"><div class="empty">not seeding</div></div>
   </div>
+  <div class="panel transfer-panel">
+    <h2>transfer path</h2>
+    <div id="transfer-path"><div class="empty">no transfer observed</div></div>
+  </div>
   <div class="panel peers-panel">
     <h2>peers</h2>
     <div id="peers-list"><div class="empty">no peers yet</div></div>
@@ -249,6 +273,7 @@ var BUILDS={};
 var CATALOG={};
 var PACKAGES=[];
 var SEEDS={};
+var TRANSFER=null;
 var WS=null;
 var WS_RETRY=1000;
 var SERVER_STARTED=null;
@@ -430,6 +455,66 @@ function renderPackages(){
   });
   if(arr.length>200)h+='<div class="empty">showing 200 of '+arr.length+' matches, refine search</div>';
   el.innerHTML=h;
+}
+
+function transferSubjectName(t){
+  if(!t)return'no transfer observed';
+  if(t.store_path)return storePathName(t.store_path);
+  if(t.nar_hash)return t.nar_hash.slice(0,24)+'...';
+  return'unknown package'
+}
+
+function ensureTransfer(narHash,storePath,narSize){
+  if(!TRANSFER||TRANSFER.nar_hash!==narHash){
+    TRANSFER={
+      nar_hash:narHash||'',
+      store_path:storePath||null,
+      nar_size:narSize||null,
+      stages:{observed:false,trusted:false,providers:false,blocks:false,verified:false,reseeded:false},
+      values:{observed:'pending',trusted:'pending',providers:'pending',blocks:'pending',verified:'pending',reseeded:'pending'}
+    }
+  }
+  if(storePath)TRANSFER.store_path=storePath;
+  if(narSize!=null)TRANSFER.nar_size=narSize;
+  return TRANSFER
+}
+
+function markTransfer(narHash,storePath,narSize,stage,value){
+  var t=ensureTransfer(narHash,storePath,narSize);
+  t.stages[stage]=true;
+  t.values[stage]=value||'ok';
+  renderTransferPath()
+}
+
+function renderTransferPath(){
+  var el=document.getElementById('transfer-path');
+  if(!TRANSFER){el.innerHTML='<div class="empty">no transfer observed</div>';return}
+  var labels=[
+    ['observed','package observed'],
+    ['trusted','narinfo trusted'],
+    ['providers','providers found'],
+    ['blocks','blocks moved'],
+    ['verified','verified/imported'],
+    ['reseeded','re-seeded locally']
+  ];
+  var activeSeen=false;
+  var stages=labels.map(function(item){
+    var key=item[0],label=item[1],done=TRANSFER.stages[key];
+    var cls=done?'done':(!activeSeen?'active':'');
+    if(!done)activeSeen=true;
+    return '<div class="transfer-stage '+cls+'">'
+      +'<div class="label">'+esc(label)+'</div>'
+      +'<div class="value">'+esc(TRANSFER.values[key]||'pending')+'</div>'
+      +'</div>'
+  }).join('');
+  el.innerHTML='<div class="transfer-card">'
+    +'<div class="transfer-subject">'
+    +'<div class="transfer-name">'+esc(transferSubjectName(TRANSFER))+'</div>'
+    +'<div class="transfer-hash">'+esc(TRANSFER.nar_hash||'?')+'</div>'
+    +'<div class="transfer-meta">'+esc(TRANSFER.nar_size!=null?fmtSize(TRANSFER.nar_size):'size unknown')+'</div>'
+    +'</div>'
+    +'<div class="transfer-stages">'+stages+'</div>'
+    +'</div>'
 }
 
 function seedPackage(ev,storePath){
@@ -637,25 +722,31 @@ function handleEvent(e){
       var b=BUILDS[e.nar_hash];
       if(!b){b={nar_hash:e.nar_hash,store_path:null,nar_size:null,providers:0};BUILDS[e.nar_hash]=b}
       b.providers=Math.max(b.providers||0,e.provider_count||0);
+      markTransfer(e.nar_hash,b.store_path,b.nar_size,'providers',String(e.provider_count||0)+' peers');
       addEvent('providers','#','Providers found: '+e.nar_hash.slice(0,16)+'... ('+e.provider_count+')');
       renderBuilds();
       break;
 
     case 'BuildDiscovered':
       mergeBuild({nar_hash:e.nar_hash,store_path:e.store_path,nar_size:e.nar_size,providers:0});
+      markTransfer(e.nar_hash,e.store_path,e.nar_size,'observed',e.store_path?storePathName(e.store_path):'observed');
+      markTransfer(e.nar_hash,e.store_path,e.nar_size,'trusted','narinfo accepted');
       addEvent('providers','+','Build observed: '+(e.store_path||e.nar_hash.slice(0,16)+'...'));
       renderBuilds();
       break;
 
     case 'DownloadStarted':
+      markTransfer(e.nar_hash,e.store_path,e.nar_size,'blocks','starting');
       addEvent('dl-start','v','Download started: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.nar_size)+')');
       break;
 
     case 'BlockReceived':
+      markTransfer(e.nar_hash,null,null,'blocks',String(e.blocks||1)+' blocks');
       addEvent('dl-start','=','Block received from '+peerIdShort(e.peer_id));
       break;
 
     case 'DownloadSucceeded':
+      markTransfer(e.nar_hash,e.store_path,e.size,'verified','imported in '+(e.elapsed_ms/1000).toFixed(1)+'s');
       addEvent('dl-ok','^','Download succeeded: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.size)+', '+(e.elapsed_ms/1000).toFixed(1)+'s)');
       break;
 
@@ -673,6 +764,7 @@ function handleEvent(e){
       PACKAGES.forEach(function(pkg){
         if(pkg.store_path===e.store_path)pkg.seeded=true
       });
+      markTransfer(e.nar_hash,e.store_path,e.nar_size,'reseeded','serving locally');
       addEvent('seed-add','*','Seed added: '+e.nar_hash.slice(0,16)+'... ('+fmtSize(e.nar_size)+')');
       renderPackages();
       renderSeeds();
@@ -685,6 +777,7 @@ function handleEvent(e){
         if(pkg.store_path===e.store_path)pkg.seeded=false
       });
       addEvent('seed-add','-','Seed removed: '+e.nar_hash.slice(0,16)+'...');
+      if(TRANSFER&&TRANSFER.nar_hash===e.nar_hash)renderTransferPath();
       renderPackages();
       renderSeeds();
       break;
@@ -692,6 +785,7 @@ function handleEvent(e){
     case 'BlockServed':
       var blockIdxs=e.indices||[];
       var blkMsg=blockIdxs.length?blockIdxs.length+' block'+(blockIdxs.length>1?'s':''):'handshake';
+      markTransfer(e.nar_hash,null,null,'blocks','served '+blkMsg);
       addEvent('block-served','\u2191','Served '+blkMsg+' to '+peerIdShort(e.peer_id)+(e.nar_hash?' for '+e.nar_hash.slice(0,16)+'...':''));
       if(e.nar_hash)flashSeedRow(e.nar_hash);
       break;
