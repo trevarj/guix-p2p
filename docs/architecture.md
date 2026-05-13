@@ -517,8 +517,12 @@ locally-seeded nars in real time:
   store path is already seeded by the local NAR store.
 - The dashboard package panel consumes `/api/packages`, supports fuzzy search
   across package name, version, and store path, and shows source, output, store
-  path, and seed state. The row-level seed control is present but remains a
-  placeholder until `POST /api/seeds` is implemented.
+  path, and seed state. Its row-level seed control calls `POST /api/seeds`.
+- `POST /api/seeds` accepts `{ "store_path": "/gnu/store/..." }` only when the
+  dashboard bind address is loopback. It validates the path, seeds and caches
+  the NAR immediately, sends `StartProviding`, emits `SeedAdded`, and persists
+  the path to the user config `seed_paths` while preserving existing TOML where
+  possible.
 - The dashboard server indexes catalog events internally, so `/api/catalog`
   works for automation even when no browser WebSocket is connected.
 
@@ -551,4 +555,6 @@ Dashboard API endpoints:
 - `/api/build/{hash}` accepts either the registry lookup key or the nar hash.
 - `/api/packages` returns installed system and Guix Home packages with seed
   state.
+- `POST /api/seeds` seeds an existing local store path and persists it for
+  future daemon starts.
 - `/api/catalog` and `/api/seeds` return deterministic sorted snapshots.

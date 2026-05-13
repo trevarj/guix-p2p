@@ -104,8 +104,9 @@ main{
 .package-row.seeded .state{color:var(--ok)}
 .package-row .seed-action{
   background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
-  padding:2px 6px;font-family:var(--font);font-size:10px;cursor:not-allowed
+  padding:2px 6px;font-family:var(--font);font-size:10px;cursor:pointer
 }
+.package-row .seed-action:hover{border-color:var(--acc)}
 .package-row.seeded .seed-action{color:var(--dim)}
 
 /* transfer flash animation */
@@ -394,7 +395,7 @@ function renderPackages(){
       +'<span class="pkg"><span class="name">'+esc(title)+'</span>'
       +'<span class="meta">'+esc(pkg.store_path||'')+'</span></span>'
       +'<span class="state">'+esc(state)+'</span>'
-      +'<button class="seed-action" onclick="seedPackage(event,\''+jsArg(pkg.store_path||'')+'\')" title="Dashboard seed mutation is the next roadmap slice">'+esc(button)+'</button>'
+      +'<button class="seed-action" onclick="seedPackage(event,\''+jsArg(pkg.store_path||'')+'\')">'+esc(button)+'</button>'
       +'</div>';
   });
   if(arr.length>200)h+='<div class="empty">showing 200 of '+arr.length+' matches, refine search</div>';
@@ -403,7 +404,26 @@ function renderPackages(){
 
 function seedPackage(ev,storePath){
   ev.stopPropagation();
-  addEvent('seed-add','!','Dashboard seed mutation is not implemented yet: '+storePath);
+  if(!storePath)return;
+  fetch('/api/seeds',{
+    method:'POST',
+    headers:{'content-type':'application/json'},
+    body:JSON.stringify({store_path:storePath})
+  }).then(function(r){
+    return r.json().then(function(body){
+      if(!r.ok)throw body;
+      return body
+    })
+  }).then(function(seed){
+    PACKAGES.forEach(function(pkg){
+      if(pkg.store_path===storePath)pkg.seeded=true
+    });
+    renderPackages();
+    loadSeeds();
+    addEvent('seed-add','*','Seeded '+storePath+' as '+seed.nar_hash.slice(0,16)+'...')
+  }).catch(function(err){
+    addEvent('dl-fail','x','Seed failed: '+((err&&err.error)||storePath))
+  });
 }
 
 function flashSeedRow(narHash){

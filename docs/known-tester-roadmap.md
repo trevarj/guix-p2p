@@ -53,23 +53,23 @@ broader public network.
 - [x] Add a fuzzy-search package picker to the dashboard.
 - [x] Search across package name, version, and store path.
 - [x] Show source, package name, version, output, store path, and seed state.
-- [ ] Add a per-row `Seed` action.
+- [x] Add a per-row `Seed` action.
 
 ## Dashboard Seed Mutation
 
-- [ ] Add `POST /api/seeds` with `{ "store_path": "/gnu/store/..." }`.
-- [ ] Allow mutation only when the dashboard bind address is loopback.
-- [ ] Validate that the requested path starts with `/gnu/store/`.
-- [ ] Validate that the requested path exists.
-- [ ] Seed immediately by exporting, caching, and announcing the NAR.
-- [ ] Emit `SeedAdded` after successful seeding.
-- [ ] Persist successful selections to user config `seed_paths`.
-- [ ] Write only to:
+- [x] Add `POST /api/seeds` with `{ "store_path": "/gnu/store/..." }`.
+- [x] Allow mutation only when the dashboard bind address is loopback.
+- [x] Validate that the requested path starts with `/gnu/store/`.
+- [x] Validate that the requested path exists.
+- [x] Seed immediately by exporting, caching, and announcing the NAR.
+- [x] Emit `SeedAdded` after successful seeding.
+- [x] Persist successful selections to user config `seed_paths`.
+- [x] Write only to:
   - `$XDG_CONFIG_HOME/guix-p2p/config.toml`
   - `~/.config/guix-p2p/config.toml` when `XDG_CONFIG_HOME` is unset
-- [ ] Deduplicate persisted `seed_paths`.
-- [ ] Add `toml_edit` to preserve existing user config formatting/comments.
-- [ ] Extend dashboard state with a `SwarmCommand` sender so new seeds can
+- [x] Deduplicate persisted `seed_paths`.
+- [x] Add `toml_edit` to preserve existing user config formatting/comments.
+- [x] Extend dashboard state with a `SwarmCommand` sender so new seeds can
   trigger `StartProviding`.
 - [x] Extend NAR seed metadata to retain optional `store_path` for dashboard
   display and `seeded` matching.
@@ -91,9 +91,9 @@ broader public network.
 
 - [x] Unit test `guix package --list-installed` tab-separated parsing.
 - [ ] Unit test missing system/home profiles are skipped cleanly.
-- [ ] Unit test `seed_paths` config persistence and deduplication.
-- [ ] Unit test non-`/gnu/store` dashboard seed requests are rejected.
-- [ ] Unit test localhost-only mutation enforcement.
+- [x] Unit test `seed_paths` config persistence and deduplication.
+- [x] Unit test non-`/gnu/store` dashboard seed requests are rejected.
+- [x] Unit test localhost-only mutation enforcement.
 - [ ] API test `GET /api/packages`.
 - [ ] API test `POST /api/seeds` seeds, announces, emits `SeedAdded`, and
   persists config.

@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
-    env,
-    net::SocketAddr,
+    env, fs,
+    net::{IpAddr, SocketAddr},
     path::{Path as FsPath, PathBuf},
     process::Command,
     sync::{Arc, Mutex},
@@ -18,10 +18,12 @@ use axum::{
     response::{Html, IntoResponse, Json},
     routing::get,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::UnboundedSender;
+use toml_edit::{Array, DocumentMut, Item, Value};
 
 use crate::{
-    connection::ConnectionManager, dht::ProviderCache, nar_store::NarStore,
+    channel::SwarmCommand, connection::ConnectionManager, dht::ProviderCache, nar_store::NarStore,
     reputation::ReputationTracker,
 };
 
@@ -160,6 +162,23 @@ struct ApiPackage {
     seeded: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct ApiSeedRequest {
+    store_path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ApiSeedMutation {
+    nar_hash: String,
+    store_path: String,
+    nar_size: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct ApiError {
+    error: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct CatalogItem {
     hash_part: String,
@@ -180,6 +199,8 @@ pub struct DashboardState {
     pub event_bus: EventBus,
     pub nar_store: Arc<Mutex<NarStore>>,
     pub catalog: Arc<Mutex<HashMap<String, CatalogItem>>>,
+    pub cmd_tx: UnboundedSender<SwarmCommand>,
+    pub seed_mutation_allowed: bool,
 }
 
 pub async fn serve(state: DashboardState, port: u16, bind: &str) {
@@ -198,7 +219,7 @@ pub async fn serve(state: DashboardState, port: u16, bind: &str) {
         .route("/api/builds", get(api_builds))
         .route("/api/build/{hash}", get(api_build_detail))
         .route("/api/catalog", get(api_catalog))
-        .route("/api/seeds", get(api_seeds))
+        .route("/api/seeds", get(api_seeds).post(api_seed))
         .route("/api/packages", get(api_packages))
         .route("/ws", get(ws_handler))
         .with_state(state);
@@ -345,6 +366,59 @@ async fn api_packages(State(state): State<DashboardState>) -> Json<Vec<ApiPackag
     Json(packages)
 }
 
+async fn api_seed(
+    State(state): State<DashboardState>,
+    Json(request): Json<ApiSeedRequest>,
+) -> Result<Json<ApiSeedMutation>, (StatusCode, Json<ApiError>)> {
+    if !state.seed_mutation_allowed {
+        return Err(api_error(
+            StatusCode::FORBIDDEN,
+            "dashboard seed mutation requires a loopback bind address",
+        ));
+    }
+
+    let store_path = request.store_path.trim().to_string();
+    if !store_path.starts_with("/gnu/store/") {
+        return Err(api_error(StatusCode::BAD_REQUEST, "store_path must start with /gnu/store/"));
+    }
+    if !FsPath::new(&store_path).exists() {
+        return Err(api_error(StatusCode::NOT_FOUND, "store_path does not exist"));
+    }
+
+    let nar_store = state.nar_store.clone();
+    let seed_path = store_path.clone();
+    let nar_hash = tokio::task::spawn_blocking(move || {
+        let mut store = nar_store.lock().unwrap();
+        store.seed_store_path(&seed_path)
+    })
+    .await
+    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("seed task failed: {e}")))?
+    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("seed failed: {e}")))?;
+
+    let info = state
+        .nar_store
+        .lock()
+        .unwrap()
+        .seed_info(&nar_hash)
+        .ok_or_else(|| api_error(StatusCode::INTERNAL_SERVER_ERROR, "seed metadata missing"))?;
+
+    state.cmd_tx.send(SwarmCommand::StartProviding { hash: nar_hash.clone() }).map_err(|e| {
+        api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("failed to announce seed: {e}"))
+    })?;
+
+    persist_seed_path(&store_path).map_err(|e| {
+        api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("persist failed: {e}"))
+    })?;
+
+    let _ = state.event_bus.send(DashboardEvent::SeedAdded {
+        nar_hash: nar_hash.clone(),
+        store_path: Some(store_path.clone()),
+        nar_size: info.nar_size,
+    });
+
+    Ok(Json(ApiSeedMutation { nar_hash, store_path, nar_size: info.nar_size }))
+}
+
 async fn api_build_detail(
     State(state): State<DashboardState>,
     Path(hash): Path<String>,
@@ -357,12 +431,60 @@ async fn api_build_detail(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
+fn api_error(status: StatusCode, message: &str) -> (StatusCode, Json<ApiError>) {
+    (status, Json(ApiError { error: message.to_string() }))
+}
+
+pub fn seed_mutation_allowed_for_bind(bind: &str) -> bool {
+    bind.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
 fn package_profiles() -> Vec<(String, PathBuf)> {
     let mut profiles = vec![("system".to_string(), PathBuf::from("/run/current-system/profile"))];
     if let Some(home) = env::var_os("HOME") {
         profiles.push(("home".to_string(), PathBuf::from(home).join(".guix-home/profile")));
     }
     profiles
+}
+
+fn user_config_path() -> PathBuf {
+    if let Ok(dir) = env::var("XDG_CONFIG_HOME") {
+        PathBuf::from(dir).join("guix-p2p/config.toml")
+    } else {
+        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+        PathBuf::from(home).join(".config/guix-p2p/config.toml")
+    }
+}
+
+fn persist_seed_path(store_path: &str) -> anyhow::Result<()> {
+    persist_seed_path_to_config(store_path, &user_config_path())
+}
+
+fn persist_seed_path_to_config(store_path: &str, config_path: &FsPath) -> anyhow::Result<()> {
+    let parent =
+        config_path.parent().ok_or_else(|| anyhow::anyhow!("config path has no parent"))?;
+    fs::create_dir_all(parent)?;
+
+    let content = fs::read_to_string(config_path).unwrap_or_default();
+    let mut doc = content.parse::<DocumentMut>().unwrap_or_else(|_| DocumentMut::new());
+
+    let mut values = match doc.get("seed_paths").and_then(Item::as_array) {
+        Some(existing) => {
+            existing.iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>()
+        },
+        None => Vec::new(),
+    };
+    if !values.iter().any(|value| value == store_path) {
+        values.push(store_path.to_string());
+    }
+
+    let mut array = Array::default();
+    for value in values {
+        array.push(value);
+    }
+    doc["seed_paths"] = Item::Value(Value::Array(array));
+    fs::write(config_path, doc.to_string())?;
+    Ok(())
 }
 
 fn installed_packages_from_profile(
@@ -678,6 +800,8 @@ mod tests {
             event_bus,
             nar_store: Arc::new(Mutex::new(NarStore::new(tmp.path(), 262_144))),
             catalog: Arc::new(Mutex::new(HashMap::new())),
+            cmd_tx: tokio::sync::mpsc::unbounded_channel().0,
+            seed_mutation_allowed: true,
         };
         (state, tmp)
     }
@@ -777,5 +901,54 @@ mod tests {
                 seeded: true,
             }
         );
+    }
+
+    #[test]
+    fn seed_mutation_requires_loopback_bind_address() {
+        assert!(seed_mutation_allowed_for_bind("127.0.0.1"));
+        assert!(seed_mutation_allowed_for_bind("::1"));
+        assert!(!seed_mutation_allowed_for_bind("0.0.0.0"));
+        assert!(!seed_mutation_allowed_for_bind("192.168.1.111"));
+    }
+
+    #[tokio::test]
+    async fn seed_api_rejects_non_store_paths() {
+        let (state, _tmp) = dashboard_state();
+        let result = api_seed(
+            State(state),
+            Json(ApiSeedRequest { store_path: "/tmp/not-store".to_string() }),
+        )
+        .await;
+
+        assert_eq!(result.unwrap_err().0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn seed_api_rejects_mutation_when_dashboard_is_not_loopback() {
+        let (mut state, _tmp) = dashboard_state();
+        state.seed_mutation_allowed = false;
+        let result = api_seed(
+            State(state),
+            Json(ApiSeedRequest { store_path: "/gnu/store/missing".to_string() }),
+        )
+        .await;
+
+        assert_eq!(result.unwrap_err().0, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn seed_path_persistence_deduplicates_existing_paths() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(&config_path, "# user config\nseed_paths = [\"/gnu/store/aaaa-existing\"]\n")
+            .unwrap();
+
+        persist_seed_path_to_config("/gnu/store/bbbb-new", &config_path).unwrap();
+        persist_seed_path_to_config("/gnu/store/bbbb-new", &config_path).unwrap();
+
+        let content = fs::read_to_string(config_path).unwrap();
+        assert!(content.contains("# user config"));
+        assert_eq!(content.matches("/gnu/store/bbbb-new").count(), 1);
+        assert!(content.contains("/gnu/store/aaaa-existing"));
     }
 }

@@ -1339,6 +1339,10 @@ pub async fn run_daemon_mode(
             event_bus: event_tx.clone(),
             nar_store: nar_store.clone(),
             catalog: Arc::new(Mutex::new(HashMap::new())),
+            cmd_tx: cmd_tx.clone(),
+            seed_mutation_allowed: dashboard::seed_mutation_allowed_for_bind(
+                &config.dashboard_bind,
+            ),
         };
         let port = config.dashboard_port;
         let bind = config.dashboard_bind.clone();
