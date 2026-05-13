@@ -1040,6 +1040,22 @@ mod tests {
         assert_eq!(result.unwrap_err().0, StatusCode::FORBIDDEN);
     }
 
+    #[tokio::test]
+    async fn seed_delete_api_removes_cached_seed_without_store_metadata() {
+        let (state, _tmp) = dashboard_state();
+        let nar_hash = "abcd".repeat(16);
+        {
+            let mut store = state.nar_store.lock().unwrap();
+            store.save_with_store_path(&nar_hash, b"nar bytes", None).unwrap();
+            assert!(store.has_nar(&nar_hash));
+        }
+
+        let status = api_seed_delete(State(state.clone()), Path(nar_hash.clone())).await.unwrap();
+
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert!(!state.nar_store.lock().unwrap().has_nar(&nar_hash));
+    }
+
     #[test]
     fn seed_path_persistence_deduplicates_existing_paths() {
         let tmp = tempfile::TempDir::new().unwrap();

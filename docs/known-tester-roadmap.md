@@ -117,6 +117,8 @@ broader public network.
 - [ ] API test `GET /api/packages`.
 - [ ] API test `POST /api/seeds` seeds, announces, emits `SeedAdded`, and
   persists config.
+- [x] API test `DELETE /api/seeds/{hash}` removes cached seeds without
+  store-path metadata.
 - [ ] Run `cargo fmt`.
 - [ ] Run `cargo clippy --all-targets --all-features -- -D warnings`.
 - [ ] Run `cargo test`.
