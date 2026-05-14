@@ -628,6 +628,7 @@ struct P2pBuildOutcome {
     http_evidence: bool,
     provider_count: Option<usize>,
     nar_size: Option<u64>,
+    phases: BenchmarkPhaseTimings,
 }
 
 struct BenchmarkPackage {
@@ -657,6 +658,24 @@ struct BenchmarkRecord {
     run_dir: PathBuf,
     error: Option<String>,
     skip_reason: Option<String>,
+    phases: BenchmarkPhaseTimings,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct BenchmarkPhaseTimings {
+    seed_ms: Option<u128>,
+    prepare_ms: Option<u128>,
+    p2p_start_ms: Option<u128>,
+    provider_wait_ms: Option<u128>,
+    daemon_start_ms: Option<u128>,
+    import_ms: Option<u128>,
+    total_ms: Option<u128>,
+}
+
+impl BenchmarkPhaseTimings {
+    fn with_total(total_ms: u128) -> Self {
+        Self { total_ms: Some(total_ms), ..Self::default() }
+    }
 }
 
 struct BenchmarkPackageSelection {
@@ -1459,16 +1478,27 @@ fn vm_fetch_timed(
     store_path: Option<&str>,
     package: Option<&str>,
     policy: &str,
-) -> anyhow::Result<u128> {
+) -> anyhow::Result<BenchmarkPhaseTimings> {
     let mut registry = VmRegistry::load(config)?;
     let node = registry.node(name)?.clone();
     let target = resolve_fetch_target(&registry, &node, store_path, package)?;
     registry.node_mut(name)?.last_fetch = Some(target.clone());
     registry.save(config)?;
     let started = std::time::Instant::now();
+
+    let phase_start = std::time::Instant::now();
     vm_start_fetch_p2p(config, name, &target, policy)?;
+    let p2p_start_ms = phase_start.elapsed().as_millis();
+
+    let phase_start = std::time::Instant::now();
     vm_require_fetch_target_available(config, name, &target)?;
+    let provider_wait_ms = phase_start.elapsed().as_millis();
+
+    let phase_start = std::time::Instant::now();
     vm_start_daemon(config, name)?;
+    let daemon_start_ms = phase_start.elapsed().as_millis();
+
+    let phase_start = std::time::Instant::now();
     let output = ssh_run(
         config,
         &node,
@@ -1480,9 +1510,18 @@ fn vm_fetch_timed(
             shell_quote(&target.store_path)
         ),
     )?;
+    let import_ms = phase_start.elapsed().as_millis();
+
     print!("{output}");
     print_vm_dashboard_evidence(config, &registry, &node, &target)?;
-    Ok(started.elapsed().as_millis())
+    Ok(BenchmarkPhaseTimings {
+        p2p_start_ms: Some(p2p_start_ms),
+        provider_wait_ms: Some(provider_wait_ms),
+        daemon_start_ms: Some(daemon_start_ms),
+        import_ms: Some(import_ms),
+        total_ms: Some(started.elapsed().as_millis()),
+        ..BenchmarkPhaseTimings::default()
+    })
 }
 
 fn vm_http_fetch(
@@ -1500,13 +1539,13 @@ fn vm_http_fetch_timed(
     name: &str,
     store_path: Option<&str>,
     package: Option<&str>,
-) -> anyhow::Result<u128> {
+) -> anyhow::Result<BenchmarkPhaseTimings> {
     let mut registry = VmRegistry::load(config)?;
     let node = registry.node(name)?.clone();
     let target = resolve_fetch_target(&registry, &node, store_path, package)?;
     registry.node_mut(name)?.last_fetch = Some(target.clone());
     registry.save(config)?;
-    let command = format!(
+    let prepare_command = format!(
         r#"
 set -eu
 PACKAGE={package}
@@ -1515,6 +1554,17 @@ SUBSTITUTE_URLS={substitute_urls}
 guix build --no-grafts --substitute-urls="$SUBSTITUTE_URLS" "$PACKAGE" >/tmp/e2e-http-realize.log
 guix gc -D "$STORE_PATH" >/tmp/e2e-http-delete.log
 test ! -e "$STORE_PATH"
+"#,
+        package = shell_quote(&target.package),
+        store_path = shell_quote(&target.store_path),
+        substitute_urls = shell_quote(&substitute_urls_for_guix(&config.substitute_urls))
+    );
+    let import_command = format!(
+        r#"
+set -eu
+PACKAGE={package}
+STORE_PATH={store_path}
+SUBSTITUTE_URLS={substitute_urls}
 guix build --no-grafts --substitute-urls="$SUBSTITUTE_URLS" "$PACKAGE"
 test -d "$STORE_PATH"
 echo HTTP_IMPORTED_OUTPUT_IN_NODE_STORE
@@ -1524,9 +1574,23 @@ echo HTTP_IMPORTED_OUTPUT_IN_NODE_STORE
         substitute_urls = shell_quote(&substitute_urls_for_guix(&config.substitute_urls))
     );
     let started = std::time::Instant::now();
-    let output = ssh_run(config, &node, &command)?;
+
+    let phase_start = std::time::Instant::now();
+    let output = ssh_run(config, &node, &prepare_command)?;
     print!("{output}");
-    Ok(started.elapsed().as_millis())
+    let prepare_ms = phase_start.elapsed().as_millis();
+
+    let phase_start = std::time::Instant::now();
+    let output = ssh_run(config, &node, &import_command)?;
+    print!("{output}");
+    let import_ms = phase_start.elapsed().as_millis();
+
+    Ok(BenchmarkPhaseTimings {
+        prepare_ms: Some(prepare_ms),
+        import_ms: Some(import_ms),
+        total_ms: Some(started.elapsed().as_millis()),
+        ..BenchmarkPhaseTimings::default()
+    })
 }
 
 fn vm_tail_log(config: &VmConfig, name: &str, kind: &str) -> anyhow::Result<()> {
@@ -1725,6 +1789,7 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                                 run_dir: run_dir.clone(),
                                 error: None,
                                 skip_reason: Some(reason.to_string()),
+                                phases: BenchmarkPhaseTimings::default(),
                             });
                             continue;
                         }
@@ -1742,6 +1807,7 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                                 http_evidence: true,
                                 provider_count: None,
                                 nar_size: None,
+                                phases: BenchmarkPhaseTimings::with_total(elapsed_ms),
                             }),
                             BenchmarkMode::P2pOnly
                             | BenchmarkMode::P2pFirst
@@ -1798,6 +1864,7 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                                 run_dir: run_dir.clone(),
                                 error: None,
                                 skip_reason: None,
+                                phases: outcome.phases,
                             }),
                             Err(e) => {
                                 let message = e.to_string();
@@ -1824,6 +1891,7 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                                     run_dir: run_dir.clone(),
                                     error: Some(message),
                                     skip_reason: None,
+                                    phases: BenchmarkPhaseTimings::default(),
                                 });
                             },
                         }
@@ -1936,11 +2004,13 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                         run_dir: output_dir.clone(),
                         error: None,
                         skip_reason: Some(reason.to_string()),
+                        phases: BenchmarkPhaseTimings::default(),
                     });
                 }
                 continue;
             }
 
+            let seed_start = std::time::Instant::now();
             for seed_node in &opts.seed_nodes {
                 tracing::info!(
                     "vm benchmark seeding package={} node={} condition={}",
@@ -1951,12 +2021,13 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                 vm_seed(&condition_config, seed_node, &package.name)
                     .with_context(|| format!("failed to seed {} on {}", package.name, seed_node))?;
             }
+            let seed_ms = seed_start.elapsed().as_millis();
 
             let registry = VmRegistry::load(&condition_config)?;
             let (seed_node, seed) = registry.latest_seed()?;
             let store_path = seed.store_path.clone();
             let seed_metadata = wait_for_vm_seed_metadata(seed_node.dashboard_port, &store_path)
-                .unwrap_or((None, None));
+                .with_context(|| format!("failed to read VM seed metadata for {store_path}"))?;
             let vm_nar_hash = seed_metadata.0.clone().unwrap_or_else(|| package.nar_hash.clone());
             let vm_nar_size = seed_metadata.1;
             package.store_path = store_path.clone();
@@ -1979,23 +2050,26 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                             Some(&store_path),
                             Some(&package.name),
                         )
-                        .map(|elapsed_ms| P2pBuildOutcome {
-                            elapsed_ms,
+                        .map(|phases| P2pBuildOutcome {
+                            elapsed_ms: phases.total_ms.unwrap_or_default(),
                             p2p_evidence: false,
                             http_evidence: true,
                             provider_count: None,
                             nar_size: vm_nar_size,
+                            phases,
                         }),
                         BenchmarkMode::P2pOnly
                         | BenchmarkMode::P2pFirst
                         | BenchmarkMode::HttpFirst => {
                             let policy = mode.as_policy().expect("p2p mode has a policy");
+                            let phase_start = std::time::Instant::now();
                             vm_remove(
                                 &condition_config,
                                 &opts.fetch_node,
                                 Some(&store_path),
                                 Some(&package.name),
                             )?;
+                            let prepare_ms = phase_start.elapsed().as_millis();
                             vm_fetch_timed(
                                 &condition_config,
                                 &opts.fetch_node,
@@ -2003,12 +2077,18 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                                 Some(&package.name),
                                 policy,
                             )
-                            .map(|elapsed_ms| P2pBuildOutcome {
-                                elapsed_ms,
-                                p2p_evidence: true,
-                                http_evidence: *mode == BenchmarkMode::HttpFirst,
-                                provider_count: Some(opts.seed_nodes.len()),
-                                nar_size: vm_nar_size,
+                            .map(|mut phases| {
+                                phases.seed_ms = Some(seed_ms);
+                                phases.prepare_ms = Some(prepare_ms);
+                                phases.total_ms = phases.total_ms.map(|total| total + prepare_ms);
+                                P2pBuildOutcome {
+                                    elapsed_ms: phases.total_ms.unwrap_or_default(),
+                                    p2p_evidence: true,
+                                    http_evidence: *mode == BenchmarkMode::HttpFirst,
+                                    provider_count: Some(opts.seed_nodes.len()),
+                                    nar_size: vm_nar_size,
+                                    phases,
+                                }
                             })
                         },
                     };
@@ -2037,6 +2117,7 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                             run_dir: output_dir.clone(),
                             error: None,
                             skip_reason: None,
+                            phases: outcome.phases,
                         }),
                         Err(e) => {
                             let message = e.to_string();
@@ -2067,6 +2148,7 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                                 run_dir: output_dir.clone(),
                                 error: Some(message),
                                 skip_reason: None,
+                                phases: BenchmarkPhaseTimings::default(),
                             });
                         },
                     }
@@ -2127,15 +2209,23 @@ fn wait_for_vm_seed_metadata(
     store_path: &str,
 ) -> anyhow::Result<(Option<String>, Option<u64>)> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut last_error = None;
     loop {
-        let seeds = dashboard_json(dashboard_port, "/api/seeds")?;
-        if let Some(entry) = matching_seed_entry(&seeds, store_path) {
-            return Ok((
-                json_string(entry, "nar_hash"),
-                entry.get("nar_size").and_then(serde_json::Value::as_u64),
-            ));
+        match dashboard_json(dashboard_port, "/api/seeds") {
+            Ok(seeds) => {
+                if let Some(entry) = matching_seed_entry(&seeds, store_path) {
+                    return Ok((
+                        json_string(entry, "nar_hash"),
+                        entry.get("nar_size").and_then(serde_json::Value::as_u64),
+                    ));
+                }
+            },
+            Err(e) => last_error = Some(e),
         }
         if std::time::Instant::now() >= deadline {
+            if let Some(e) = last_error {
+                anyhow::bail!("seed dashboard did not include {store_path}; last error: {e}");
+            }
             anyhow::bail!("seed dashboard did not include {store_path}");
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -2643,6 +2733,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         http_evidence,
         provider_count: Some(spec.seed_ports.len()),
         nar_size,
+        phases: BenchmarkPhaseTimings::with_total(elapsed_ms),
     })
 }
 
@@ -3320,7 +3411,8 @@ fn write_benchmark_csv(path: &std::path::Path, records: &[BenchmarkRecord]) -> a
     let mut csv = String::from(
         "tier,package,store_path,nar_hash,nar_size,mode,http_condition,seed_count,iteration,\
          elapsed_ms,success,skipped,p2p_evidence,http_evidence,provider_count,run_dir,error,\
-         skip_reason\n",
+         skip_reason,seed_ms,prepare_ms,p2p_start_ms,provider_wait_ms,daemon_start_ms,import_ms,\
+         total_ms\n",
     );
     for record in records {
         csv.push_str(&csv_row(&[
@@ -3342,6 +3434,13 @@ fn write_benchmark_csv(path: &std::path::Path, records: &[BenchmarkRecord]) -> a
             record.run_dir.display().to_string(),
             record.error.clone().unwrap_or_default(),
             record.skip_reason.clone().unwrap_or_default(),
+            record.phases.seed_ms.map(|n| n.to_string()).unwrap_or_default(),
+            record.phases.prepare_ms.map(|n| n.to_string()).unwrap_or_default(),
+            record.phases.p2p_start_ms.map(|n| n.to_string()).unwrap_or_default(),
+            record.phases.provider_wait_ms.map(|n| n.to_string()).unwrap_or_default(),
+            record.phases.daemon_start_ms.map(|n| n.to_string()).unwrap_or_default(),
+            record.phases.import_ms.map(|n| n.to_string()).unwrap_or_default(),
+            record.phases.total_ms.map(|n| n.to_string()).unwrap_or_default(),
         ]));
         csv.push('\n');
     }
@@ -3385,10 +3484,10 @@ fn write_benchmark_report(
     report.push_str("\n## Runs\n\n");
     report.push_str(
         "| Tier | Package | HTTP condition | Mode | Seeds | Iteration | Elapsed | Status | P2P | \
-         HTTP | Providers |\n",
+         HTTP | Providers | Seed | Prepare | P2P start | Provider wait | Daemon start | Import |\n",
     );
     report.push_str(
-        "|------|---------|----------------|------|-------|-----------|---------|--------|-----|---------------|-----------|\n",
+        "|------|---------|----------------|------|-------|-----------|---------|--------|-----|------|-----------|------|---------|-----------|---------------|--------------|--------|\n",
     );
     for record in records {
         let elapsed = record
@@ -3405,7 +3504,8 @@ fn write_benchmark_report(
             "failed"
         };
         report.push_str(&format!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} \
+             |\n",
             record.tier,
             record.package,
             record.http_condition,
@@ -3416,7 +3516,13 @@ fn write_benchmark_report(
             status,
             record.p2p_evidence,
             record.http_evidence,
-            record.provider_count.map(|n| n.to_string()).unwrap_or_else(|| "n/a".to_string())
+            record.provider_count.map(|n| n.to_string()).unwrap_or_else(|| "n/a".to_string()),
+            format_ms_option(record.phases.seed_ms),
+            format_ms_option(record.phases.prepare_ms),
+            format_ms_option(record.phases.p2p_start_ms),
+            format_ms_option(record.phases.provider_wait_ms),
+            format_ms_option(record.phases.daemon_start_ms),
+            format_ms_option(record.phases.import_ms)
         ));
     }
 
@@ -3465,6 +3571,48 @@ fn write_benchmark_report(
         ));
     }
 
+    report.push_str("\n## Phase Summary\n\n");
+    report.push_str(
+        "| Tier | Package | HTTP condition | Mode | Seeds | Total median | Seed median | Prepare \
+         median | P2P start median | Provider wait median | Daemon start median | Import median \
+         |\n",
+    );
+    report.push_str(
+        "|------|---------|----------------|------|-------|--------------|-------------|----------------|------------------|----------------------|---------------------|---------------|\n",
+    );
+    let groups: BTreeSet<_> = records
+        .iter()
+        .map(|r| (r.tier, r.package.clone(), r.http_condition, r.mode, r.seed_count))
+        .collect();
+    for (tier, package, condition, mode, seed_count) in groups {
+        let subset: Vec<&BenchmarkRecord> = records
+            .iter()
+            .filter(|r| {
+                r.success
+                    && r.tier == tier
+                    && r.package == package
+                    && r.http_condition == condition
+                    && r.mode == mode
+                    && r.seed_count == seed_count
+            })
+            .collect();
+        report.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            tier,
+            package,
+            condition,
+            mode,
+            seed_count,
+            phase_median(&subset, |p| p.total_ms),
+            phase_median(&subset, |p| p.seed_ms),
+            phase_median(&subset, |p| p.prepare_ms),
+            phase_median(&subset, |p| p.p2p_start_ms),
+            phase_median(&subset, |p| p.provider_wait_ms),
+            phase_median(&subset, |p| p.daemon_start_ms),
+            phase_median(&subset, |p| p.import_ms)
+        ));
+    }
+
     let skipped: Vec<&BenchmarkRecord> = records.iter().filter(|r| r.skipped).collect();
     if !skipped.is_empty() {
         report.push_str("\n## Skipped Runs\n\n");
@@ -3508,6 +3656,14 @@ fn median_ms(mut values: Vec<u128>) -> Option<u128> {
     }
     values.sort_unstable();
     Some(values[values.len() / 2])
+}
+
+fn phase_median(
+    records: &[&BenchmarkRecord],
+    field: impl Fn(&BenchmarkPhaseTimings) -> Option<u128>,
+) -> String {
+    let values = records.iter().filter_map(|record| field(&record.phases)).collect();
+    format_ms_option(median_ms(values))
 }
 
 fn percentile_ms(mut values: Vec<u128>, percentile: usize) -> Option<u128> {

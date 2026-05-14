@@ -115,6 +115,16 @@ The VM benchmark writes:
 - `target/guix-p2p-e2e/benchmarks/results.csv`
 - `docs/benchmark-results.md`
 
+The CSV keeps the original result columns and appends phase timings:
+
+- `seed_ms`: seed-node setup for the package/condition.
+- `prepare_ms`: realize dependencies and remove only the target output.
+- `p2p_start_ms`: start the fetch-node `guix-p2p` daemon.
+- `provider_wait_ms`: wait until the target is visible through P2P.
+- `daemon_start_ms`: start the wrapped `guix-daemon`.
+- `import_ms`: run the final `guix build` import.
+- `total_ms`: total measured mode time.
+
 The older top-level `benchmark` command remains a fast container harness, but
 VM benchmarks are the publishable path because each node has its own writable
 store and daemon state.
