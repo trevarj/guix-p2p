@@ -117,3 +117,50 @@ the store even with `--max-jobs=0`. If the host exposes `/gnu/store` read-only,
 the harness fails at preflight before starting nodes. The disposable VM proof
 is the authoritative full-store-isolation check; the benchmark harness remains
 the faster controlled timing tool.
+
+## Future Benchmark Work
+
+The current `hello` result proves the local p2p-only substitute path and block
+transfer. It does not prove that P2P is faster than HTTP. Future benchmark work
+should compare HTTP and P2P under repeated, controlled scenarios.
+
+Baseline comparison:
+
+- Run `http`, `p2p-only`, and `p2p-first` for the same package set.
+- Use a fresh `--base` per run group so kept temp state does not contaminate
+  results.
+- Use at least three iterations and compare medians, not single runs.
+- Record substitute URLs, host Guix revision, transport, package store paths,
+  NAR hashes, and NAR sizes.
+
+Package set:
+
+- `hello`: small correctness and harness sanity check.
+- `git`: medium package with non-trivial closure and transfer size.
+- `emacs` or another large already-realized package: useful for bandwidth and
+  multi-peer behavior.
+
+Multi-peer P2P comparison:
+
+- Use one fetch node, one neutral bootstrap node, and N seed nodes all seeding
+  the same desired NAR.
+- Run seed counts of 1, 3, 5, and 8 for the same package and transport.
+- Record provider count, time to first provider, time to first block, total
+  restored bytes, elapsed time, and per-seeder block-serving evidence.
+- Keep the explicit relay substitute restore for p2p modes; shared host-store
+  containers can make exact store-path builds no-op.
+
+Mixed-policy comparison:
+
+- Compare `p2p-first` and `http-first` when P2P providers are available.
+- Repeat with slow or bandwidth-limited seeders once upload limits are wired
+  into block serving.
+- Repeat with no providers to measure HTTP fallback latency and confirm the
+  fallback path is visible in logs.
+
+Acceptance criteria for publishing a benchmark claim:
+
+- Every p2p run has block-serving evidence in seed-node logs.
+- Every restored output exists under the kept run directory.
+- HTTP fallback usage is explicitly recorded for `p2p-first` and `http-first`.
+- Report median and p95 elapsed time for each package/mode/seed-count group.

@@ -23,6 +23,16 @@ Implementation: in `try_swarm_substitute`, start the HTTP nar download as a
 concurrent tokio task. If the swarm download succeeds first, cancel the
 HTTP task. If HTTP succeeds first, save to nar store and reply success.
 
+## HTTP and Multi-Peer Benchmark Suite
+
+Extend the benchmark harness to compare HTTP, p2p-only, and p2p-first modes
+with repeated runs and multiple seed counts. The important comparison is not
+the current single-node `hello` proof, but median and p95 elapsed time across
+small, medium, and large packages with 1, 3, 5, and 8 seeders.
+
+The methodology and acceptance criteria are documented in
+`docs/benchmarks.md` under "Future Benchmark Work".
+
 ## Bandwidth Limits for Seeding
 
 The `BandwidthLimiter` module exists (token-bucket rate limiting) but is not
