@@ -49,6 +49,10 @@ struct Cli {
     #[arg(long, global = true)]
     policy: Option<SubstitutePolicy>,
 
+    /// Minimum P2P providers required before claiming or downloading a nar
+    #[arg(long, global = true)]
+    min_providers: Option<usize>,
+
     /// Enable web dashboard in daemon mode
     #[arg(long)]
     dashboard: bool,
@@ -76,6 +80,10 @@ struct Cli {
     /// Comma-separated store paths to seed via guix archive --export
     #[arg(long, global = true)]
     seed: Option<String>,
+
+    /// JSON metadata file for offline narinfo lookups
+    #[arg(long, global = true)]
+    local_narinfo: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
@@ -115,6 +123,12 @@ async fn main() -> anyhow::Result<()> {
 
     if let Some(ref seed) = cli.seed {
         config.seed_paths = seed.split(',').map(str::to_string).collect();
+    }
+    if let Some(ref path) = cli.local_narinfo {
+        config.local_narinfo_path = Some(path.clone());
+    }
+    if let Some(min_providers) = cli.min_providers {
+        config.min_providers = min_providers;
     }
 
     tracing::info!("Starting guix-p2p");
@@ -182,6 +196,7 @@ async fn main() -> anyhow::Result<()> {
     let provider_cache = dht::create_provider_cache();
     let narinfo_cache = std::sync::Mutex::new(narinfo::NarinfoCache::new(60));
     let narinfo_cache = std::sync::Arc::new(narinfo_cache);
+    load_local_narinfo_metadata(&config, &narinfo_cache);
 
     let http_client = guix_p2p::http_client::create_http_client(&config)
         .context("failed to create HTTP client")?;
@@ -298,4 +313,71 @@ async fn main() -> anyhow::Result<()> {
     let _ = reputation.lock().unwrap().save(&rep_path);
 
     Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LocalNarinfoFile {
+    narinfos: Vec<LocalNarinfoEntry>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LocalNarinfoEntry {
+    store_path: String,
+    nar_hash: String,
+    nar_size: u64,
+    #[serde(default)]
+    references: Vec<String>,
+    deriver: Option<String>,
+    #[serde(default)]
+    download_size: u64,
+}
+
+fn load_local_narinfo_metadata(
+    config: &guix_p2p::config::Config,
+    cache: &std::sync::Arc<std::sync::Mutex<narinfo::NarinfoCache>>,
+) {
+    let Some(path) = &config.local_narinfo_path else {
+        return;
+    };
+
+    match load_local_narinfos(path) {
+        Ok(narinfos) => {
+            let mut guard = cache.lock().unwrap();
+            for info in narinfos {
+                match guix_p2p::store_path::hash_part(&info.store_path) {
+                    Ok(hash_part) => guard.put(hash_part, info),
+                    Err(e) => tracing::warn!("skipping local narinfo: {}", e),
+                }
+            }
+            tracing::info!("loaded local narinfo metadata from {}", path.display());
+        },
+        Err(e) => tracing::warn!("failed to load local narinfo metadata {}: {}", path.display(), e),
+    }
+}
+
+fn load_local_narinfos(path: &std::path::Path) -> anyhow::Result<Vec<narinfo::Narinfo>> {
+    let file: LocalNarinfoFile = serde_json::from_str(
+        &std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?,
+    )
+    .with_context(|| format!("failed to parse {}", path.display()))?;
+
+    Ok(file
+        .narinfos
+        .into_iter()
+        .map(|entry| narinfo::Narinfo {
+            store_path: entry.store_path,
+            nar_hash: entry.nar_hash,
+            nar_size: entry.nar_size,
+            references: entry.references,
+            deriver: entry.deriver,
+            urls: vec![narinfo::NarUrl {
+                url: "p2p://local-metadata".to_string(),
+                compression: "none".to_string(),
+                file_size: entry.download_size,
+            }],
+            signed_portion: "local narinfo metadata".to_string(),
+            signature: None,
+        })
+        .collect())
 }

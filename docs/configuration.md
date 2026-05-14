@@ -39,7 +39,7 @@ seed_paths = ["/gnu/store/...-hello"]
 | `request_timeout_secs` | `30` | none | Overall provider lookup and block request timeout. |
 | `stall_timeout_secs` | `30` | none | Abort a P2P download after this many seconds without block progress. |
 | `max_peers_per_download` | `8` | none | Upper bound on peers used for one active download. |
-| `min_providers` | `3` | none | Minimum DHT providers required before attempting P2P. Local two-node tests set this to `1`. |
+| `min_providers` | `3` | `--min-providers` | Minimum DHT providers required before attempting P2P. Local two-node tests set this to `1`. |
 | `max_total_peers` | `50` | none | Connection manager peer limit. |
 | `connection_retries` | `3` | none | Connection retry count. |
 | `health_check_interval_secs` | `60` | none | Connection health check interval. |

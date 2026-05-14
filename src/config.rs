@@ -65,6 +65,7 @@ struct ConfigFile {
     tor_only: Option<bool>,
     socket_path: Option<String>,
     seed_paths: Option<Vec<String>>,
+    local_narinfo_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +96,8 @@ pub struct Config {
     pub socket_path: String,
     /// Store paths to seed on startup via `guix archive --export`.
     pub seed_paths: Vec<String>,
+    /// Optional JSON metadata file for offline narinfo lookups.
+    pub local_narinfo_path: Option<PathBuf>,
 }
 
 impl Config {
@@ -166,6 +169,7 @@ impl Config {
                 .socket_path
                 .unwrap_or_else(|| cache_dir.join("guix-p2p.sock").display().to_string()),
             seed_paths: file.seed_paths.unwrap_or_default(),
+            local_narinfo_path: file.local_narinfo_path.map(PathBuf::from),
         }
     }
 }

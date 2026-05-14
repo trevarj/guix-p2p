@@ -85,7 +85,7 @@ guix-p2p (Rust, libp2p)
 | Transport | QUIC (libp2p-quic) + TCP fallback | QUIC is the default listen address; TCP is enabled for restricted containers and networks where UDP is unavailable |
 | NAT traversal | Built into libp2p (autonat/relay/dcutr), deferred post-MVP | Significant complexity; initial users need open ports or IPv6 |
 | Daemon integration | Unix socket relay + PATH wrapper | Zero daemon C++ changes; relay gives <1ms startup |
-| Narinfos | HTTP fetch from official substitute URLs | Tiny (<500 bytes); existing trust chain unchanged |
+| Narinfos | HTTP fetch from official substitute URLs, optional local metadata file for offline harnesses | Tiny (<500 bytes); existing trust chain unchanged for HTTP, while local metadata lets seeded p2p-only tests avoid network lookup |
 | Nars | DHT + swarm; not-found replies let guix-daemon chain to HTTP substituters | Heavy payload; distributed across peers for P2P |
 | Distribution | External project, crates.io for development, Guix channel for packaging | Not targeting upstream Guix inclusion (would need pure Guile) |
 
@@ -151,8 +151,17 @@ matching guix-daemon's permission model.
 - **info**: daemon writes `info <path1> ...\n`. Reply per path: store_path,
   deriver, ref_count, refs, download_size, nar_size, then blank line.
   Narinfo derivers and references are returned as full `/gnu/store/...` paths.
-  In `p2p-only` mode, info is returned only when the corresponding NarHash has
-  enough P2P providers.
+  `p2p-only` info replies are not DHT-gated; availability is enforced by
+  `have` and the final `substitute` request.
+
+`--local-narinfo PATH` or `local_narinfo_path = "PATH"` loads a JSON metadata
+file into the narinfo cache at daemon startup. The file has a top-level
+`narinfos` array with `store_path`, `nar_hash`, `nar_size`, `references`,
+optional `deriver`, and optional `download_size` fields. This is intended for
+offline/local benchmark harnesses that pre-seed store paths and already know the
+corresponding NAR hashes. If local metadata has `nar_size = 0`, p2p downloads
+derive the block count from the provider handshake and still verify the final
+NAR hash.
 
 ### Substitute protocol
 
@@ -265,7 +274,9 @@ server URLs in the narinfo. Decompression supports gzip and zstd; lzip is not
 yet supported. The preference order is: zstd > gzip > none.
 
 ### Safety thresholds:
-- DHT returns < `min_providers` (3) peers → skip swarm, reply not-found
+- DHT returns < `min_providers` peers → skip swarm, reply not-found. The
+  provider threshold defaults to `3` and can be set with `--min-providers` or
+  `min_providers` in config.
 - Swarm download stalls (no new blocks for `stall_timeout_secs` (30s)) → abort, reply not-found
 - Nar hash verification failed → reply not-found
 - Narinfo signature verification failed → report error, no fallback (security)

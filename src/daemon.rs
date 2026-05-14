@@ -721,10 +721,21 @@ async fn try_p2p_download(
         return Err("no successful P2P handshakes".into());
     }
 
-    let mut download_block_info = BlockInfo::from_file_size(nar_size, config.block_size);
-    if let Some(first) = handshakes.first() {
-        download_block_info.set_hashes(first.block_hashes.clone());
-    }
+    let download_block_info = if nar_size == 0 {
+        let first = handshakes.first().ok_or_else(|| "no successful P2P handshakes".to_string())?;
+        BlockInfo {
+            block_count: first.block_count,
+            block_size: config.block_size,
+            last_block_size: config.block_size,
+            block_hashes: first.block_hashes.clone(),
+        }
+    } else {
+        let mut info = BlockInfo::from_file_size(nar_size, config.block_size);
+        if let Some(first) = handshakes.first() {
+            info.set_hashes(first.block_hashes.clone());
+        }
+        info
+    };
 
     let download_start = std::time::Instant::now();
 

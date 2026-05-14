@@ -99,6 +99,18 @@ medians, and whether P2P block-serving evidence was observed.
 
 Per-run temp directories are removed unless `--keep-temp` is passed.
 
+For p2p modes, the container benchmark also runs an explicit relay substitute
+restore because shared host-store containers can make exact store-path builds a
+no-op. With `--keep-temp`, inspect:
+
+- `$BASE/tmp/<package>-<mode>-<iteration>/manual-substitute-output`
+- `$BASE/tmp/<package>-<mode>-<iteration>/logs/direct-substitute.log`
+- `$BASE/tmp/<package>-<mode>-<iteration>/logs/node-a.log`
+- `$BASE/tmp/<package>-<mode>-<iteration>/logs/node-b.log`
+
+If a kept temp directory contains container-owned files, rerun with a fresh
+`--base` rather than deleting the evidence directory.
+
 The smoke and benchmark harnesses require the test container to be able to
 write `/gnu/store`, because raw `guix-daemon` imports substituted nars into
 the store even with `--max-jobs=0`. If the host exposes `/gnu/store` read-only,

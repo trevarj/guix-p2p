@@ -98,7 +98,7 @@ impl ActiveDownload {
             }
         }
 
-        if nar.len() != self.nar_size as usize {
+        if self.nar_size > 0 && nar.len() != self.nar_size as usize {
             return Err(DownloadError::Incomplete);
         }
 
