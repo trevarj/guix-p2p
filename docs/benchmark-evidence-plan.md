@@ -9,7 +9,13 @@ work has measurable proof attached.
 ## Current Status
 
 - Dashboard evidence output is implemented in `guix-p2p-e2e vm fetch`.
-- Strict VM proof rerun is still pending.
+- Provider lookup now collects and deduplicates a short burst of matching DHT
+  provider notifications before handshakes, so stale provider records do not
+  immediately exclude newer seeders.
+- P2p-only `info` replies now return verified narinfo metadata without DHT
+  gating; availability is enforced by `have` and the final `substitute`
+  request, so Guix dependency metadata checks do not stall the VM proof.
+- Strict VM proof rerun passed for `hello` and printed dashboard evidence.
 - Benchmark harness run is still pending.
 
 ## Key Changes

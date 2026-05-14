@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -224,8 +224,8 @@ async fn handle_have(
 #[allow(clippy::too_many_arguments)]
 async fn handle_info(
     config: &Config,
-    query_tx: &UnboundedSender<String>,
-    notify_rx: &mut NotifyRx,
+    _query_tx: &UnboundedSender<String>,
+    _notify_rx: &mut NotifyRx,
     cache: &Mutex<NarinfoCache>,
     reply: &mut ReplyWriter,
     paths: &[String],
@@ -251,22 +251,6 @@ async fn handle_info(
                     },
                 };
                 let dht_key = hex::encode(nar_hash_bytes);
-                if config.substitute_policy == SubstitutePolicy::P2pOnly {
-                    let _ = query_tx.send(dht_key.clone());
-                    let query_timeout =
-                        tokio::time::Duration::from_secs(config.request_timeout_secs.min(5));
-                    let providers =
-                        wait_for_providers_for_duration(notify_rx, &dht_key, query_timeout).await;
-                    if providers.len() < config.min_providers {
-                        tracing::info!(
-                            "info: skipping {} (p2p-only, only {}/{}) providers found",
-                            path,
-                            providers.len(),
-                            config.min_providers
-                        );
-                        continue;
-                    }
-                }
 
                 if let Some(tx) = event_tx {
                     let _ = tx.send(DashboardEvent::CatalogEntry {
@@ -274,7 +258,7 @@ async fn handle_info(
                         store_path: Some(info.store_path.clone()),
                         nar_size: Some(info.nar_size),
                         nar_hash: Some(dht_key),
-                        p2p_available: config.substitute_policy == SubstitutePolicy::P2pOnly,
+                        p2p_available: false,
                     });
                 }
                 let _ = reply.write_line(&info.store_path);
@@ -816,18 +800,32 @@ async fn wait_for_providers_for_duration(
     timeout: tokio::time::Duration,
 ) -> Vec<PeerId> {
     let deadline = tokio::time::Instant::now() + timeout;
+    let collect_grace = tokio::time::Duration::from_secs(3);
+    let mut collect_until = deadline;
+    let mut providers = Vec::new();
+    let mut seen = HashSet::new();
 
     loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let remaining = collect_until.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
-            tracing::debug!("Provider lookup timed out for {}", dht_key);
-            return Vec::new();
+            if providers.is_empty() {
+                tracing::debug!("Provider lookup timed out for {}", dht_key);
+            }
+            return providers;
         }
 
-        match tokio::time::timeout(tokio::time::Duration::from_secs(1), notify_rx.recv()).await {
+        let wait_for = remaining.min(tokio::time::Duration::from_secs(1));
+        match tokio::time::timeout(wait_for, notify_rx.recv()).await {
             Ok(Ok(SwarmNotification::ProvidersFound { hash, peers })) => {
                 if hash == dht_key {
-                    return peers;
+                    let new_providers: Vec<_> =
+                        peers.into_iter().filter(|peer| seen.insert(*peer)).collect();
+                    let added = new_providers.len();
+                    providers.extend(new_providers);
+
+                    if added > 0 && collect_until == deadline {
+                        collect_until = (tokio::time::Instant::now() + collect_grace).min(deadline);
+                    }
                 }
             },
             Ok(Ok(_)) => {},
@@ -1394,5 +1392,42 @@ mod tests {
     #[test]
     fn test_extract_bad() {
         assert!(extract_hash_part("/bad/path").is_err());
+    }
+
+    #[tokio::test]
+    async fn wait_for_providers_collects_matching_notifications() {
+        let (notify_tx, mut notify_rx) = tokio::sync::broadcast::channel(8);
+        let dht_key = "d4d3119688670b1299e8457d4f35439c5b427bf5ff31b5c17635f1c481d70a62";
+        let stale = PeerId::random();
+        let current = PeerId::random();
+        let ignored = PeerId::random();
+
+        notify_tx
+            .send(SwarmNotification::ProvidersFound {
+                hash: dht_key.to_string(),
+                peers: vec![stale],
+            })
+            .unwrap();
+        notify_tx
+            .send(SwarmNotification::ProvidersFound {
+                hash: "other".to_string(),
+                peers: vec![ignored],
+            })
+            .unwrap();
+        notify_tx
+            .send(SwarmNotification::ProvidersFound {
+                hash: dht_key.to_string(),
+                peers: vec![stale, current],
+            })
+            .unwrap();
+
+        let providers = wait_for_providers_for_duration(
+            &mut notify_rx,
+            dht_key,
+            tokio::time::Duration::from_millis(50),
+        )
+        .await;
+
+        assert_eq!(providers, vec![stale, current]);
     }
 }

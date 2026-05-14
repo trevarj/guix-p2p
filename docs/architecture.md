@@ -54,7 +54,7 @@ guix-p2p (Rust, libp2p)
   │     "substitute" → swarm download or reply not-found → fd 4 reply
   │
   ├─► libp2p Kad DHT (QUIC/TCP transport, SHA-256 key = nar hash)
-  │     get_providers(nar_hash) → list of PeerIds
+  │     get_providers(nar_hash) → deduplicated burst of PeerIds
   │     start_providing(nar_hash) → announce availability
   │     Bootstrap from community-maintained seed nodes
   │
@@ -180,8 +180,10 @@ the narinfo's expected `NarHash`. If they don't match:
 3. If policy is http-first or p2p-first:
      → include all paths in reply (we can serve via HTTP)
    If policy is p2p-only:
-     → kad.get_providers(nar_hash) → Vec<PeerId>
+     → kad.get_providers(nar_hash) → collect/deduplicate matching PeerIds
      → include path only if peers found
+   "info" returns verified narinfo metadata without DHT-gating; availability is
+   enforced by "have" and the final "substitute" request.
 
 4. "substitute /gnu/store/abc...-foo /tmp/dest"
 5. Fetch narinfo from substitute servers, verify signature

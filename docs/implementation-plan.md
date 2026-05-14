@@ -379,7 +379,7 @@ the fetch node imports the NAR from the seed node through `guix-p2p`.
   private store/state and `GUIX` pointing to wrapper
 - [x] Phase 6b: Run `guix build hello` inside the fetch node through the raw daemon
 - [x] Phase 7: Propagate build exit code from the raw daemon proof
-- [ ] Print dashboard catalog/seeds from the VM proof
+- [x] Print dashboard catalog/seeds from the VM proof
 - [x] Phase 8: Managed VM process status/stop commands
 
 ### Key Design Decisions

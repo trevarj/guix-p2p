@@ -141,7 +141,8 @@ struct NarDownloader {
 
 1. **Initialize**: from narinfo, get nar_hash and nar_size for the raw
    single-item NAR byte stream. Compute block count.
-2. **Get providers**: `kad.get_providers(nar_hash)` → Vec<PeerId>
+2. **Get providers**: `kad.get_providers(nar_hash)` → deduplicated burst of
+   `PeerId`s for the matching NAR hash
 3. **Connect**: dial each provider, establish request-response channel
 4. **Handshake**: send HANDSHAKE to each peer. Collect:
    - `blocks_available` bitfield per peer
