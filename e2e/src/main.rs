@@ -3,6 +3,13 @@ use std::{os::unix::process::CommandExt, path::PathBuf};
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
 
+mod format;
+
+use format::{
+    contains_any, first_line, format_bytes, json_string, parse_key_line, read_tail, sanitize_name,
+    shell_quote, store_hash_part, toml_string, unix_timestamp,
+};
+
 // ── CLI ──────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
@@ -803,10 +810,9 @@ fn vm_reset(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<
         anyhow::bail!("base disk is missing; build it first with: vm image");
     }
     let mut registry = VmRegistry::load(config)?;
-    let targets: Vec<String> = if all || node.is_none() {
-        registry.nodes.iter().map(|node| node.name.clone()).collect()
-    } else {
-        vec![registry.node(node.expect("checked above"))?.name.clone()]
+    let targets: Vec<String> = match (all, node) {
+        (true, _) | (_, None) => registry.nodes.iter().map(|node| node.name.clone()).collect(),
+        (false, Some(name)) => vec![registry.node(name)?.name.clone()],
     };
     if targets.is_empty() {
         anyhow::bail!("no VM nodes are registered yet");
@@ -918,10 +924,9 @@ fn qemu_command(
 
 fn vm_stop(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<()> {
     let mut registry = VmRegistry::load(config)?;
-    let names: Vec<String> = if all || node.is_none() {
-        registry.nodes.iter().map(|node| node.name.clone()).collect()
-    } else {
-        vec![registry.node(node.expect("checked above"))?.name.clone()]
+    let names: Vec<String> = match (all, node) {
+        (true, _) | (_, None) => registry.nodes.iter().map(|node| node.name.clone()).collect(),
+        (false, Some(name)) => vec![registry.node(name)?.name.clone()],
     };
     for name in names {
         let target = registry.node_mut(&name)?;
@@ -940,10 +945,9 @@ fn vm_stop(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<(
 
 fn vm_status(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
-    let targets: Vec<&VmNode> = if all || node.is_none() {
-        registry.nodes.iter().collect()
-    } else {
-        vec![registry.node(node.expect("checked above"))?]
+    let targets: Vec<&VmNode> = match (all, node) {
+        (true, _) | (_, None) => registry.nodes.iter().collect(),
+        (false, Some(name)) => vec![registry.node(name)?],
     };
     if targets.is_empty() {
         println!("no VM nodes registered");
@@ -1008,10 +1012,9 @@ fn vm_wait_ssh(config: &VmConfig, nodes: &[String]) -> anyhow::Result<()> {
 fn vm_push_binary(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<()> {
     ensure_guix_p2p_binary(config)?;
     let registry = VmRegistry::load(config)?;
-    let targets: Vec<&VmNode> = if all || node.is_none() {
-        registry.nodes.iter().collect()
-    } else {
-        vec![registry.node(node.expect("checked above"))?]
+    let targets: Vec<&VmNode> = match (all, node) {
+        (true, _) | (_, None) => registry.nodes.iter().collect(),
+        (false, Some(name)) => vec![registry.node(name)?],
     };
     let libgcrypt_runtime = guix_build_last_path("libgcrypt")?;
     for target in targets {
@@ -2678,11 +2681,6 @@ fn guix_build_last_path(package: &str) -> anyhow::Result<String> {
         .ok_or_else(|| anyhow::anyhow!("guix build {package} did not print a store path"))
 }
 
-fn parse_key_line(output: &str, key: &str) -> Option<String> {
-    let prefix = format!("{key}=");
-    output.lines().filter_map(|line| line.strip_prefix(&prefix)).last().map(str::to_string)
-}
-
 fn write_vm_env(config: &VmConfig, node: &VmNode, seed: &VmSeed) -> anyhow::Result<()> {
     let content = format!(
         "export STORE_PATH={}\nexport PEER_ID={}\nexport E2E_PACKAGE={}\n",
@@ -2964,65 +2962,6 @@ done
 printf 'peer_id=%s\n' "$PEER_ID"
 printf 'pid=%s\nlog=%s\nsocket=%s\ndashboard=http://127.0.0.1:%s\n' "$PID" "$LOG" "$SOCKET" "$DASHBOARD_PORT"
 "#
-}
-
-fn store_hash_part(store_path: &str) -> Option<String> {
-    let rest = store_path.strip_prefix("/gnu/store/")?;
-    Some(rest.split_once('-')?.0.to_string())
-}
-
-fn contains_any(haystack: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| haystack.contains(needle))
-}
-
-fn json_string(value: &serde_json::Value, field: &str) -> Option<String> {
-    value.get(field)?.as_str().map(str::to_string)
-}
-
-fn toml_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
-}
-
-fn sanitize_name(name: &str) -> String {
-    name.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
-}
-
-fn first_line(value: &str) -> &str {
-    value.lines().next().unwrap_or("")
-}
-
-fn read_tail(path: &std::path::Path, max_lines: usize) -> String {
-    let content = std::fs::read_to_string(path).unwrap_or_default();
-    let lines: Vec<&str> = content.lines().collect();
-    let start = lines.len().saturating_sub(max_lines);
-    lines[start..].join("\n")
-}
-
-fn unix_timestamp() -> String {
-    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => format!("{} seconds since 1970-01-01 UTC", duration.as_secs()),
-        Err(_) => "unknown".to_string(),
-    }
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const KIB: f64 = 1024.0;
-    const MIB: f64 = 1024.0 * 1024.0;
-    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
-    let value = bytes as f64;
-    if value >= GIB {
-        format!("{:.2} GiB", value / GIB)
-    } else if value >= MIB {
-        format!("{:.2} MiB", value / MIB)
-    } else if value >= KIB {
-        format!("{:.2} KiB", value / KIB)
-    } else {
-        format!("{bytes} B")
-    }
 }
 
 #[cfg(test)]

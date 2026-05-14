@@ -1,11 +1,10 @@
 use std::{
     collections::HashMap,
-    io::{self, BufRead},
+    io,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use libp2p::PeerId;
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc::UnboundedSender;
@@ -17,10 +16,12 @@ use crate::{
     dashboard::{self, BuildRegistry, DashboardEvent, ObservedBuild},
     dht::ProviderCache,
     http_client::HttpClientError,
+    nar_hash,
     nar_restore::restore_nar_to_destination,
     nar_store::NarStore,
     narinfo::NarinfoCache,
     reputation::ReputationTracker,
+    store_path,
     swarm::{
         block::BlockInfo,
         codec::{BlockData, BlockRequest, BlockResponse},
@@ -28,289 +29,20 @@ use crate::{
     },
 };
 
-pub enum DaemonCommand {
-    Have(Vec<String>),
-    Info(Vec<String>),
-    Substitute { path: String, dest: String },
-}
+mod protocol;
 
-pub fn read_command() -> io::Result<DaemonCommand> {
-    let mut line = String::new();
-    let n = io::stdin().lock().read_line(&mut line)?;
-    if n == 0 {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "stdin closed"));
-    }
-    parse_command_line(line.trim())
-}
-
-pub fn parse_command_line(line: &str) -> io::Result<DaemonCommand> {
-    if let Some(rest) = line.strip_prefix("have ") {
-        let paths = rest.split_whitespace().map(str::to_string).collect();
-        Ok(DaemonCommand::Have(paths))
-    } else if let Some(rest) = line.strip_prefix("info ") {
-        let paths = rest.split_whitespace().map(str::to_string).collect();
-        Ok(DaemonCommand::Info(paths))
-    } else if let Some(rest) = line.strip_prefix("substitute ") {
-        let mut parts = rest.splitn(2, ' ');
-        let path = parts.next().unwrap_or("").to_string();
-        let dest = parts.next().unwrap_or("").to_string();
-        Ok(DaemonCommand::Substitute { path, dest })
-    } else {
-        Ok(DaemonCommand::Have(vec![line.to_string()]))
-    }
-}
-
-pub enum ReplyWriter {
-    /// Write structured replies to fd 4 and trace messages to stdout.
-    Fd4,
-    /// Collect all output into a buffer (no channel prefix, for direct use).
-    Buffer(Vec<u8>),
-    /// Collect output with channel prefix framing for socket relay.
-    /// fd4: lines → fd 4, out: lines → stdout, nar: lines → restored substitute.
-    Socket { buf: Vec<u8> },
-}
-
-impl ReplyWriter {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        ReplyWriter::Fd4
-    }
-
-    pub fn buffer() -> Self {
-        ReplyWriter::Buffer(Vec::new())
-    }
-
-    pub fn socket() -> Self {
-        ReplyWriter::Socket { buf: Vec::new() }
-    }
-
-    /// Write a structured reply line (to fd 4 in direct mode, fd4: prefix in socket mode).
-    pub fn write_line(&mut self, line: &str) -> io::Result<()> {
-        match self {
-            ReplyWriter::Fd4 => {
-                let mut buf = line.as_bytes().to_vec();
-                buf.push(b'\n');
-                unsafe {
-                    let n = libc::write(4, buf.as_ptr() as *const libc::c_void, buf.len());
-                    if n < 0 {
-                        return Err(io::Error::last_os_error());
-                    }
-                }
-                Ok(())
-            },
-            ReplyWriter::Buffer(buf) => {
-                buf.extend_from_slice(line.as_bytes());
-                buf.push(b'\n');
-                Ok(())
-            },
-            ReplyWriter::Socket { buf } => {
-                buf.extend_from_slice(b"fd4:");
-                buf.extend_from_slice(line.as_bytes());
-                buf.push(b'\n');
-                Ok(())
-            },
-        }
-    }
-
-    /// Write a trace output line (to stdout in direct mode, out: prefix in socket mode).
-    pub fn write_trace(&mut self, line: &str) -> io::Result<()> {
-        match self {
-            ReplyWriter::Fd4 => {
-                let mut buf = line.as_bytes().to_vec();
-                buf.push(b'\n');
-                unsafe {
-                    let n = libc::write(1, buf.as_ptr() as *const libc::c_void, buf.len());
-                    if n < 0 {
-                        return Err(io::Error::last_os_error());
-                    }
-                }
-                Ok(())
-            },
-            ReplyWriter::Buffer(buf) => {
-                // In buffer mode, traces go to the same buffer (for testing)
-                buf.extend_from_slice(line.as_bytes());
-                buf.push(b'\n');
-                Ok(())
-            },
-            ReplyWriter::Socket { buf } => {
-                buf.extend_from_slice(b"out:");
-                buf.extend_from_slice(line.as_bytes());
-                buf.push(b'\n');
-                Ok(())
-            },
-        }
-    }
-
-    /// Send raw NAR bytes to a socket relay. The relay restores them into the
-    /// destination path while retaining the guix-daemon child privileges.
-    pub fn write_nar_data(&mut self, nar_data: &[u8]) -> io::Result<()> {
-        const CHUNK_SIZE: usize = 48 * 1024;
-
-        if let ReplyWriter::Socket { buf } = self {
-            for chunk in nar_data.chunks(CHUNK_SIZE) {
-                buf.extend_from_slice(b"nar:");
-                buf.extend_from_slice(BASE64.encode(chunk).as_bytes());
-                buf.push(b'\n');
-            }
-            buf.extend_from_slice(b"nar-end\n");
-        }
-
-        Ok(())
-    }
-
-    pub fn is_socket(&self) -> bool {
-        matches!(self, ReplyWriter::Socket { .. })
-    }
-
-    pub fn write_end(&mut self) -> io::Result<()> {
-        self.write_line("")
-    }
-
-    /// Flush socket buffers to the writer. For Socket mode, writes fd4 then out.
-    pub async fn flush_socket(
-        &mut self,
-        writer: &mut (impl tokio::io::AsyncWrite + Unpin),
-    ) -> io::Result<()> {
-        use tokio::io::AsyncWriteExt;
-        match self {
-            ReplyWriter::Socket { buf } => {
-                if !buf.is_empty() {
-                    writer.write_all(buf).await?;
-                    buf.clear();
-                    writer.flush().await?;
-                }
-                Ok(())
-            },
-            _ => Ok(()),
-        }
-    }
-
-    /// Check if there's any buffered data to flush (for Buffer and Socket modes).
-    pub fn has_data(&self) -> bool {
-        match self {
-            ReplyWriter::Buffer(buf) => !buf.is_empty(),
-            ReplyWriter::Socket { buf } => !buf.is_empty(),
-            ReplyWriter::Fd4 => false,
-        }
-    }
-
-    /// Get the buffer contents (only for Buffer mode).
-    pub fn into_buffer(self) -> Option<Vec<u8>> {
-        match self {
-            ReplyWriter::Buffer(buf) => Some(buf),
-            _ => None,
-        }
-    }
-}
-
-/// An `std::io::Write` implementation that collects lines into a Vec<String>.
-pub struct LineBuffer {
-    lines: Vec<String>,
-}
-
-impl Default for LineBuffer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl LineBuffer {
-    pub fn new() -> Self {
-        LineBuffer { lines: Vec::new() }
-    }
-
-    pub fn into_string(self) -> String {
-        let mut out = String::new();
-        for line in &self.lines {
-            out.push_str(line);
-            out.push('\n');
-        }
-        out
-    }
-}
-
-impl io::Write for LineBuffer {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let s = String::from_utf8_lossy(buf);
-        for line in s.lines() {
-            self.lines.push(line.to_string());
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
+pub use protocol::{
+    DaemonCommand, LineBuffer, ReplyWriter, format_trace_progress, format_trace_started,
+    format_trace_succeeded, parse_command_line, read_command,
+};
 
 pub fn extract_hash_part(store_path: &str) -> Result<String, String> {
-    let prefix = "/gnu/store/";
-    if !store_path.starts_with(prefix) {
-        return Err(format!("not a store path: {}", store_path));
-    }
-    let rest = &store_path[prefix.len()..];
-    let hash_end = rest.find('-').ok_or_else(|| format!("no name separator in: {}", store_path))?;
-    Ok(rest[..hash_end].to_string())
+    store_path::hash_part(store_path)
 }
 
 /// Extract the raw SHA-256 bytes from a narinfo NarHash field.
 fn extract_nar_hash_bytes(nar_hash: &str) -> Option<[u8; 32]> {
-    let hash = nar_hash.strip_prefix("sha256:").unwrap_or(nar_hash);
-    let bytes = if hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
-        hex::decode(hash).ok()?
-    } else {
-        decode_nix_base32(hash)?
-    };
-    if bytes.len() != 32 {
-        return None;
-    }
-    let mut arr = [0u8; 32];
-    arr.copy_from_slice(&bytes);
-    Some(arr)
-}
-
-fn decode_nix_base32(input: &str) -> Option<Vec<u8>> {
-    const ALPHABET: &[u8; 32] = b"0123456789abcdfghijklmnpqrsvwxyz";
-    let mut out = vec![0u8; input.len() * 5 / 8];
-    for (index, chr) in input.bytes().rev().enumerate() {
-        let value = ALPHABET.iter().position(|&c| c == chr)? as u8;
-        set_nix_base32_quintet(&mut out, index, value);
-    }
-    Some(out)
-}
-
-fn set_nix_base32_quintet(out: &mut [u8], index: usize, value: u8) {
-    let offset = index * 5 / 8;
-    let value = value & 0x1f;
-    match index % 8 {
-        0 => out[offset] |= value,
-        1 => {
-            out[offset] |= (value & 0x07) << 5;
-            set_byte(out, offset + 1, value >> 3);
-        },
-        2 => out[offset] |= value << 2,
-        3 => {
-            out[offset] |= (value & 0x01) << 7;
-            set_byte(out, offset + 1, value >> 1);
-        },
-        4 => {
-            out[offset] |= (value & 0x0f) << 4;
-            set_byte(out, offset + 1, value >> 4);
-        },
-        5 => out[offset] |= value << 1,
-        6 => {
-            out[offset] |= (value & 0x03) << 6;
-            set_byte(out, offset + 1, value >> 2);
-        },
-        7 => out[offset] |= value << 3,
-        _ => unreachable!(),
-    }
-}
-
-fn set_byte(out: &mut [u8], offset: usize, value: u8) {
-    if let Some(byte) = out.get_mut(offset) {
-        *byte |= value;
-    }
+    nar_hash::sha256_bytes(nar_hash)
 }
 
 pub async fn run_query_mode(
@@ -566,11 +298,7 @@ async fn handle_info(
 }
 
 fn guix_store_path(path_or_basename: &str) -> String {
-    if path_or_basename.is_empty() || path_or_basename.starts_with("/gnu/store/") {
-        path_or_basename.to_string()
-    } else {
-        format!("/gnu/store/{path_or_basename}")
-    }
+    store_path::from_narinfo_path(path_or_basename)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1297,19 +1025,7 @@ async fn download_blocks_from_peers(
 }
 
 fn nar_hash_bytes(nar_hash: &str) -> Vec<u8> {
-    extract_nar_hash_bytes(nar_hash).map(Vec::from).unwrap_or_default()
-}
-
-pub fn format_trace_started(store_path: &str, url: &str, size: u64) -> String {
-    format!("@ download-started {} {} {}", store_path, url, size)
-}
-
-pub fn format_trace_progress(store_path: &str, url: &str, total: u64, transferred: u64) -> String {
-    format!("@ download-progress {} {} {} {}", store_path, url, total, transferred)
-}
-
-pub fn format_trace_succeeded(store_path: &str, url: &str, size: u64) -> String {
-    format!("@ download-succeeded {} {} {}", store_path, url, size)
+    nar_hash::sha256_vec(nar_hash)
 }
 
 #[allow(clippy::too_many_arguments)]

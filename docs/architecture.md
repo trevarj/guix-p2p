@@ -310,20 +310,30 @@ Narinfo flow:
 ```
 src/
 ├── lib.rs                   # Crate root (public API for integration tests)
-├── main.rs                  # CLI, swarm task, daemon/relay mode dispatch
+├── main.rs                  # CLI, config overlay, daemon/relay mode dispatch
 ├── behaviour.rs             # libp2p NetworkBehaviour (kad + block_exchange + mdns + identify)
 ├── channel.rs               # SwarmCommand / SwarmNotification enums (broadcast channel types)
 ├── config.rs                # Config struct (block_size, timeouts, ACL path, socket_path, etc.)
 ├── connection.rs            # ConnectionManager (retry/backoff, dead peer pruning, max peers)
-├── daemon.rs                # stdin parser, fd 4 reply writer, swarm substitute pipeline, daemon + socket listener
+├── daemon.rs                # Query/substitute pipeline, daemon mode, socket listener
+├── daemon/
+│   └── protocol.rs          # Daemon command parser, fd 4/socket reply writer, trace formatting
+├── runtime.rs               # libp2p swarm task, command handling, block request serving
 ├── relay.rs                 # Unix socket relay client (stdin → socket → fd 4)
 ├── dht.rs                   # Kad wrapper, handle_kad_event → notifications, get_providers, bootstrap
 ├── reputation.rs            # ReputationTracker (time-decay scoring, ban threshold, JSON persistence)
 ├── bandwidth.rs             # BandwidthLimiter (token-bucket, configurable caps)
-├── dashboard.rs             # Web dashboard (optional, --dashboard flag)
+├── dashboard.rs             # Dashboard HTTP/WebSocket routing and state
+├── dashboard/
+│   ├── catalog.rs           # Catalog state and event upsert logic
+│   ├── geo.rs               # Multiaddr IP extraction and country/flag helpers
+│   ├── packages.rs          # Guix profile package discovery and parsing
+│   └── seed_config.rs       # seed_paths TOML persistence/removal
 ├── http_client.rs           # Narinfo fetch (HTTP only), signature verification, cache
+├── nar_hash.rs              # NarHash hex/Nix-base32 decoding helpers
 ├── narinfo.rs               # Narinfo parser, ACL loader, Ed25519 verifier, NarinfoCache (with TTL eviction)
 ├── nar_store.rs             # NarStore: local nar cache, block serving, raw single-item nar seeding
+├── store_path.rs            # Guix store path parsing and normalization helpers
 ├── identity.rs              # Ed25519 keypair gen/persistence
 └── swarm/
     ├── mod.rs

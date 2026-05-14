@@ -457,7 +457,7 @@ Deriver: /gnu/store/xyz-test.drv
     #[test]
     fn test_extract_hash_part() {
         assert_eq!(
-            crate::daemon::extract_hash_part("/gnu/store/abc123def456ghi789jkl012mno345pq-foo-1.0")
+            crate::store_path::hash_part("/gnu/store/abc123def456ghi789jkl012mno345pq-foo-1.0")
                 .unwrap(),
             "abc123def456ghi789jkl012mno345pq"
         );

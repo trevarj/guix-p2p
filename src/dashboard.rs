@@ -1,9 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
-    env, fs,
     net::{IpAddr, SocketAddr},
-    path::{Path as FsPath, PathBuf},
-    process::Command,
+    path::Path as FsPath,
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -20,12 +18,23 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
-use toml_edit::{Array, DocumentMut, Item, Value};
 
 use crate::{
     channel::SwarmCommand, connection::ConnectionManager, dht::ProviderCache, nar_store::NarStore,
     reputation::ReputationTracker,
 };
+
+mod catalog;
+mod geo;
+mod packages;
+mod seed_config;
+
+pub use catalog::CatalogItem;
+use catalog::upsert_catalog_item;
+pub use geo::country_flag;
+use geo::extract_addr_info;
+use packages::{ApiPackage, installed_packages_from_profile, package_profiles};
+use seed_config::{persist_seed_path_to_config, remove_seed_path_from_config, user_config_path};
 
 pub type EventBus = tokio::sync::broadcast::Sender<DashboardEvent>;
 
@@ -157,16 +166,6 @@ struct ApiCatalogEntry {
     p2p_available: bool,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-struct ApiPackage {
-    source: String,
-    name: String,
-    version: String,
-    output: String,
-    store_path: String,
-    seeded: bool,
-}
-
 #[derive(Debug, Deserialize)]
 struct ApiSeedRequest {
     store_path: String,
@@ -182,15 +181,6 @@ struct ApiSeedMutation {
 #[derive(Debug, Serialize)]
 struct ApiError {
     error: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct CatalogItem {
-    hash_part: String,
-    store_path: Option<String>,
-    nar_size: Option<u64>,
-    nar_hash: Option<String>,
-    p2p_available: bool,
 }
 
 #[derive(Clone)]
@@ -498,151 +488,6 @@ pub fn seed_mutation_allowed_for_bind(bind: &str) -> bool {
     bind.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
-fn package_profiles() -> Vec<(String, PathBuf)> {
-    package_profiles_for_home(env::var_os("HOME").map(PathBuf::from))
-}
-
-fn package_profiles_for_home(home: Option<PathBuf>) -> Vec<(String, PathBuf)> {
-    let mut profiles = vec![
-        ("system".to_string(), PathBuf::from("/run/current-system/profile")),
-        ("kernel".to_string(), PathBuf::from("/run/current-system/kernel")),
-    ];
-    if let Some(home) = home {
-        profiles.push(("home".to_string(), home.join(".guix-home/profile")));
-    }
-    profiles
-}
-
-fn user_config_path() -> PathBuf {
-    if let Ok(dir) = env::var("XDG_CONFIG_HOME") {
-        PathBuf::from(dir).join("guix-p2p/config.toml")
-    } else {
-        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        PathBuf::from(home).join(".config/guix-p2p/config.toml")
-    }
-}
-
-fn persist_seed_path_to_config(store_path: &str, config_path: &FsPath) -> anyhow::Result<()> {
-    let parent =
-        config_path.parent().ok_or_else(|| anyhow::anyhow!("config path has no parent"))?;
-    fs::create_dir_all(parent)?;
-
-    let content = fs::read_to_string(config_path).unwrap_or_default();
-    let mut doc = content.parse::<DocumentMut>().unwrap_or_else(|_| DocumentMut::new());
-
-    let mut values = match doc.get("seed_paths").and_then(Item::as_array) {
-        Some(existing) => {
-            existing.iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>()
-        },
-        None => Vec::new(),
-    };
-    if !values.iter().any(|value| value == store_path) {
-        values.push(store_path.to_string());
-    }
-
-    let mut array = Array::default();
-    for value in values {
-        array.push(value);
-    }
-    doc["seed_paths"] = Item::Value(Value::Array(array));
-    fs::write(config_path, doc.to_string())?;
-    Ok(())
-}
-
-fn remove_seed_path_from_config(store_path: &str, config_path: &FsPath) -> anyhow::Result<()> {
-    let content = match fs::read_to_string(config_path) {
-        Ok(content) => content,
-        Err(_) => return Ok(()),
-    };
-    let mut doc = content.parse::<DocumentMut>().unwrap_or_else(|_| DocumentMut::new());
-    let values = match doc.get("seed_paths").and_then(Item::as_array) {
-        Some(existing) => existing
-            .iter()
-            .filter_map(Value::as_str)
-            .filter(|value| *value != store_path)
-            .map(str::to_string)
-            .collect::<Vec<_>>(),
-        None => return Ok(()),
-    };
-
-    let mut array = Array::default();
-    for value in values {
-        array.push(value);
-    }
-    doc["seed_paths"] = Item::Value(Value::Array(array));
-    fs::write(config_path, doc.to_string())?;
-    Ok(())
-}
-
-fn installed_packages_from_profile(
-    source: &str,
-    profile: &FsPath,
-    seeded_store_paths: &HashSet<String>,
-) -> Vec<ApiPackage> {
-    if !profile.exists() {
-        return Vec::new();
-    }
-
-    let output = Command::new("guix")
-        .arg("package")
-        .arg("--list-installed")
-        .arg(format!("--profile={}", profile.display()))
-        .output();
-
-    let output = match output {
-        Ok(output) if output.status.success() => output,
-        Ok(output) => {
-            tracing::warn!(
-                "failed to list Guix packages for {} profile {}: status {}",
-                source,
-                profile.display(),
-                output.status,
-            );
-            return Vec::new();
-        },
-        Err(e) => {
-            tracing::warn!(
-                "failed to run guix package for {} profile {}: {}",
-                source,
-                profile.display(),
-                e,
-            );
-            return Vec::new();
-        },
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout
-        .lines()
-        .filter_map(|line| parse_installed_package(source, line, seeded_store_paths))
-        .collect()
-}
-
-fn parse_installed_package(
-    source: &str,
-    line: &str,
-    seeded_store_paths: &HashSet<String>,
-) -> Option<ApiPackage> {
-    let mut fields = line.split('\t');
-    let name = fields.next()?.trim();
-    let version = fields.next()?.trim();
-    let output = fields.next()?.trim();
-    let store_path = fields.next()?.trim();
-
-    if name.is_empty() || version.is_empty() || output.is_empty() || store_path.is_empty() {
-        return None;
-    }
-
-    Some(ApiPackage {
-        source: source.to_string(),
-        name: name.to_string(),
-        version: version.to_string(),
-        output: output.to_string(),
-        store_path: store_path.to_string(),
-        seeded: seeded_store_paths.contains(store_path),
-    })
-}
-
 async fn ws_handler(
     State(state): State<DashboardState>,
     ws: WebSocketUpgrade,
@@ -707,171 +552,17 @@ async fn maintain_catalog(state: DashboardState) {
     }
 }
 
-fn upsert_catalog_item(
-    catalog: &Arc<Mutex<HashMap<String, CatalogItem>>>,
-    hash_part: String,
-    store_path: Option<String>,
-    nar_size: Option<u64>,
-    nar_hash: Option<String>,
-    p2p_available: bool,
-) {
-    let mut cat = catalog.lock().unwrap();
-    cat.entry(hash_part.clone())
-        .and_modify(|entry: &mut CatalogItem| {
-            if store_path.is_some() {
-                entry.store_path = store_path.clone();
-            }
-            if nar_size.is_some() {
-                entry.nar_size = nar_size;
-            }
-            if nar_hash.is_some() {
-                entry.nar_hash = nar_hash.clone();
-            }
-            entry.p2p_available |= p2p_available;
-        })
-        .or_insert_with(|| CatalogItem {
-            hash_part,
-            store_path,
-            nar_size,
-            nar_hash,
-            p2p_available,
-        });
-}
-
-fn extract_addr_info(addrs: &[String]) -> (Option<String>, Option<String>) {
-    for addr in addrs {
-        if let Some(ip) = extract_ip_from_multiaddr(addr) {
-            let country = ip_to_country(&ip).map(|s| s.to_string());
-            return (Some(ip), country);
-        }
-    }
-    (None, None)
-}
-
-fn extract_ip_from_multiaddr(addr: &str) -> Option<String> {
-    let ip4_marker = "/ip4/";
-    if let Some(pos) = addr.find(ip4_marker) {
-        let rest = &addr[pos + ip4_marker.len()..];
-        return Some(rest.split('/').next()?.to_string());
-    }
-    let ip6_marker = "/ip6/";
-    if let Some(pos) = addr.find(ip6_marker) {
-        let rest = &addr[pos + ip6_marker.len()..];
-        return Some(rest.split('/').next()?.to_string());
-    }
-    None
-}
-
-fn ip_to_country(ip: &str) -> Option<&'static str> {
-    let first_octet = ip.split('.').next()?.parse::<u8>().ok()?;
-    match first_octet {
-        5 => Some("DE"),
-        14 => Some("JP"),
-        27 => Some("JP"),
-        31 => Some("NL"),
-        36 | 68 => Some("CA"),
-        41 => Some("KE"),
-        46 => Some("SE"),
-        49 => Some("JP"),
-        51 => Some("NO"),
-        58 => Some("JP"),
-        60 => Some("JP"),
-        62 => Some("IT"),
-        77..=83 => Some("RU"),
-        84 => Some("ES"),
-        85 | 86 => Some("CH"),
-        87 => Some("DK"),
-        88 => Some("PL"),
-        89..=95 => Some("RU"),
-        101 => Some("JP"),
-        102 => Some("ZA"),
-        103 => Some("JP"),
-        105 => Some("FR"),
-        106 => Some("JP"),
-        109 => Some("IL"),
-        110..=126 => Some("JP"),
-        151 | 181 | 189 | 190 | 200 | 201 => Some("BR"),
-        152 => Some("MX"),
-        154 => Some("TR"),
-        176 | 178 | 212 | 213 => Some("RU"),
-        177 => Some("AR"),
-        179 => Some("PE"),
-        184 => Some("CL"),
-        185 => Some("CZ"),
-        187 => Some("PT"),
-        188 => Some("RO"),
-        191 => Some("CO"),
-        193 => Some("HU"),
-        194 => Some("AT"),
-        195 => Some("GR"),
-        196 => Some("UA"),
-        197 => Some("NG"),
-        214..=215 => Some("PH"),
-        217 => Some("BE"),
-        1..=4
-        | 8
-        | 13
-        | 20..=24
-        | 40
-        | 44
-        | 45
-        | 47
-        | 50
-        | 52
-        | 54
-        | 63
-        | 64
-        | 65
-        | 66
-        | 67
-        | 69
-        | 71
-        | 72
-        | 73
-        | 74
-        | 75
-        | 76
-        | 96..=100
-        | 104
-        | 107
-        | 108
-        | 128..=150
-        | 152..=186
-        | 192
-        | 198
-        | 199
-        | 204..=209
-        | 216 => Some("US"),
-        _ => None,
-    }
-}
-
-pub fn country_flag(code: &str) -> String {
-    if code.len() != 2 {
-        return String::new();
-    }
-
-    let bytes = code.as_bytes();
-    let a = bytes[0].to_ascii_uppercase();
-    let b = bytes[1].to_ascii_uppercase();
-
-    if !a.is_ascii_uppercase() || !b.is_ascii_uppercase() {
-        return String::new();
-    }
-
-    format!(
-        "{}{}",
-        char::from_u32(0x1F1E6 + (a - b'A') as u32).unwrap_or(' '),
-        char::from_u32(0x1F1E6 + (b - b'A') as u32).unwrap_or(' '),
-    )
-}
-
 #[cfg(test)]
 mod tests {
+    use std::{fs, path::PathBuf};
+
     use axum::http::{Method, Request};
     use tower::ServiceExt;
 
-    use super::*;
+    use super::{
+        packages::{package_profiles_for_home, parse_installed_package},
+        *,
+    };
     use crate::{
         connection::{ConnectionConfig, ConnectionManager},
         dht::create_provider_cache,
