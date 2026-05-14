@@ -757,14 +757,14 @@ async fn try_p2p_download(
 
     let download_start = std::time::Instant::now();
 
+    let block_download = BlockDownloadContext { cmd_tx, notify_rx, config, event_tx };
+
     match download_blocks_from_peers(
-        cmd_tx,
-        notify_rx,
+        block_download,
         &handshakes,
         nar_size,
         download_block_info,
         nar_hash,
-        config,
     )
     .await
     {
@@ -885,6 +885,13 @@ struct PeerHandshake {
     block_count: u32,
 }
 
+struct BlockDownloadContext<'a> {
+    cmd_tx: &'a UnboundedSender<SwarmCommand>,
+    notify_rx: &'a mut NotifyRx,
+    config: &'a Config,
+    event_tx: &'a dashboard::EventBus,
+}
+
 #[derive(Clone, Debug)]
 enum BlockFetchState {
     Pending,
@@ -990,13 +997,11 @@ async fn handshake_with_providers(
 
 /// Orchestrate block downloads from peers.
 async fn download_blocks_from_peers(
-    cmd_tx: &UnboundedSender<SwarmCommand>,
-    notify_rx: &mut NotifyRx,
+    ctx: BlockDownloadContext<'_>,
     handshakes: &[PeerHandshake],
     nar_size: u64,
     block_info: BlockInfo,
     nar_hash: &str,
-    config: &Config,
 ) -> Result<(Vec<u8>, String), DownloadError> {
     let mut download = ActiveDownload::new(
         nar_hash.to_string(),
@@ -1029,14 +1034,20 @@ async fn download_blocks_from_peers(
         })
         .collect();
 
-    let overall_deadline =
-        tokio::time::Instant::now() + tokio::time::Duration::from_secs(config.request_timeout_secs);
-    let mut stall_deadline =
-        tokio::time::Instant::now() + tokio::time::Duration::from_secs(config.stall_timeout_secs);
-    let block_timeout = tokio::time::Duration::from_secs(config.stall_timeout_secs);
-    let max_in_flight = config.max_in_flight_blocks_per_peer.max(1);
+    let overall_deadline = tokio::time::Instant::now()
+        + tokio::time::Duration::from_secs(ctx.config.request_timeout_secs);
+    let mut stall_deadline = tokio::time::Instant::now()
+        + tokio::time::Duration::from_secs(ctx.config.stall_timeout_secs);
+    let block_timeout = tokio::time::Duration::from_secs(ctx.config.stall_timeout_secs);
+    let max_in_flight = ctx.config.max_in_flight_blocks_per_peer.max(1);
 
-    dispatch_block_requests(cmd_tx, &mut peer_states, &mut block_states, nar_hash, max_in_flight);
+    dispatch_block_requests(
+        ctx.cmd_tx,
+        &mut peer_states,
+        &mut block_states,
+        nar_hash,
+        max_in_flight,
+    );
 
     loop {
         let remaining = overall_deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -1048,7 +1059,7 @@ async fn download_blocks_from_peers(
         if tokio::time::Instant::now() > stall_deadline {
             tracing::warn!(
                 "Block download stalled (no new blocks for {}s)",
-                config.stall_timeout_secs
+                ctx.config.stall_timeout_secs
             );
             break;
         }
@@ -1059,7 +1070,7 @@ async fn download_blocks_from_peers(
         }
 
         dispatch_block_requests(
-            cmd_tx,
+            ctx.cmd_tx,
             &mut peer_states,
             &mut block_states,
             nar_hash,
@@ -1074,7 +1085,8 @@ async fn download_blocks_from_peers(
             break;
         }
 
-        match tokio::time::timeout(tokio::time::Duration::from_secs(1), notify_rx.recv()).await {
+        match tokio::time::timeout(tokio::time::Duration::from_secs(1), ctx.notify_rx.recv()).await
+        {
             Ok(Ok(SwarmNotification::BlockResponse {
                 peer,
                 response: BlockResponse::Blocks { data },
@@ -1093,6 +1105,20 @@ async fn download_blocks_from_peers(
                     for (idx, _) in &blocks {
                         peer_state.in_flight.remove(idx);
                     }
+                }
+
+                if newly_accepted > 0 {
+                    let bytes = blocks
+                        .iter()
+                        .filter(|(idx, _)| accepted_set.contains(idx))
+                        .map(|(_, data)| data.len() as u64)
+                        .sum();
+                    let _ = ctx.event_tx.send(DashboardEvent::BlockReceived {
+                        nar_hash: nar_hash.to_string(),
+                        peer_id: peer.to_string(),
+                        indices: accepted.clone(),
+                        bytes,
+                    });
                 }
 
                 for idx in accepted {
@@ -1119,7 +1145,7 @@ async fn download_blocks_from_peers(
 
                 if newly_accepted > 0 {
                     stall_deadline = tokio::time::Instant::now()
-                        + tokio::time::Duration::from_secs(config.stall_timeout_secs);
+                        + tokio::time::Duration::from_secs(ctx.config.stall_timeout_secs);
                 }
 
                 if download.is_complete() {
@@ -1246,6 +1272,7 @@ pub async fn run_daemon_mode(
             reputation: reputation.clone(),
             conn_mgr: conn_mgr.clone(),
             build_registry: build_registry.clone(),
+            transfer_registry: Arc::new(Mutex::new(HashMap::new())),
             started: std::time::Instant::now(),
             peer_id: local_peer_id.to_string(),
             event_bus: event_tx.clone(),

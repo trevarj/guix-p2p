@@ -65,7 +65,8 @@ pub enum DashboardEvent {
     BlockReceived {
         nar_hash: String,
         peer_id: String,
-        blocks: usize,
+        indices: Vec<u32>,
+        bytes: u64,
     },
     DownloadSucceeded {
         nar_hash: String,
@@ -102,6 +103,7 @@ pub enum DashboardEvent {
 }
 
 pub type BuildRegistry = Arc<Mutex<HashMap<String, ObservedBuild>>>;
+pub type TransferRegistry = Arc<Mutex<HashMap<String, TransferStats>>>;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ObservedBuild {
@@ -114,6 +116,25 @@ pub struct ObservedBuild {
     pub providers: Vec<String>,
     pub downloaded_at: Option<u64>,
     pub download_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TransferStats {
+    pub nar_hash: String,
+    pub store_path: Option<String>,
+    pub nar_size: Option<u64>,
+    pub total_blocks_received: usize,
+    pub total_bytes_received: u64,
+    pub total_blocks_served: usize,
+    pub download_peers: HashMap<String, PeerTransferStats>,
+    pub serving_peers: HashMap<String, PeerTransferStats>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct PeerTransferStats {
+    pub blocks: usize,
+    pub bytes: u64,
+    pub last_indices: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -166,6 +187,26 @@ struct ApiCatalogEntry {
     p2p_available: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ApiTransfer {
+    nar_hash: String,
+    store_path: Option<String>,
+    nar_size: Option<u64>,
+    total_blocks_received: usize,
+    total_bytes_received: u64,
+    total_blocks_served: usize,
+    download_peers: Vec<ApiTransferPeer>,
+    serving_peers: Vec<ApiTransferPeer>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ApiTransferPeer {
+    peer_id: String,
+    blocks: usize,
+    bytes: u64,
+    last_indices: Vec<u32>,
+}
+
 #[derive(Debug, Deserialize)]
 struct ApiSeedRequest {
     store_path: String,
@@ -189,6 +230,7 @@ pub struct DashboardState {
     pub reputation: Arc<Mutex<ReputationTracker>>,
     pub conn_mgr: Arc<Mutex<ConnectionManager>>,
     pub build_registry: BuildRegistry,
+    pub transfer_registry: TransferRegistry,
     pub started: Instant,
     pub peer_id: String,
     pub event_bus: EventBus,
@@ -207,6 +249,11 @@ pub async fn serve(state: DashboardState, port: u16, bind: &str) {
         maintain_catalog(catalog_state).await;
     });
 
+    let transfer_state = state.clone();
+    tokio::spawn(async move {
+        maintain_transfers(transfer_state).await;
+    });
+
     let app = dashboard_router(state);
 
     tracing::info!("Dashboard listening on http://{}", addr);
@@ -223,6 +270,7 @@ fn dashboard_router(state: DashboardState) -> Router {
         .route("/api/peers", get(api_peers))
         .route("/api/builds", get(api_builds))
         .route("/api/build/:hash", get(api_build_detail))
+        .route("/api/transfers", get(api_transfers))
         .route("/api/catalog", get(api_catalog))
         .route("/api/seeds", get(api_seeds).post(api_seed))
         .route("/api/seeds/:hash", delete(api_seed_delete))
@@ -319,6 +367,51 @@ async fn api_catalog(State(state): State<DashboardState>) -> Json<Vec<ApiCatalog
             .then_with(|| a.hash_part.cmp(&b.hash_part))
     });
     Json(entries)
+}
+
+async fn api_transfers(State(state): State<DashboardState>) -> Json<Vec<ApiTransfer>> {
+    let transfers = state.transfer_registry.lock().unwrap();
+    let mut entries: Vec<ApiTransfer> = transfers.values().map(api_transfer_from_stats).collect();
+    entries.sort_by(|a, b| {
+        b.total_blocks_received
+            .cmp(&a.total_blocks_received)
+            .then_with(|| b.total_blocks_served.cmp(&a.total_blocks_served))
+            .then_with(|| a.store_path.cmp(&b.store_path))
+            .then_with(|| a.nar_hash.cmp(&b.nar_hash))
+    });
+    Json(entries)
+}
+
+fn api_transfer_from_stats(stats: &TransferStats) -> ApiTransfer {
+    ApiTransfer {
+        nar_hash: stats.nar_hash.clone(),
+        store_path: stats.store_path.clone(),
+        nar_size: stats.nar_size,
+        total_blocks_received: stats.total_blocks_received,
+        total_bytes_received: stats.total_bytes_received,
+        total_blocks_served: stats.total_blocks_served,
+        download_peers: transfer_peer_entries(&stats.download_peers),
+        serving_peers: transfer_peer_entries(&stats.serving_peers),
+    }
+}
+
+fn transfer_peer_entries(peers: &HashMap<String, PeerTransferStats>) -> Vec<ApiTransferPeer> {
+    let mut entries: Vec<ApiTransferPeer> = peers
+        .iter()
+        .map(|(peer_id, stats)| ApiTransferPeer {
+            peer_id: peer_id.clone(),
+            blocks: stats.blocks,
+            bytes: stats.bytes,
+            last_indices: stats.last_indices.clone(),
+        })
+        .collect();
+    entries.sort_by(|a, b| {
+        b.blocks
+            .cmp(&a.blocks)
+            .then_with(|| b.bytes.cmp(&a.bytes))
+            .then_with(|| a.peer_id.cmp(&b.peer_id))
+    });
+    entries
 }
 
 async fn api_seeds(State(state): State<DashboardState>) -> Json<Vec<ApiSeededNar>> {
@@ -552,6 +645,73 @@ async fn maintain_catalog(state: DashboardState) {
     }
 }
 
+async fn maintain_transfers(state: DashboardState) {
+    let mut rx = state.event_bus.subscribe();
+
+    loop {
+        let event = match rx.recv().await {
+            Ok(e) => e,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                tracing::debug!("Dashboard transfer listener lagged by {} events", n);
+                continue;
+            },
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        };
+
+        match event {
+            DashboardEvent::DownloadStarted { nar_hash, store_path, nar_size } => {
+                let mut transfers = state.transfer_registry.lock().unwrap();
+                let entry = transfers
+                    .entry(nar_hash.clone())
+                    .or_insert_with(|| TransferStats { nar_hash, ..TransferStats::default() });
+                entry.store_path = Some(store_path);
+                entry.nar_size = Some(nar_size);
+            },
+            DashboardEvent::BlockReceived { nar_hash, peer_id, indices, bytes } => {
+                let mut transfers = state.transfer_registry.lock().unwrap();
+                let entry = transfers
+                    .entry(nar_hash.clone())
+                    .or_insert_with(|| TransferStats { nar_hash, ..TransferStats::default() });
+                entry.total_blocks_received += indices.len();
+                entry.total_bytes_received += bytes;
+                record_transfer_peer(&mut entry.download_peers, peer_id, indices, bytes);
+            },
+            DashboardEvent::BlockServed { nar_hash, peer_id, indices } => {
+                if indices.is_empty() {
+                    continue;
+                }
+                let mut transfers = state.transfer_registry.lock().unwrap();
+                let entry = transfers
+                    .entry(nar_hash.clone())
+                    .or_insert_with(|| TransferStats { nar_hash, ..TransferStats::default() });
+                entry.total_blocks_served += indices.len();
+                record_transfer_peer(&mut entry.serving_peers, peer_id, indices, 0);
+            },
+            DashboardEvent::DownloadSucceeded { nar_hash, store_path, size, .. } => {
+                let mut transfers = state.transfer_registry.lock().unwrap();
+                let entry = transfers
+                    .entry(nar_hash.clone())
+                    .or_insert_with(|| TransferStats { nar_hash, ..TransferStats::default() });
+                entry.store_path = Some(store_path);
+                entry.nar_size = Some(size);
+            },
+            _ => {},
+        }
+    }
+}
+
+fn record_transfer_peer(
+    peers: &mut HashMap<String, PeerTransferStats>,
+    peer_id: String,
+    indices: Vec<u32>,
+    bytes: u64,
+) {
+    let peer = peers.entry(peer_id).or_default();
+    peer.blocks += indices.len();
+    peer.bytes += bytes;
+    peer.last_indices = indices;
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, path::PathBuf};
@@ -576,6 +736,7 @@ mod tests {
             reputation: Arc::new(Mutex::new(ReputationTracker::new(5))),
             conn_mgr: Arc::new(Mutex::new(ConnectionManager::new(ConnectionConfig::default()))),
             build_registry: Arc::new(Mutex::new(HashMap::new())),
+            transfer_registry: Arc::new(Mutex::new(HashMap::new())),
             started: Instant::now(),
             peer_id: "local-peer".to_string(),
             event_bus,
@@ -629,6 +790,48 @@ mod tests {
         assert_eq!(peers[0].completed, 1);
         assert_eq!(peers[0].failed, 1);
         assert_eq!(peers[0].bytes_served, 4096);
+    }
+
+    #[tokio::test]
+    async fn transfers_api_returns_peer_contribution_evidence() {
+        let (state, _tmp) = dashboard_state();
+        {
+            let mut transfers = state.transfer_registry.lock().unwrap();
+            transfers.insert(
+                "sha256:transfer".to_string(),
+                TransferStats {
+                    nar_hash: "sha256:transfer".to_string(),
+                    store_path: Some("/gnu/store/hash-package".to_string()),
+                    nar_size: Some(8192),
+                    total_blocks_received: 3,
+                    total_bytes_received: 6144,
+                    total_blocks_served: 2,
+                    download_peers: HashMap::from([
+                        (
+                            "peer-b".to_string(),
+                            PeerTransferStats { blocks: 1, bytes: 2048, last_indices: vec![1] },
+                        ),
+                        (
+                            "peer-a".to_string(),
+                            PeerTransferStats { blocks: 2, bytes: 4096, last_indices: vec![0, 2] },
+                        ),
+                    ]),
+                    serving_peers: HashMap::from([(
+                        "peer-c".to_string(),
+                        PeerTransferStats { blocks: 2, bytes: 0, last_indices: vec![3, 4] },
+                    )]),
+                },
+            );
+        }
+
+        let transfers = api_transfers(State(state)).await.0;
+
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].nar_hash, "sha256:transfer");
+        assert_eq!(transfers[0].download_peers[0].peer_id, "peer-a");
+        assert_eq!(transfers[0].download_peers[0].last_indices, vec![0, 2]);
+        assert_eq!(transfers[0].download_peers[1].peer_id, "peer-b");
+        assert_eq!(transfers[0].serving_peers[0].peer_id, "peer-c");
     }
 
     #[tokio::test]

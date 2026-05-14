@@ -543,6 +543,10 @@ locally-seeded nars in real time:
 - **Real-time events**: `BlockServed` events stream via WebSocket showing
   which blocks are being uploaded to which peers. Served rows flash green
   momentarily.
+- **Transfer evidence**: accepted `BlockReceived` events and non-empty
+  `BlockServed` events are aggregated by peer, so the transfer path shows
+  which peers contributed downloaded blocks and which requesters received
+  served blocks.
 - **Seed count** in the header bar updates as nars are seeded or auto-saved
   after downloads.
 - The `/api/seeds` endpoint returns the full list of seeded nars with size,
@@ -566,7 +570,9 @@ locally-seeded nars in real time:
   seed-only; removal is intentionally centralized in Active Seeds.
 - The transfer path panel is driven by dashboard events and tracks the latest
   observed package/NAR through package observation, narinfo trust, provider
-  discovery, block movement, verification/import, and local re-seeding.
+  discovery, block movement, verification/import, and local re-seeding. It also
+  shows per-peer block counts, byte counts for downloads, and the most recent
+  block indices accepted from or served to each peer.
 - `POST /api/seeds` accepts `{ "store_path": "/gnu/store/..." }` only when the
   dashboard bind address is loopback. It validates the path, seeds and caches
   the NAR immediately, sends `StartProviding`, emits `SeedAdded`, and persists
@@ -580,12 +586,16 @@ locally-seeded nars in real time:
   removed NAR.
 - The dashboard server indexes catalog events internally, so `/api/catalog`
   works for automation even when no browser WebSocket is connected.
+- The dashboard server indexes transfer events internally, so `/api/transfers`
+  returns aggregate download and upload evidence even when no browser WebSocket
+  is connected.
 
 Dashboard events related to seeding:
 
 | Event | Description |
 |-------|-------------|
 | `SeedAdded` | Emitted when a nar is added to the local store (startup seeding or post-download) |
+| `BlockReceived` | Emitted when requested blocks are accepted from a provider (includes nar hash, peer, indices, bytes) |
 | `BlockServed` | Emitted when blocks are served to a requesting peer (includes nar hash, peer, indices) |
 
 ## Dashboard Catalog View
@@ -608,6 +618,9 @@ Dashboard API endpoints:
 - `/api/peers` returns full peer ids and reputation counters.
 - `/api/builds` returns observed builds with a `lookup_key` for detail links.
 - `/api/build/{hash}` accepts either the registry lookup key or the nar hash.
+- `/api/transfers` returns aggregate transfer evidence by nar hash, including
+  downloaded block counts, downloaded bytes, served block counts, and peer-level
+  contribution summaries.
 - `/api/packages` returns installed system and Guix Home packages with seed
   state.
 - `POST /api/seeds` seeds an existing local store path and persists it for
