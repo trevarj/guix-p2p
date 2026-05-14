@@ -27,6 +27,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  pages: write
 
 concurrency:
   group: benchmarks-${{ github.ref }}
@@ -37,6 +39,9 @@ jobs:
     name: Container benchmark
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy-pages.outputs.page_url }}
 
     steps:
       - name: Check out repository
@@ -63,3 +68,140 @@ jobs:
           path: |
             target/guix-p2p-bench/results.csv
             docs/benchmark-results.md
+
+      - name: Prepare Pages site
+        run: |
+          mkdir -p site
+          cp target/guix-p2p-bench/results.csv site/results.csv
+          cp docs/benchmark-results.md site/benchmark-results.md
+          cat > site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>guix-p2p benchmarks</title>
+            <style>
+              :root {
+                color-scheme: light dark;
+                font-family: system-ui, sans-serif;
+                line-height: 1.5;
+              }
+              body {
+                margin: 0 auto;
+                max-width: 980px;
+                padding: 32px 20px;
+              }
+              header, section {
+                border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+                padding-bottom: 24px;
+                margin-bottom: 24px;
+              }
+              h1, h2 {
+                line-height: 1.2;
+              }
+              a {
+                color: #0969da;
+              }
+              pre {
+                overflow: auto;
+                padding: 16px;
+                background: color-mix(in srgb, currentColor 8%, transparent);
+              }
+              table {
+                border-collapse: collapse;
+                width: 100%;
+              }
+              th, td {
+                border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+                padding: 8px;
+                text-align: left;
+              }
+              .muted {
+                opacity: 0.72;
+              }
+            </style>
+          </head>
+          <body>
+            <header>
+              <h1>guix-p2p benchmarks</h1>
+              <p class="muted">Latest generated report from the GitHub mirror benchmark workflow.</p>
+              <p>
+                <a href="benchmark-results.md">Latest markdown report</a>
+                · <a href="results.csv">Latest CSV</a>
+                · <a href="https://github.com/trevarj/guix-p2p/actions/workflows/benchmarks.yml">Benchmark runs</a>
+              </p>
+            </header>
+
+            <section>
+              <h2>Latest Report</h2>
+              <pre id="report">Loading benchmark-results.md...</pre>
+            </section>
+
+            <section>
+              <h2>Recent Runs</h2>
+              <p class="muted">Each run keeps its full CSV and markdown output as a GitHub Actions artifact.</p>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Run</th>
+                    <th>Status</th>
+                    <th>Started</th>
+                    <th>Commit</th>
+                  </tr>
+                </thead>
+                <tbody id="runs">
+                  <tr><td colspan="4">Loading workflow runs...</td></tr>
+                </tbody>
+              </table>
+            </section>
+
+            <script>
+              async function loadReport() {
+                const response = await fetch("benchmark-results.md", { cache: "no-store" });
+                document.getElementById("report").textContent = response.ok
+                  ? await response.text()
+                  : "No benchmark report was published yet.";
+              }
+
+              async function loadRuns() {
+                const runsBody = document.getElementById("runs");
+                const response = await fetch(
+                  "https://api.github.com/repos/trevarj/guix-p2p/actions/workflows/benchmarks.yml/runs?per_page=20",
+                  { cache: "no-store" }
+                );
+                if (!response.ok) {
+                  runsBody.innerHTML = "<tr><td colspan=\"4\">Could not load workflow runs.</td></tr>";
+                  return;
+                }
+                const payload = await response.json();
+                runsBody.innerHTML = payload.workflow_runs.map((run) => {
+                  const started = new Date(run.created_at).toLocaleString();
+                  const sha = run.head_sha.slice(0, 7);
+                  return `<tr>
+                    <td><a href="${run.html_url}">#${run.run_number}</a></td>
+                    <td>${run.conclusion || run.status}</td>
+                    <td>${started}</td>
+                    <td><a href="${run.head_repository.html_url}/commit/${run.head_sha}">${sha}</a></td>
+                  </tr>`;
+                }).join("");
+              }
+
+              loadReport();
+              loadRuns();
+            </script>
+          </body>
+          </html>
+          HTML
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Deploy Pages
+        id: deploy-pages
+        uses: actions/deploy-pages@v4

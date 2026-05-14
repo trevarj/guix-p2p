@@ -219,6 +219,13 @@ The artifact contains:
 - `results.csv`
 - `benchmark-results.md`
 
+Successful benchmark runs also deploy a GitHub Pages site with the latest CSV,
+latest markdown report, and links to recent benchmark workflow runs. Older
+reports stay attached to their GitHub Actions runs as artifacts.
+
+Before the first Pages deploy, configure the GitHub mirror's Pages source to
+`GitHub Actions` under `Settings > Pages`.
+
 The workflow does not commit generated benchmark output back to either GitHub
 or Codeberg.
 

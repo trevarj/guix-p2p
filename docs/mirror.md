@@ -80,6 +80,14 @@ The workflow runs the container benchmark harness and uploads
 `target/guix-p2p-bench/results.csv` plus `docs/benchmark-results.md`. It does
 not commit generated benchmark output back to the repository.
 
+Successful benchmark runs also deploy a GitHub Pages site. Before the first
+deploy, set the GitHub mirror's Pages source to `GitHub Actions` under
+`Settings > Pages`.
+
+The Pages site shows the latest generated report and links to recent benchmark
+workflow runs. Older CSV and markdown reports remain attached to their
+corresponding GitHub Actions runs as artifacts.
+
 ## References
 
 - Forgejo repository mirroring: <https://forgejo.org/docs/next/user/repo-mirror/>
