@@ -205,6 +205,27 @@ enum VmCommand {
         #[arg(long)]
         package: Option<String>,
     },
+    /// Run the documented Bootstrap/Alice/Bob VM proof playbook
+    Proof {
+        /// Seedless DHT bootstrap node
+        #[arg(long, default_value = "Bootstrap")]
+        bootstrap_node: String,
+        /// Seeder node
+        #[arg(long, default_value = "Alice")]
+        seed_node: String,
+        /// Fetcher node
+        #[arg(long, default_value = "Bob")]
+        fetch_node: String,
+        /// Guix package to seed, remove, and fetch
+        #[arg(long, default_value = "hello")]
+        package: String,
+        /// Fetch policy passed to the fetch node
+        #[arg(long, default_value = "p2p-only")]
+        policy: String,
+        /// Skip copying target/release/guix-p2p into the proof VMs
+        #[arg(long)]
+        skip_push_binary: bool,
+    },
     /// Benchmark configured VM nodes using the VM proof workflow
     Benchmark {
         /// Benchmark package tier suite
@@ -801,6 +822,22 @@ fn run_vm_command(opts: VmOptions) -> anyhow::Result<()> {
         VmCommand::HttpFetch { node, store_path, package } => {
             vm_http_fetch(&config, &node, store_path.as_deref(), package.as_deref())
         },
+        VmCommand::Proof {
+            bootstrap_node,
+            seed_node,
+            fetch_node,
+            package,
+            policy,
+            skip_push_binary,
+        } => vm_proof(
+            &config,
+            &bootstrap_node,
+            &seed_node,
+            &fetch_node,
+            &package,
+            &policy,
+            skip_push_binary,
+        ),
         VmCommand::Benchmark {
             suite,
             packages,
@@ -1469,6 +1506,44 @@ fn vm_fetch(
     policy: &str,
 ) -> anyhow::Result<()> {
     let _ = vm_fetch_timed(config, name, store_path, package, policy)?;
+    Ok(())
+}
+
+fn vm_proof(
+    config: &VmConfig,
+    bootstrap_node: &str,
+    seed_node: &str,
+    fetch_node: &str,
+    package: &str,
+    policy: &str,
+    skip_push_binary: bool,
+) -> anyhow::Result<()> {
+    let node_names = [bootstrap_node.to_string(), seed_node.to_string(), fetch_node.to_string()];
+    ensure_vm_proof_nodes(config, &node_names)?;
+
+    println!("VM_PROOF_STEP wait-ssh");
+    vm_wait_ssh(config, &node_names)?;
+
+    if !skip_push_binary {
+        println!("VM_PROOF_STEP push-binary");
+        for node in &node_names {
+            vm_push_binary(config, Some(node), false)?;
+        }
+    }
+
+    println!("VM_PROOF_STEP bootstrap node={bootstrap_node}");
+    vm_bootstrap(config, bootstrap_node)?;
+
+    println!("VM_PROOF_STEP seed node={seed_node} package={package}");
+    vm_seed(config, seed_node, package)?;
+
+    println!("VM_PROOF_STEP remove node={fetch_node} package={package}");
+    vm_remove(config, fetch_node, None, Some(package))?;
+
+    println!("VM_PROOF_STEP fetch node={fetch_node} package={package} policy={policy}");
+    vm_fetch(config, fetch_node, None, Some(package), policy)?;
+
+    println!("VM_PROOF_SUCCEEDED package={package} seed_node={seed_node} fetch_node={fetch_node}");
     Ok(())
 }
 
@@ -2201,6 +2276,22 @@ fn ensure_vm_benchmark_nodes_ready(
         }
         wait_ssh(config, node)?;
     }
+    Ok(())
+}
+
+fn ensure_vm_proof_nodes(config: &VmConfig, names: &[String]) -> anyhow::Result<()> {
+    let mut registry = VmRegistry::load(config)?;
+    for name in names {
+        registry.ensure_node(config, name)?;
+    }
+    registry.save(config)?;
+
+    for name in names {
+        let registry = VmRegistry::load(config)?;
+        let node = registry.node(name)?.clone();
+        vm_run_node(config, &node)?;
+    }
+
     Ok(())
 }
 
@@ -4092,7 +4183,7 @@ STORE_HASH="${{STORE_HASH%%-*}}"
 NARINFO_URL=''
 for BASE_URL in $SUBSTITUTE_URLS; do
   URL="${{BASE_URL%/}}/$STORE_HASH.narinfo"
-  if curl -fsI "$URL" >/dev/null 2>&1; then
+  if curl -fsL "$URL" -o /dev/null 2>&1; then
     NARINFO_URL="$URL"
     break
   fi

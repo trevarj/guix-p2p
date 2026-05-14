@@ -35,6 +35,17 @@ cargo run -p guix-p2p-e2e -- vm status --all
 Run the proof:
 
 ```sh
+cargo run -p guix-p2p-e2e -- vm proof
+```
+
+`vm proof` runs the documented Bootstrap/Alice/Bob sequence: wait for SSH,
+push the release binary, start the bootstrap node, seed Alice, remove the
+target from Bob, and fetch through Bob's p2p-only daemon. Use this after large
+feature changes before trusting benchmark results.
+
+The steps are also available individually:
+
+```sh
 cargo run -p guix-p2p-e2e -- vm wait-ssh Bootstrap Alice Bob
 cargo run -p guix-p2p-e2e -- vm push-binary --all
 cargo run -p guix-p2p-e2e -- vm bootstrap Bootstrap
