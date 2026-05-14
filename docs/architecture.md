@@ -567,10 +567,12 @@ locally-seeded nars in real time:
 - The dashboard layout is organized around the known-tester seeding workflow:
   transfer evidence is the primary proof surface, packages and active seeds
   are the main workspace, peers/catalog/builds are secondary diagnostics, and
-  the filtered event history stays full-width at the bottom.
-- Dashboard sections and controls expose faded `?` affordances. Hovering them
-  highlights the help control, and clicking opens a concise explanatory popup
-  for that component.
+  the filtered event history stays full-width at the bottom. The package list
+  uses a narrower column while Active Seeds spans the remaining workspace width
+  so seeded item text has more room.
+- Each main dashboard panel exposes one faded `?` affordance in the top-right
+  corner. Clicking it opens a concise overview for that panel, including the
+  important controls and row elements inside it.
 - Dashboard scrollbars are themed with the active console palette, and active
   seed rows reserve separate columns for package path, size/block metadata, and
   stop controls to avoid overlap.
