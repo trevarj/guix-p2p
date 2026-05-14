@@ -8,12 +8,13 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0a0a0a;--fg:#f5d000;--acc:#d4a800;--dim:#554400;
-  --bg2:#111;--bg3:#1a1a1a;--err:#cc3333;--ok:#33cc33;
+  --bg:#080908;--fg:#f5d000;--acc:#d4a800;--dim:#5a4a12;
+  --bg2:#10110f;--bg3:#191b18;--line:#2f2b14;--err:#d24b4b;--ok:#56c271;--warn:#d8a642;
+  --muted:#9c8832;--panel:#0f100e;--panel2:#151711;
   --font:'Cascadia Code','JetBrains Mono','Fira Code','IBM Plex Mono',monospace
 }
-.theme-green{--fg:#00cc00;--acc:#009900;--dim:#003300;--ok:#00ff00}
-.theme-amber{--fg:#ffb000;--acc:#cc8800;--dim:#553300;--ok:#ffcc00}
+.theme-green{--fg:#59d35f;--acc:#30a943;--dim:#1c5a28;--ok:#69e079;--muted:#67a86f}
+.theme-amber{--fg:#ffb000;--acc:#d68f00;--dim:#69450e;--ok:#ffcf54;--muted:#c08e31}
 html,body{height:100%}
 body{
   background:var(--bg);color:var(--fg);font-family:var(--font);font-size:13px;
@@ -26,29 +27,32 @@ body::before{
   pointer-events:none;z-index:999
 }
 header{
-  background:var(--bg2);border-bottom:1px solid var(--dim);
-  padding:8px 16px;display:flex;justify-content:space-between;align-items:center;
-  flex-shrink:0;gap:12px
+  background:linear-gradient(180deg,var(--bg2),var(--bg));border-bottom:1px solid var(--line);
+  padding:10px 16px;display:flex;justify-content:space-between;align-items:center;
+  flex-shrink:0;gap:16px
 }
+header strong{font-size:15px;letter-spacing:1px}
 header .id{font-size:11px;opacity:.6}
-header .stats{display:flex;gap:20px;font-size:12px}
-header .stats span{color:var(--acc);font-weight:bold}
+header .stats{display:grid;grid-template-columns:repeat(7,auto);gap:8px;font-size:11px}
+header .stats div{border:1px solid var(--line);background:var(--panel);padding:4px 7px;min-width:74px}
+header .stats span{display:block;color:var(--acc);font-weight:bold;font-size:14px;line-height:1.1}
 header button{
   background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
-  padding:3px 10px;font-family:var(--font);font-size:11px;cursor:pointer
+  padding:5px 10px;font-family:var(--font);font-size:11px;cursor:pointer;border-radius:4px
 }
 header button:hover{border-color:var(--acc)}
 main{
-  display:grid;grid-template-columns:1.4fr 1fr 1fr;grid-template-rows:minmax(0,1.1fr) minmax(0,.55fr) minmax(0,.85fr) auto;
+  display:grid;grid-template-columns:1.35fr 1fr 1fr;grid-template-rows:minmax(150px,.58fr) minmax(260px,1.15fr) minmax(210px,.85fr) minmax(150px,.45fr);
   grid-template-areas:
-    "packages packages seeds"
     "transfer transfer transfer"
+    "packages packages seeds"
     "peers catalog builds"
     "events events events";
-  flex:1;overflow:hidden;gap:0
+  flex:1;overflow:hidden;gap:8px;padding:8px
 }
 .panel{
-  border:1px solid var(--dim);overflow-y:auto;padding:8px;position:relative
+  border:1px solid var(--line);background:var(--panel);overflow-y:auto;padding:10px;position:relative;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025)
 }
 .packages-panel{grid-area:packages}
 .seeds-panel{grid-area:seeds}
@@ -56,20 +60,30 @@ main{
 .peers-panel{grid-area:peers}
 .catalog-panel{grid-area:catalog}
 .builds-panel{grid-area:builds}
-.events{grid-area:events}
+.events{grid-area:events;min-height:160px}
 .panel h2{
-  font-size:11px;text-transform:uppercase;letter-spacing:2px;
-  color:var(--acc);margin-bottom:6px;position:sticky;top:0;
-  background:var(--bg);padding:4px 0;z-index:1
+  font-size:11px;text-transform:uppercase;letter-spacing:1.5px;
+  color:var(--acc);margin:-2px 0 8px;position:sticky;top:-10px;
+  background:linear-gradient(var(--panel),var(--panel));padding:8px 0 6px;z-index:1;
+  display:flex;align-items:center;gap:6px
 }
+.panel h2::before{content:'';width:6px;height:6px;border:1px solid var(--acc);display:inline-block}
 .panel h2 .badge{
   display:inline-block;background:var(--acc);color:var(--bg);
   padding:0 5px;margin-left:6px;font-size:10px;border-radius:2px;vertical-align:middle
 }
-.events{max-height:150px;border-top:1px solid var(--dim)}
-.events .entry{font-size:11px;padding:1px 0;border-bottom:1px solid var(--dim)}
+.events{border-top:1px solid var(--line)}
+.event-tools{display:flex;gap:4px;align-items:center;margin:-2px 0 8px;flex-wrap:wrap}
+.event-filter{
+  background:var(--bg3);border:1px solid var(--line);color:var(--muted);
+  font-family:var(--font);font-size:10px;padding:3px 7px;cursor:pointer;border-radius:4px
+}
+.event-filter.active{color:var(--bg);background:var(--acc);border-color:var(--acc)}
+.events .entry{display:grid;grid-template-columns:74px 22px 92px 1fr;gap:6px;align-items:start;font-size:11px;padding:3px 0;border-bottom:1px solid var(--line)}
 .events .entry.added{animation:slidein .3s ease}
 .events .entry .ts{color:var(--dim);margin-right:8px}
+.events .entry .kind{color:var(--muted);text-transform:uppercase;font-size:10px}
+.events .entry .msg{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .events .entry.peer-conn .sym{color:var(--ok)}
 .events .entry.peer-disc .sym{color:var(--dim)}
 .events .entry.providers .sym{color:var(--acc)}
@@ -78,12 +92,13 @@ main{
 .events .entry.dl-fail .sym{color:var(--err)}
 .events .entry.seed-add .sym{color:var(--ok)}
 .events .entry.block-served .sym{color:var(--acc)}
+.events .entry.catalog .sym{color:var(--muted)}
 
 @keyframes slidein{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
 
-.peer-row,.build-row,.seed-row,.package-row{
+.peer-row,.build-row,.seed-row,.package-row,.catalog-row{
   display:flex;align-items:center;gap:6px;padding:3px 0;
-  border-bottom:1px solid var(--dim);font-size:12px
+  border-bottom:1px solid var(--line);font-size:12px
 }
 .peer-row .flag,.build-row .flag,.seed-row .flag,.package-row .source{font-size:14px;min-width:24px}
 .peer-row .peer-id{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -91,8 +106,8 @@ main{
 .peer-row .bar-inner,.build-row .bar-inner{height:100%;background:var(--acc)}
 .peer-row .meta{min-width:90px;text-align:right;font-size:11px;opacity:.8}
 .peer-row.offline{opacity:.55}
-.catalog-row,.build-row,.seed-row,.package-row{cursor:pointer}
-.catalog-row:hover,.build-row:hover,.seed-row:hover,.package-row:hover{background:var(--bg2)}
+.catalog-row,.build-row,.seed-row,.package-row{cursor:pointer;border-radius:4px;padding-left:3px;padding-right:3px}
+.catalog-row:hover,.build-row:hover,.seed-row:hover,.package-row:hover{background:var(--panel2)}
 .catalog-row .path,.build-row .path,.seed-row .path,.package-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
 .catalog-row .size{min-width:70px;text-align:right;font-size:11px;opacity:.6}
 .catalog-row .p2p{min-width:40px;text-align:center;font-size:10px}
@@ -114,8 +129,8 @@ main{
 .seed-row .stop-seed:hover{border-color:var(--acc);color:var(--err)}
 .package-tools{display:flex;gap:8px;align-items:center;margin-bottom:6px}
 .package-search{
-  width:100%;background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
-  padding:5px 6px;font-family:var(--font);font-size:11px
+  width:100%;background:var(--bg3);color:var(--fg);border:1px solid var(--line);
+  padding:7px 8px;font-family:var(--font);font-size:11px;border-radius:4px
 }
 .package-search:focus{outline:none;border-color:var(--acc)}
 .package-hint{min-width:150px;text-align:right;font-size:10px;color:var(--dim)}
@@ -126,18 +141,18 @@ main{
 .package-row .state{min-width:58px;text-align:right;font-size:10px}
 .package-row.seeded .state{color:var(--ok)}
 .package-row .seed-action{
-  background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
-  padding:2px 6px;font-family:var(--font);font-size:10px;cursor:pointer
+  background:var(--bg3);color:var(--fg);border:1px solid var(--line);
+  padding:3px 7px;font-family:var(--font);font-size:10px;cursor:pointer;border-radius:4px
 }
 .package-row .seed-action:hover{border-color:var(--acc)}
 .package-row.seeded .seed-action{color:var(--dim)}
-.transfer-card{display:grid;grid-template-columns:1.2fr 2fr;gap:12px;min-height:92px}
-.transfer-subject{border-right:1px solid var(--dim);padding-right:10px;min-width:0}
-.transfer-name{font-size:13px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.transfer-card{display:grid;grid-template-columns:minmax(220px,.9fr) 2fr;gap:14px;min-height:128px}
+.transfer-subject{border-right:1px solid var(--line);padding-right:12px;min-width:0}
+.transfer-name{font-size:16px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .transfer-hash{font-size:10px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:4px}
 .transfer-meta{font-size:10px;color:var(--acc);margin-top:6px}
 .transfer-stages{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;align-items:stretch}
-.transfer-stage{border:1px solid var(--dim);background:var(--bg3);padding:6px;min-width:0}
+.transfer-stage{border:1px solid var(--line);background:var(--bg3);padding:7px;min-width:0;border-radius:4px}
 .transfer-stage.done{border-color:var(--ok);box-shadow:inset 0 0 0 1px rgba(51,204,51,.2)}
 .transfer-stage.active{border-color:var(--acc)}
 .transfer-stage .label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--dim)}
@@ -146,9 +161,9 @@ main{
 .transfer-stage .value{font-size:11px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .transfer-detail{display:grid;grid-template-rows:auto auto;gap:8px;min-width:0}
 .transfer-peers{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.transfer-peer-group{border:1px solid var(--dim);background:var(--bg2);padding:6px;min-width:0}
+.transfer-peer-group{border:1px solid var(--line);background:var(--bg2);padding:7px;min-width:0;border-radius:4px}
 .transfer-peer-title{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--acc);margin-bottom:4px}
-.transfer-peer-row{display:grid;grid-template-columns:1fr auto;gap:6px;font-size:10px;border-top:1px solid var(--dim);padding-top:3px;margin-top:3px}
+.transfer-peer-row{display:grid;grid-template-columns:1fr auto;gap:6px;font-size:10px;border-top:1px solid var(--line);padding-top:4px;margin-top:4px}
 .transfer-peer-id{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
 .transfer-peer-count{text-align:right;color:var(--acc)}
 .transfer-peer-indices{grid-column:1 / 3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
@@ -188,15 +203,22 @@ main{
 .detail .narinfo-raw.open{display:block}
 
 .empty{text-align:center;padding:20px;color:var(--dim);font-size:12px;font-style:italic}
+.tip{
+  position:fixed;z-index:1000;max-width:320px;background:#0b0c0a;color:var(--fg);
+  border:1px solid var(--acc);padding:7px 8px;font-size:11px;line-height:1.35;
+  box-shadow:0 8px 24px rgba(0,0,0,.45);pointer-events:none;border-radius:4px
+}
+.tip.hidden{display:none}
+[data-tip]{cursor:help}
 
 @media (max-width:1100px){
   header{align-items:flex-start;flex-wrap:wrap}
   header .stats{flex-wrap:wrap;gap:10px 16px}
   main{
-    grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1.2fr) minmax(0,.65fr) minmax(0,1fr) minmax(0,.8fr) auto;
+    grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,.7fr) minmax(0,1fr) minmax(0,1fr) minmax(0,.8fr) auto;
     grid-template-areas:
-      "packages packages"
       "transfer transfer"
+      "packages packages"
       "seeds peers"
       "catalog builds"
       "events events"
@@ -208,65 +230,77 @@ main{
 @media (max-width:720px){
   body{overflow:auto}
   header .stats{width:100%}
+  header .stats{grid-template-columns:repeat(2,1fr)}
   main{display:block;overflow:visible}
   .panel{min-height:220px;max-height:360px}
   .events{max-height:260px}
   .package-tools{display:block}
   .package-hint{text-align:left;margin-top:4px}
   .transfer-stages{grid-template-columns:1fr 1fr}
+  .transfer-peers{grid-template-columns:1fr}
+  .events .entry{grid-template-columns:62px 18px 1fr}
+  .events .entry .kind{display:none}
 }
 </style>
 </head>
 <body class="theme-yellow">
 <header>
   <div>
-    <strong>guix-p2p</strong>
-    <br><span class="id" id="peer-id">--</span>
+    <strong data-tip="Local daemon dashboard for P2P substitute discovery, seeding, and transfer evidence.">guix-p2p</strong>
+    <br><span class="id" id="peer-id" data-tip="Full libp2p peer id for this node.">--</span>
   </div>
   <div class="stats">
-    <div>CONN <span id="connected">0</span></div>
-    <div>PEERS <span id="total-peers">0</span></div>
-    <div>DHT <span id="dht-entries">0</span></div>
-    <div>PACKAGES <span id="package-count">0</span></div>
-    <div>CATALOG <span id="catalog-count">0</span></div>
-    <div>SEEDS <span id="seed-count">0</span></div>
-    <div>UPTIME <span id="uptime">00:00:00</span></div>
+    <div data-tip="Currently connected swarm peers.">CONN <span id="connected">0</span></div>
+    <div data-tip="Known peers with reputation records.">PEERS <span id="total-peers">0</span></div>
+    <div data-tip="Provider records known in the local DHT cache.">DHT <span id="dht-entries">0</span></div>
+    <div data-tip="Installed packages discovered from system, kernel, and Guix Home profiles.">PACKAGES <span id="package-count">0</span></div>
+    <div data-tip="Store paths observed through substitute/narinfo lookups.">CATALOG <span id="catalog-count">0</span></div>
+    <div data-tip="NARs currently cached locally and available for block serving.">SEEDS <span id="seed-count">0</span></div>
+    <div data-tip="Daemon dashboard uptime since this process started.">UPTIME <span id="uptime">00:00:00</span></div>
   </div>
   <div>
-    <button onclick="cycleTheme()">theme</button>
+    <button onclick="cycleTheme()" data-tip="Cycle dashboard color theme.">theme</button>
   </div>
 </header>
 <main>
   <div class="panel packages-panel">
-    <h2>packages <span class="badge" id="package-badge">0</span></h2>
+    <h2 data-tip="Installed store paths that can be seeded into the local P2P cache.">packages <span class="badge" id="package-badge">0</span></h2>
     <div class="package-tools">
-      <input class="package-search" id="package-search" placeholder="search name, version, store path">
-      <div class="package-hint">installed profiles</div>
+      <input class="package-search" id="package-search" placeholder="search name, version, store path" data-tip="Filter installed packages by name, version, or full /gnu/store path.">
+      <div class="package-hint" data-tip="Profiles scanned: system, kernel, and Guix Home.">installed profiles</div>
     </div>
     <div id="packages-list"><div class="empty">loading packages</div></div>
   </div>
   <div class="panel seeds-panel">
-    <h2>active seeds <span class="badge" id="seed-badge">0</span></h2>
+    <h2 data-tip="NARs this node can serve to other peers.">active seeds <span class="badge" id="seed-badge">0</span></h2>
     <div id="seeds-list"><div class="empty">not seeding</div></div>
   </div>
   <div class="panel transfer-panel">
-    <h2>transfer path</h2>
+    <h2 data-tip="Latest P2P proof path: observed package, trusted narinfo, providers, block movement, import, and re-seeding.">transfer path</h2>
     <div id="transfer-path"><div class="empty">no transfer observed</div></div>
   </div>
   <div class="panel peers-panel">
-    <h2>peers</h2>
+    <h2 data-tip="Peers known through reputation records and live connection events.">peers</h2>
     <div id="peers-list"><div class="empty">no peers yet</div></div>
   </div>
   <div class="panel catalog-panel">
-    <h2>catalog <span class="badge" id="catalog-badge">0</span></h2>
+    <h2 data-tip="Substitute lookups observed by this node, including whether P2P providers were found.">catalog <span class="badge" id="catalog-badge">0</span></h2>
     <div id="catalog-list"><div class="empty">no packages discovered</div></div>
   </div>
   <div class="panel builds-panel">
-    <h2>builds</h2>
+    <h2 data-tip="Observed narinfo/build records with provider counts and detail drill-down.">builds</h2>
     <div id="builds-list"><div class="empty">no builds observed</div></div>
   </div>
   <div class="panel events">
-    <h2>events</h2>
+    <h2 data-tip="Daemon event history. Reloading the page keeps the latest 500 events from daemon memory.">events</h2>
+    <div class="event-tools">
+      <button class="event-filter active" data-filter="all" onclick="setEventFilter('all')" data-tip="Show every persisted and live dashboard event.">all</button>
+      <button class="event-filter" data-filter="transfer" onclick="setEventFilter('transfer')" data-tip="Downloads, block movement, transfer success, and transfer failures.">transfers</button>
+      <button class="event-filter" data-filter="seed" onclick="setEventFilter('seed')" data-tip="Seed creation/removal and local seed actions.">seeds</button>
+      <button class="event-filter" data-filter="peer" onclick="setEventFilter('peer')" data-tip="Peer connection and disconnection activity.">peers</button>
+      <button class="event-filter" data-filter="discovery" onclick="setEventFilter('discovery')" data-tip="Narinfo, catalog, and provider discovery events.">discovery</button>
+      <button class="event-filter" data-filter="failure" onclick="setEventFilter('failure')" data-tip="Only failed downloads and local dashboard action errors.">failures</button>
+    </div>
     <div id="events-list"></div>
   </div>
 </main>
@@ -276,11 +310,14 @@ main{
     <div id="detail-content"></div>
   </div>
 </div>
+<div class="tip hidden" id="tip"></div>
 <script>
 var THEMES=['theme-yellow','theme-green','theme-amber'];
 var THEME_IDX=THEMES.indexOf('theme-yellow');
 var STARTED=Date.now();
 var EVENT_IDX=0;
+var EVENTS=[];
+var EVENT_FILTER='all';
 var PEERS={};
 var BUILDS={};
 var CATALOG={};
@@ -335,24 +372,65 @@ function cycleTheme(){
   localStorage.setItem('guix-p2p-theme',THEMES[THEME_IDX]);
 }
 
-function addEvent(cls,sym,msg){
+function eventCategory(cls){
+  if(cls==='peer-conn'||cls==='peer-disc')return'peer';
+  if(cls==='seed-add')return'seed';
+  if(cls==='providers'||cls==='catalog')return'discovery';
+  if(cls==='dl-fail')return'failure';
+  if(cls==='dl-start'||cls==='dl-ok'||cls==='block-served')return'transfer';
+  return'other'
+}
+
+function addEvent(cls,sym,msg,meta){
+  meta=meta||{};
+  var id=meta.id!=null?meta.id:('local-'+EVENT_IDX++);
+  var timestamp=meta.timestamp_ms!=null?meta.timestamp_ms:Date.now();
+  var duplicate=EVENTS.some(function(e){return e.id===id});
+  if(!duplicate){
+    EVENTS.push({
+      id:id,
+      timestamp_ms:timestamp,
+      cls:cls,
+      sym:sym,
+      msg:msg,
+      category:eventCategory(cls),
+      added:!meta.persisted
+    });
+    EVENTS.sort(function(a,b){
+      return (a.timestamp_ms||0)-(b.timestamp_ms||0)||String(a.id).localeCompare(String(b.id))
+    });
+    while(EVENTS.length>500)EVENTS.shift()
+  }
+  renderEvents()
+}
+
+function setEventFilter(filter){
+  EVENT_FILTER=filter;
+  document.querySelectorAll('.event-filter').forEach(function(btn){
+    btn.classList.toggle('active',btn.dataset.filter===filter)
+  });
+  renderEvents()
+}
+
+function renderEvents(){
   var el=document.getElementById('events-list');
-  var d=document.createElement('div');
-  d.className='entry '+cls+' added';
-  var now=new Date();
-  var ts=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
-  var tsEl=document.createElement('span');
-  tsEl.className='ts';
-  tsEl.textContent=ts;
-  var symEl=document.createElement('span');
-  symEl.className='sym';
-  symEl.textContent=sym;
-  d.appendChild(tsEl);
-  d.appendChild(symEl);
-  d.appendChild(document.createTextNode(' '+msg));
-  el.appendChild(d);
-  EVENT_IDX++;
-  while(el.children.length>200)el.removeChild(el.firstChild);
+  var visible=EVENTS.filter(function(e){
+    return EVENT_FILTER==='all'||e.category===EVENT_FILTER
+  });
+  if(!visible.length){
+    el.innerHTML='<div class="empty">no matching events</div>';
+    return
+  }
+  el.innerHTML=visible.slice(-500).map(function(e){
+    var d=new Date(e.timestamp_ms||Date.now());
+    var ts=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0');
+    return '<div class="entry '+esc(e.cls)+(e.added?' added':'')+'">'
+      +'<span class="ts">'+esc(ts)+'</span>'
+      +'<span class="sym">'+esc(e.sym)+'</span>'
+      +'<span class="kind">'+esc(e.category)+'</span>'
+      +'<span class="msg" data-tip="'+attr(e.msg)+'">'+esc(e.msg)+'</span>'
+      +'</div>'
+  }).join('');
   el.scrollTop=el.scrollHeight;
 }
 
@@ -381,7 +459,7 @@ function renderPeers(){
     var ip=p.ip||'?';
     h+='<div class="peer-row '+(p.connected?'':'offline')+'">'
       +'<span class="flag">'+esc(flag)+'</span>'
-      +'<span class="peer-id" title="'+attr(k)+'">'+esc(peerIdShort(k))+'</span>'
+      +'<span class="peer-id" data-tip="'+attr(k)+'">'+esc(peerIdShort(k))+'</span>'
       +'<span class="bar"><span class="bar-inner" style="width:'+w+'%"></span></span>'
       +'<span class="meta">'+esc(ip)+' ('+esc(fmtScore(sc))+')</span>'
       +'</div>';
@@ -401,7 +479,7 @@ function renderBuilds(){
     var name=b.store_path?b.store_path.split('-').slice(1).join('-'):b.nar_hash.slice(0,16);
     var lookup=b.lookup_key||b.nar_hash;
     h+='<div class="build-row" data-hash="'+attr(lookup)+'" onclick="openDetail(\''+jsArg(lookup)+'\')">'
-      +'<span class="path" title="'+attr(b.store_path||b.nar_hash)+'">'+esc(name)+'</span>'
+      +'<span class="path" data-tip="'+attr(b.store_path||b.nar_hash)+'">'+esc(name)+'</span>'
       +'<span class="providers">'+esc(b.providers||0)+' peers</span>'
       +'<span style="font-size:11px;opacity:.6">'+esc(sz)+'</span>'
       +'</div>';
@@ -423,7 +501,7 @@ function renderCatalog(){
     var sz=c.nar_size!=null?fmtSize(c.nar_size):'?';
     var p2p=c.p2p_available?'yes':'no';
     h+='<div class="catalog-row">'
-      +'<span class="path" title="'+attr(c.store_path||c.hash_part)+'">'+esc(name)+'</span>'
+      +'<span class="path" data-tip="'+attr(c.store_path||c.hash_part)+'">'+esc(name)+'</span>'
       +'<span class="size">'+esc(sz)+'</span>'
       +'<span class="p2p '+p2p+'">'+(c.p2p_available?'P2P':'http')+'</span>'
       +'</div>';
@@ -459,12 +537,12 @@ function renderPackages(){
     var title=(pkg.name||'?')+' '+(pkg.version||'');
     var state=pkg.seeded?'seeded':'ready';
     var button=pkg.seeded?'seeded':'seed';
-    h+='<div class="package-row '+(pkg.seeded?'seeded':'')+'" title="'+attr(pkg.store_path||'')+'">'
+    h+='<div class="package-row '+(pkg.seeded?'seeded':'')+'" data-tip="'+attr(pkg.store_path||'')+'">'
       +'<span class="pkg"><span class="name">'+esc(title)+'</span>'
       +'<span class="source-meta">'+esc(src)+'</span>'
       +'<span class="meta">'+esc(pkg.store_path||'')+'</span></span>'
       +'<span class="state">'+esc(state)+'</span>'
-      +'<button class="seed-action" onclick="seedPackage(event,\''+jsArg(pkg.store_path||'')+'\')">'+esc(button)+'</button>'
+      +'<button class="seed-action" data-tip="'+attr(pkg.seeded?'Already seeded locally.':'Seed this installed store path into the local P2P cache.')+'" onclick="seedPackage(event,\''+jsArg(pkg.store_path||'')+'\')">'+esc(button)+'</button>'
       +'</div>';
   });
   if(arr.length>200)h+='<div class="empty">showing 200 of '+arr.length+' matches, refine search</div>';
@@ -580,7 +658,7 @@ function renderTransferPeers(title,peers){
     var indices=(p.last_indices||[]).join(',');
     var bytes=p.bytes?(' / '+fmtBytes(p.bytes)):'';
     return '<div class="transfer-peer-row">'
-      +'<div class="transfer-peer-id" title="'+attr(id)+'">'+esc(peerIdShort(id))+'</div>'
+      +'<div class="transfer-peer-id" data-tip="'+attr(id)+'">'+esc(peerIdShort(id))+'</div>'
       +'<div class="transfer-peer-count">'+esc((p.blocks||0)+' blk'+bytes)+'</div>'
       +'<div class="transfer-peer-indices">'+esc(indices?'last ['+indices+']':'no accepted blocks yet')+'</div>'
       +'</div>'
@@ -705,9 +783,9 @@ function renderSeeds(){
     var seedSubtitle=s.store_path?s.store_path:k;
     h+='<div class="seed-row" data-hash="'+attr(k)+'" onclick="openSeedDetail(\''+jsArg(k)+'\')">'
       +'<span class="seed-name"><span class="seed-title">'+esc(seedTitle)+'</span>'
-      +'<span class="seed-subtitle" title="'+attr(seedSubtitle)+'">'+esc(seedSubtitle)+'</span></span>'
+      +'<span class="seed-subtitle" data-tip="'+attr(seedSubtitle)+'">'+esc(seedSubtitle)+'</span></span>'
       +'<span class="seed-meta"><span class="sz">'+esc(sz)+'</span><span class="bl">'+esc(bl+' x '+bs)+'</span></span>'
-      +'<button class="stop-seed" onclick="event.stopPropagation();stopSeedByHash(\''+jsArg(k)+'\',\''+jsArg(s.store_path||'')+'\')">stop</button>'
+      +'<button class="stop-seed" data-tip="Stop serving this cached NAR and remove its persisted seed path when known." onclick="event.stopPropagation();stopSeedByHash(\''+jsArg(k)+'\',\''+jsArg(s.store_path||'')+'\')">stop</button>'
       +'</div>';
   });
   el.innerHTML=h;
@@ -805,7 +883,8 @@ function connectWS(){
   WS.onerror=function(){WS&&WS.close()}
 }
 
-function handleEvent(e){
+function handleEvent(e,meta){
+  meta=meta||{};
   switch(e.type){
     case 'PeerConnected':
       mergePeer({peer_id:e.peer_id,connected:true,addresses:e.addresses||[]});
@@ -813,13 +892,13 @@ function handleEvent(e){
         var ip=extractIP(a);
         if(ip){PEERS[e.peer_id].ip=ip;PEERS[e.peer_id].country=ipCountry(ip)}
       });
-      addEvent('peer-conn','o','Peer '+peerIdShort(e.peer_id)+' connected');
+      addEvent('peer-conn','o','Peer '+peerIdShort(e.peer_id)+' connected',meta);
       renderPeers();
       break;
 
     case 'PeerDisconnected':
       if(PEERS[e.peer_id])PEERS[e.peer_id].connected=false;
-      addEvent('peer-disc','-','Peer '+peerIdShort(e.peer_id)+' disconnected');
+      addEvent('peer-disc','-','Peer '+peerIdShort(e.peer_id)+' disconnected',meta);
       renderPeers();
       break;
 
@@ -828,7 +907,7 @@ function handleEvent(e){
       if(!b){b={nar_hash:e.nar_hash,store_path:null,nar_size:null,providers:0};BUILDS[e.nar_hash]=b}
       b.providers=Math.max(b.providers||0,e.provider_count||0);
       markTransfer(e.nar_hash,b.store_path,b.nar_size,'providers',String(e.provider_count||0)+' peers');
-      addEvent('providers','#','Providers found: '+e.nar_hash.slice(0,16)+'... ('+e.provider_count+')');
+      addEvent('providers','#','Providers found: '+e.nar_hash.slice(0,16)+'... ('+e.provider_count+')',meta);
       renderBuilds();
       break;
 
@@ -836,35 +915,36 @@ function handleEvent(e){
       mergeBuild({nar_hash:e.nar_hash,store_path:e.store_path,nar_size:e.nar_size,providers:0});
       markTransfer(e.nar_hash,e.store_path,e.nar_size,'observed',e.store_path?storePathName(e.store_path):'observed');
       markTransfer(e.nar_hash,e.store_path,e.nar_size,'trusted','narinfo accepted');
-      addEvent('providers','+','Build observed: '+(e.store_path||e.nar_hash.slice(0,16)+'...'));
+      addEvent('providers','+','Build observed: '+(e.store_path||e.nar_hash.slice(0,16)+'...'),meta);
       renderBuilds();
       break;
 
     case 'DownloadStarted':
       mergeTransfer({nar_hash:e.nar_hash,store_path:e.store_path,nar_size:e.nar_size});
       markTransfer(e.nar_hash,e.store_path,e.nar_size,'blocks','starting');
-      addEvent('dl-start','v','Download started: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.nar_size)+')');
+      addEvent('dl-start','v','Download started: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.nar_size)+')',meta);
       break;
 
     case 'BlockReceived':
       var rxIdxs=e.indices||[];
       recordTransferPeer(e.nar_hash,'download',e.peer_id,rxIdxs,e.bytes||0);
       markTransfer(e.nar_hash,null,null,'blocks',String(rxIdxs.length||1)+' blocks');
-      addEvent('dl-start','=','Received '+(rxIdxs.length||1)+' block'+(rxIdxs.length===1?'':'s')+' from '+peerIdShort(e.peer_id));
+      addEvent('dl-start','=','Received '+(rxIdxs.length||1)+' block'+(rxIdxs.length===1?'':'s')+' from '+peerIdShort(e.peer_id),meta);
       break;
 
     case 'DownloadSucceeded':
       mergeTransfer({nar_hash:e.nar_hash,store_path:e.store_path,nar_size:e.size});
       markTransfer(e.nar_hash,e.store_path,e.size,'verified','imported in '+(e.elapsed_ms/1000).toFixed(1)+'s');
-      addEvent('dl-ok','^','Download succeeded: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.size)+', '+(e.elapsed_ms/1000).toFixed(1)+'s)');
+      addEvent('dl-ok','^','Download succeeded: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.size)+', '+(e.elapsed_ms/1000).toFixed(1)+'s)',meta);
       break;
 
     case 'DownloadFailed':
-      addEvent('dl-fail','x','Download failed: '+(e.store_path||e.nar_hash)+' ('+e.reason+')');
+      addEvent('dl-fail','x','Download failed: '+(e.store_path||e.nar_hash)+' ('+e.reason+')',meta);
       break;
 
     case 'CatalogEntry':
       mergeCatalogEntry(e);
+      addEvent('catalog','c','Catalog observed: '+(e.store_path||e.hash_part)+(e.p2p_available?' (P2P providers)':' (HTTP fallback)'),meta);
       renderCatalog();
       break;
 
@@ -874,10 +954,10 @@ function handleEvent(e){
         if(pkg.store_path===e.store_path)pkg.seeded=true
       });
       markTransfer(e.nar_hash,e.store_path,e.nar_size,'reseeded','serving locally');
-      addEvent('seed-add','*','Seed added: '+e.nar_hash.slice(0,16)+'... ('+fmtSize(e.nar_size)+')');
+      addEvent('seed-add','*','Seed added: '+e.nar_hash.slice(0,16)+'... ('+fmtSize(e.nar_size)+')',meta);
       renderPackages();
       renderSeeds();
-      loadSeeds();
+      if(!meta.persisted)loadSeeds();
       break;
 
     case 'SeedRemoved':
@@ -885,7 +965,7 @@ function handleEvent(e){
       PACKAGES.forEach(function(pkg){
         if(pkg.store_path===e.store_path)pkg.seeded=false
       });
-      addEvent('seed-add','-','Seed removed: '+e.nar_hash.slice(0,16)+'...');
+      addEvent('seed-add','-','Seed removed: '+e.nar_hash.slice(0,16)+'...',meta);
       if(TRANSFER&&TRANSFER.nar_hash===e.nar_hash)renderTransferPath();
       renderPackages();
       renderSeeds();
@@ -896,7 +976,7 @@ function handleEvent(e){
       var blkMsg=blockIdxs.length?blockIdxs.length+' block'+(blockIdxs.length>1?'s':''):'handshake';
       if(blockIdxs.length)recordTransferPeer(e.nar_hash,'serving',e.peer_id,blockIdxs,0);
       markTransfer(e.nar_hash,null,null,'blocks','served '+blkMsg);
-      addEvent('block-served','\u2191','Served '+blkMsg+' to '+peerIdShort(e.peer_id)+(e.nar_hash?' for '+e.nar_hash.slice(0,16)+'...':''));
+      addEvent('block-served','\u2191','Served '+blkMsg+' to '+peerIdShort(e.peer_id)+(e.nar_hash?' for '+e.nar_hash.slice(0,16)+'...':''),meta);
       if(e.nar_hash)flashSeedRow(e.nar_hash);
       break;
   }
@@ -955,6 +1035,52 @@ function mergeCatalogEntry(c){
   CATALOG[c.hash_part]=cur
 }
 
+function ingestEventEnvelope(entry){
+  if(!entry||!entry.event)return;
+  handleEvent(entry.event,{
+    id:entry.id,
+    timestamp_ms:entry.timestamp_ms,
+    persisted:true
+  })
+}
+
+function initTooltips(){
+  var tip=document.getElementById('tip');
+  function show(el){
+    var text=el&&el.dataset?el.dataset.tip:null;
+    if(!text)return;
+    tip.textContent=text;
+    tip.classList.remove('hidden');
+    move(lastMouseEvent||{clientX:window.innerWidth/2,clientY:20})
+  }
+  function hide(){tip.classList.add('hidden')}
+  function move(ev){
+    if(tip.classList.contains('hidden'))return;
+    var pad=12;
+    var x=Math.min(ev.clientX+pad,window.innerWidth-tip.offsetWidth-pad);
+    var y=Math.min(ev.clientY+pad,window.innerHeight-tip.offsetHeight-pad);
+    tip.style.left=Math.max(pad,x)+'px';
+    tip.style.top=Math.max(pad,y)+'px'
+  }
+  var lastMouseEvent=null;
+  document.addEventListener('mousemove',function(ev){
+    lastMouseEvent=ev;
+    move(ev)
+  });
+  document.addEventListener('mouseover',function(ev){
+    var el=ev.target.closest('[data-tip]');
+    if(el)show(el)
+  });
+  document.addEventListener('mouseout',function(ev){
+    if(ev.target.closest('[data-tip]'))hide()
+  });
+  document.addEventListener('focusin',function(ev){
+    var el=ev.target.closest('[data-tip]');
+    if(el)show(el)
+  });
+  document.addEventListener('focusout',hide)
+}
+
 (function(){
   var saved=localStorage.getItem('guix-p2p-theme');
   if(saved&&THEMES.indexOf(saved)>=0){THEME_IDX=THEMES.indexOf(saved)}
@@ -971,7 +1097,9 @@ function mergeCatalogEntry(c){
 
   function refreshStatus(){
     fetch('/api/status').then(function(r){return r.json()}).then(function(s){
-      document.getElementById('peer-id').textContent=s.peer_id;
+      var peerEl=document.getElementById('peer-id');
+      peerEl.textContent=s.peer_id;
+      peerEl.dataset.tip=s.peer_id;
       document.getElementById('connected').textContent=s.connected_peers;
       document.getElementById('dht-entries').textContent=s.dht_entries;
       if(s.uptime_secs!=null){
@@ -1039,6 +1167,14 @@ function mergeCatalogEntry(c){
     }).catch(function(){})
   }
 
+  function loadEvents(){
+    return fetch('/api/events').then(function(r){return r.json()}).then(function(es){
+      EVENTS=[];
+      (es||[]).forEach(function(entry){ingestEventEnvelope(entry)});
+      renderEvents()
+    }).catch(function(){renderEvents()})
+  }
+
   setInterval(loadPeers,10000);
   setInterval(loadBuilds,10000);
   setInterval(loadSeeds,15000);
@@ -1052,8 +1188,9 @@ function mergeCatalogEntry(c){
   loadPackages();
   loadCatalog();
   loadTransfers();
+  loadEvents().then(connectWS);
+  initTooltips();
   document.getElementById('package-search').addEventListener('input',renderPackages);
-  connectWS();
 })();
 </script>
 </body>

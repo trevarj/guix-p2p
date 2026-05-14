@@ -543,6 +543,10 @@ locally-seeded nars in real time:
 - **Real-time events**: `BlockServed` events stream via WebSocket showing
   which blocks are being uploaded to which peers. Served rows flash green
   momentarily.
+- **Reload-safe event history**: dashboard events are retained in a daemon
+  memory ring buffer and exposed through `/api/events`, so browser reloads
+  restore the latest operational history. This history is intentionally not
+  persisted across daemon restarts.
 - **Transfer evidence**: accepted `BlockReceived` events and non-empty
   `BlockServed` events are aggregated by peer, so the transfer path shows
   which peers contributed downloaded blocks and which requesters received
@@ -561,8 +565,9 @@ locally-seeded nars in real time:
   across package name, version, and store path, and shows source, output, store
   path, and seed state. Its row-level seed control calls `POST /api/seeds`.
 - The dashboard layout is organized around the known-tester seeding workflow:
-  packages and active seeds are the primary workspace, peers/catalog/builds are
-  secondary diagnostics, and events stay full-width at the bottom.
+  transfer evidence is the primary proof surface, packages and active seeds
+  are the main workspace, peers/catalog/builds are secondary diagnostics, and
+  the filtered event history stays full-width at the bottom.
 - Active seed rows display the package/store item name when store-path metadata
   is available, with the full store path and NAR hash available in details.
   Each active seed row can stop seeding directly by NAR hash, which works even
@@ -589,6 +594,9 @@ locally-seeded nars in real time:
 - The dashboard server indexes transfer events internally, so `/api/transfers`
   returns aggregate download and upload evidence even when no browser WebSocket
   is connected.
+- The dashboard server indexes the latest 500 events internally, so
+  `/api/events` restores recent history after browser reloads. The live
+  WebSocket remains the source for newly-arriving events.
 
 Dashboard events related to seeding:
 
@@ -621,6 +629,8 @@ Dashboard API endpoints:
 - `/api/transfers` returns aggregate transfer evidence by nar hash, including
   downloaded block counts, downloaded bytes, served block counts, and peer-level
   contribution summaries.
+- `/api/events` returns the latest 500 dashboard events with a monotonic
+  in-memory id, timestamp, and serialized event payload.
 - `/api/packages` returns installed system and Guix Home packages with seed
   state.
 - `POST /api/seeds` seeds an existing local store path and persists it for

@@ -1,9 +1,9 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, SocketAddr},
     path::Path as FsPath,
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
@@ -104,6 +104,9 @@ pub enum DashboardEvent {
 
 pub type BuildRegistry = Arc<Mutex<HashMap<String, ObservedBuild>>>;
 pub type TransferRegistry = Arc<Mutex<HashMap<String, TransferStats>>>;
+pub type EventHistoryRegistry = Arc<Mutex<EventHistory>>;
+
+const EVENT_HISTORY_LIMIT: usize = 500;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ObservedBuild {
@@ -207,6 +210,19 @@ struct ApiTransferPeer {
     last_indices: Vec<u32>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ApiDashboardEvent {
+    id: u64,
+    timestamp_ms: u64,
+    event: DashboardEvent,
+}
+
+#[derive(Debug, Default)]
+pub struct EventHistory {
+    next_id: u64,
+    entries: VecDeque<ApiDashboardEvent>,
+}
+
 #[derive(Debug, Deserialize)]
 struct ApiSeedRequest {
     store_path: String,
@@ -231,6 +247,7 @@ pub struct DashboardState {
     pub conn_mgr: Arc<Mutex<ConnectionManager>>,
     pub build_registry: BuildRegistry,
     pub transfer_registry: TransferRegistry,
+    pub event_history: EventHistoryRegistry,
     pub started: Instant,
     pub peer_id: String,
     pub event_bus: EventBus,
@@ -254,6 +271,11 @@ pub async fn serve(state: DashboardState, port: u16, bind: &str) {
         maintain_transfers(transfer_state).await;
     });
 
+    let event_history_state = state.clone();
+    tokio::spawn(async move {
+        maintain_event_history(event_history_state).await;
+    });
+
     let app = dashboard_router(state);
 
     tracing::info!("Dashboard listening on http://{}", addr);
@@ -271,6 +293,7 @@ fn dashboard_router(state: DashboardState) -> Router {
         .route("/api/builds", get(api_builds))
         .route("/api/build/:hash", get(api_build_detail))
         .route("/api/transfers", get(api_transfers))
+        .route("/api/events", get(api_events))
         .route("/api/catalog", get(api_catalog))
         .route("/api/seeds", get(api_seeds).post(api_seed))
         .route("/api/seeds/:hash", delete(api_seed_delete))
@@ -380,6 +403,10 @@ async fn api_transfers(State(state): State<DashboardState>) -> Json<Vec<ApiTrans
             .then_with(|| a.nar_hash.cmp(&b.nar_hash))
     });
     Json(entries)
+}
+
+async fn api_events(State(state): State<DashboardState>) -> Json<Vec<ApiDashboardEvent>> {
+    Json(state.event_history.lock().unwrap().entries.iter().cloned().collect())
 }
 
 fn api_transfer_from_stats(stats: &TransferStats) -> ApiTransfer {
@@ -700,6 +727,37 @@ async fn maintain_transfers(state: DashboardState) {
     }
 }
 
+async fn maintain_event_history(state: DashboardState) {
+    let mut rx = state.event_bus.subscribe();
+
+    loop {
+        let event = match rx.recv().await {
+            Ok(e) => e,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                tracing::debug!("Dashboard event-history listener lagged by {} events", n);
+                continue;
+            },
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        };
+
+        record_event_history(&state.event_history, event);
+    }
+}
+
+fn record_event_history(history: &EventHistoryRegistry, event: DashboardEvent) {
+    let mut history = history.lock().unwrap();
+    let id = history.next_id;
+    history.next_id += 1;
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default();
+    history.entries.push_back(ApiDashboardEvent { id, timestamp_ms, event });
+    while history.entries.len() > EVENT_HISTORY_LIMIT {
+        history.entries.pop_front();
+    }
+}
+
 fn record_transfer_peer(
     peers: &mut HashMap<String, PeerTransferStats>,
     peer_id: String,
@@ -737,6 +795,7 @@ mod tests {
             conn_mgr: Arc::new(Mutex::new(ConnectionManager::new(ConnectionConfig::default()))),
             build_registry: Arc::new(Mutex::new(HashMap::new())),
             transfer_registry: Arc::new(Mutex::new(HashMap::new())),
+            event_history: Arc::new(Mutex::new(EventHistory::default())),
             started: Instant::now(),
             peer_id: "local-peer".to_string(),
             event_bus,
@@ -832,6 +891,56 @@ mod tests {
         assert_eq!(transfers[0].download_peers[0].last_indices, vec![0, 2]);
         assert_eq!(transfers[0].download_peers[1].peer_id, "peer-b");
         assert_eq!(transfers[0].serving_peers[0].peer_id, "peer-c");
+    }
+
+    #[tokio::test]
+    async fn events_api_returns_persisted_event_history() {
+        let (state, _tmp) = dashboard_state();
+        record_event_history(
+            &state.event_history,
+            DashboardEvent::PeerConnected {
+                peer_id: "peer-a".to_string(),
+                addresses: vec!["/ip4/127.0.0.1/tcp/1234".to_string()],
+            },
+        );
+        record_event_history(
+            &state.event_history,
+            DashboardEvent::DownloadFailed {
+                nar_hash: "sha256:abc".to_string(),
+                store_path: "/gnu/store/hash-package".to_string(),
+                reason: "missing providers".to_string(),
+            },
+        );
+
+        let events = api_events(State(state)).await.0;
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].id, 0);
+        assert_eq!(events[1].id, 1);
+        assert!(events[1].timestamp_ms >= events[0].timestamp_ms);
+        match &events[1].event {
+            DashboardEvent::DownloadFailed { reason, .. } => {
+                assert_eq!(reason, "missing providers");
+            },
+            other => panic!("unexpected dashboard event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn event_history_keeps_newest_500_entries() {
+        let history = Arc::new(Mutex::new(EventHistory::default()));
+        for idx in 0..(EVENT_HISTORY_LIMIT + 3) {
+            record_event_history(
+                &history,
+                DashboardEvent::PeerDisconnected { peer_id: format!("peer-{idx}") },
+            );
+        }
+
+        let guard = history.lock().unwrap();
+
+        assert_eq!(guard.entries.len(), EVENT_HISTORY_LIMIT);
+        assert_eq!(guard.entries.front().unwrap().id, 3);
+        assert_eq!(guard.entries.back().unwrap().id, 502);
     }
 
     #[tokio::test]

@@ -1273,6 +1273,7 @@ pub async fn run_daemon_mode(
             conn_mgr: conn_mgr.clone(),
             build_registry: build_registry.clone(),
             transfer_registry: Arc::new(Mutex::new(HashMap::new())),
+            event_history: Arc::new(Mutex::new(dashboard::EventHistory::default())),
             started: std::time::Instant::now(),
             peer_id: local_peer_id.to_string(),
             event_bus: event_tx.clone(),
