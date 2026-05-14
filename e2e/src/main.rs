@@ -195,6 +195,45 @@ enum VmCommand {
         store_path: Option<String>,
         #[arg(long)]
         package: Option<String>,
+        #[arg(long, default_value = "p2p-only")]
+        policy: String,
+    },
+    /// Fetch the target through regular HTTP substitutes without guix-p2p
+    HttpFetch {
+        node: String,
+        store_path: Option<String>,
+        #[arg(long)]
+        package: Option<String>,
+    },
+    /// Benchmark configured VM nodes using the VM proof workflow
+    Benchmark {
+        /// Benchmark package tier suite
+        #[arg(long, value_enum, default_value_t = BenchmarkSuite::Smoke)]
+        suite: BenchmarkSuite,
+        /// Comma-separated Guix package names. Overrides --suite when set.
+        #[arg(long, value_delimiter = ',')]
+        packages: Option<Vec<String>>,
+        /// Benchmark modes
+        #[arg(long, value_enum, value_delimiter = ',', default_value = "http,p2p-only,p2p-first")]
+        modes: Vec<BenchmarkMode>,
+        /// HTTP substitute-server condition profiles
+        #[arg(long, value_enum, value_delimiter = ',', default_value = "normal")]
+        http_conditions: Vec<HttpCondition>,
+        /// Seeder VM node names, comma-separated
+        #[arg(long, value_delimiter = ',', default_value = "Alice")]
+        seed_nodes: Vec<String>,
+        /// Fetcher VM node name for p2p modes
+        #[arg(long, default_value = "Bob")]
+        fetch_node: String,
+        /// Fetcher VM node name for HTTP mode
+        #[arg(long, default_value = "Bob")]
+        http_node: String,
+        /// Iterations per package/mode
+        #[arg(long, default_value_t = 1)]
+        iterations: usize,
+        /// Benchmark output directory
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
     /// Tail a node's guix-p2p log
     Logs { node: String },
@@ -323,6 +362,10 @@ impl HttpCondition {
             ),
             _ => None,
         }
+    }
+
+    fn vm_substitute_urls(self) -> String {
+        self.substitute_urls().to_string()
     }
 }
 
@@ -462,6 +505,19 @@ struct BenchmarkOptions {
     base: PathBuf,
     guix_p2p_bin: Option<PathBuf>,
     keep_temp: bool,
+}
+
+struct VmBenchmarkOptions {
+    config: VmConfig,
+    suite: BenchmarkSuite,
+    packages: Option<Vec<String>>,
+    modes: Vec<BenchmarkMode>,
+    http_conditions: Vec<HttpCondition>,
+    seed_nodes: Vec<String>,
+    fetch_node: String,
+    http_node: String,
+    iterations: usize,
+    output: Option<PathBuf>,
 }
 
 struct VmOptions {
@@ -720,9 +776,34 @@ fn run_vm_command(opts: VmOptions) -> anyhow::Result<()> {
         VmCommand::Remove { node, store_path, package } => {
             vm_remove(&config, &node, store_path.as_deref(), package.as_deref())
         },
-        VmCommand::Fetch { node, store_path, package } => {
-            vm_fetch(&config, &node, store_path.as_deref(), package.as_deref())
+        VmCommand::Fetch { node, store_path, package, policy } => {
+            vm_fetch(&config, &node, store_path.as_deref(), package.as_deref(), &policy)
         },
+        VmCommand::HttpFetch { node, store_path, package } => {
+            vm_http_fetch(&config, &node, store_path.as_deref(), package.as_deref())
+        },
+        VmCommand::Benchmark {
+            suite,
+            packages,
+            modes,
+            http_conditions,
+            seed_nodes,
+            fetch_node,
+            http_node,
+            iterations,
+            output,
+        } => vm_benchmark(VmBenchmarkOptions {
+            config,
+            suite,
+            packages,
+            modes,
+            http_conditions,
+            seed_nodes,
+            fetch_node,
+            http_node,
+            iterations,
+            output,
+        }),
         VmCommand::Logs { node } => vm_tail_log(&config, &node, "guix-p2p"),
         VmCommand::DaemonLog { node } => vm_tail_log(&config, &node, "daemon"),
     }
@@ -808,6 +889,12 @@ impl VmConfig {
 
     fn proof_env_path(&self, node: &VmNode) -> PathBuf {
         self.state_dir.join(format!("{}.env", node.slug))
+    }
+
+    fn with_substitute_urls(&self, substitute_urls: String) -> Self {
+        let mut config = self.clone();
+        config.substitute_urls = substitute_urls;
+        config
     }
 }
 
@@ -1332,13 +1419,24 @@ echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
     Ok(())
 }
 
-fn vm_start_fetch_p2p(config: &VmConfig, name: &str, target: &VmFetch) -> anyhow::Result<()> {
+fn vm_start_fetch_p2p(
+    config: &VmConfig,
+    name: &str,
+    target: &VmFetch,
+    policy: &str,
+) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
     let bootstrap = registry
         .bootstrap_multiaddr()?
         .ok_or_else(|| anyhow::anyhow!("no bootstrap node configured; run: vm bootstrap <node>"))?;
-    let command = fetch_node_command(target, &bootstrap, &vm_external_multiaddr(node));
+    let command = fetch_node_command(
+        target,
+        &bootstrap,
+        &vm_external_multiaddr(node),
+        policy,
+        &config.substitute_urls,
+    );
     let output = ssh_run(config, node, &command)?;
     print!("{output}");
     Ok(())
@@ -1349,13 +1447,26 @@ fn vm_fetch(
     name: &str,
     store_path: Option<&str>,
     package: Option<&str>,
+    policy: &str,
 ) -> anyhow::Result<()> {
+    let _ = vm_fetch_timed(config, name, store_path, package, policy)?;
+    Ok(())
+}
+
+fn vm_fetch_timed(
+    config: &VmConfig,
+    name: &str,
+    store_path: Option<&str>,
+    package: Option<&str>,
+    policy: &str,
+) -> anyhow::Result<u128> {
     let mut registry = VmRegistry::load(config)?;
     let node = registry.node(name)?.clone();
     let target = resolve_fetch_target(&registry, &node, store_path, package)?;
     registry.node_mut(name)?.last_fetch = Some(target.clone());
     registry.save(config)?;
-    vm_start_fetch_p2p(config, name, &target)?;
+    let started = std::time::Instant::now();
+    vm_start_fetch_p2p(config, name, &target, policy)?;
     vm_require_fetch_target_available(config, name, &target)?;
     vm_start_daemon(config, name)?;
     let output = ssh_run(
@@ -1371,7 +1482,51 @@ fn vm_fetch(
     )?;
     print!("{output}");
     print_vm_dashboard_evidence(config, &registry, &node, &target)?;
+    Ok(started.elapsed().as_millis())
+}
+
+fn vm_http_fetch(
+    config: &VmConfig,
+    name: &str,
+    store_path: Option<&str>,
+    package: Option<&str>,
+) -> anyhow::Result<()> {
+    let _ = vm_http_fetch_timed(config, name, store_path, package)?;
     Ok(())
+}
+
+fn vm_http_fetch_timed(
+    config: &VmConfig,
+    name: &str,
+    store_path: Option<&str>,
+    package: Option<&str>,
+) -> anyhow::Result<u128> {
+    let mut registry = VmRegistry::load(config)?;
+    let node = registry.node(name)?.clone();
+    let target = resolve_fetch_target(&registry, &node, store_path, package)?;
+    registry.node_mut(name)?.last_fetch = Some(target.clone());
+    registry.save(config)?;
+    let command = format!(
+        r#"
+set -eu
+PACKAGE={package}
+STORE_PATH={store_path}
+SUBSTITUTE_URLS={substitute_urls}
+guix build --no-grafts --substitute-urls="$SUBSTITUTE_URLS" "$PACKAGE" >/tmp/e2e-http-realize.log
+guix gc -D "$STORE_PATH" >/tmp/e2e-http-delete.log
+test ! -e "$STORE_PATH"
+guix build --no-grafts --substitute-urls="$SUBSTITUTE_URLS" "$PACKAGE"
+test -d "$STORE_PATH"
+echo HTTP_IMPORTED_OUTPUT_IN_NODE_STORE
+"#,
+        package = shell_quote(&target.package),
+        store_path = shell_quote(&target.store_path),
+        substitute_urls = shell_quote(&substitute_urls_for_guix(&config.substitute_urls))
+    );
+    let started = std::time::Instant::now();
+    let output = ssh_run(config, &node, &command)?;
+    print!("{output}");
+    Ok(started.elapsed().as_millis())
 }
 
 fn vm_tail_log(config: &VmConfig, name: &str, kind: &str) -> anyhow::Result<()> {
@@ -1706,6 +1861,284 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
             "benchmark completed with {} failed run(s); see docs/benchmark-results.md",
             failures.len()
         );
+    }
+}
+
+fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
+    if opts.iterations == 0 {
+        anyhow::bail!("--iterations must be greater than zero");
+    }
+    if opts.modes.is_empty() {
+        anyhow::bail!("--modes must contain at least one mode");
+    }
+    if opts.http_conditions.is_empty() {
+        anyhow::bail!("--http-conditions must contain at least one condition");
+    }
+    if opts.seed_nodes.is_empty() {
+        anyhow::bail!("--seed-nodes must contain at least one VM node");
+    }
+
+    ensure_vm_benchmark_nodes_ready(
+        &opts.config,
+        &opts.seed_nodes,
+        &opts.fetch_node,
+        &opts.http_node,
+    )?;
+
+    let selections = benchmark_package_selections(opts.suite, opts.packages.as_deref());
+    if selections.is_empty() {
+        anyhow::bail!("--packages must contain at least one package");
+    }
+
+    let guix = find_on_path("guix").context("missing required command: guix")?;
+    let mut packages = Vec::new();
+    for selection in &selections {
+        tracing::info!("resolving benchmark package {} ({})", selection.name, selection.tier);
+        let store_path = resolve_package(&guix, &selection.name)?;
+        let nar_hash = compute_nar_hash(&guix, &store_path)?;
+        let closure_paths = resolve_requisites(&guix, &store_path)?;
+        packages.push(BenchmarkPackage {
+            tier: selection.tier,
+            name: selection.name.clone(),
+            store_path,
+            nar_hash,
+            closure_paths,
+        });
+    }
+
+    let output_dir = opts.output.unwrap_or_else(|| opts.config.state_dir.join("benchmarks"));
+    std::fs::create_dir_all(&output_dir)?;
+    let mut records = Vec::new();
+    let mut failures = Vec::new();
+
+    for package in &mut packages {
+        for condition in &opts.http_conditions {
+            let condition_config = opts.config.with_substitute_urls(condition.vm_substitute_urls());
+
+            if let Some(reason) = condition.skip_reason() {
+                for mode in &opts.modes {
+                    records.push(BenchmarkRecord {
+                        tier: package.tier,
+                        package: package.name.clone(),
+                        store_path: package.store_path.clone(),
+                        nar_hash: package.nar_hash.clone(),
+                        nar_size: None,
+                        mode: *mode,
+                        http_condition: *condition,
+                        seed_count: opts.seed_nodes.len(),
+                        iteration: 1,
+                        elapsed_ms: None,
+                        success: false,
+                        skipped: true,
+                        p2p_evidence: false,
+                        http_evidence: false,
+                        provider_count: None,
+                        run_dir: output_dir.clone(),
+                        error: None,
+                        skip_reason: Some(reason.to_string()),
+                    });
+                }
+                continue;
+            }
+
+            for seed_node in &opts.seed_nodes {
+                tracing::info!(
+                    "vm benchmark seeding package={} node={} condition={}",
+                    package.name,
+                    seed_node,
+                    condition
+                );
+                vm_seed(&condition_config, seed_node, &package.name)
+                    .with_context(|| format!("failed to seed {} on {}", package.name, seed_node))?;
+            }
+
+            let registry = VmRegistry::load(&condition_config)?;
+            let (seed_node, seed) = registry.latest_seed()?;
+            let store_path = seed.store_path.clone();
+            let seed_metadata = wait_for_vm_seed_metadata(seed_node.dashboard_port, &store_path)
+                .unwrap_or((None, None));
+            let vm_nar_hash = seed_metadata.0.clone().unwrap_or_else(|| package.nar_hash.clone());
+            let vm_nar_size = seed_metadata.1;
+            package.store_path = store_path.clone();
+            package.nar_hash = vm_nar_hash.clone();
+
+            for mode in &opts.modes {
+                for iteration in 1..=opts.iterations {
+                    tracing::info!(
+                        "vm benchmark package={} condition={} mode={} iteration={}/{}",
+                        package.name,
+                        condition,
+                        mode,
+                        iteration,
+                        opts.iterations
+                    );
+                    let result = match mode {
+                        BenchmarkMode::Http => vm_http_fetch_timed(
+                            &condition_config,
+                            &opts.http_node,
+                            Some(&store_path),
+                            Some(&package.name),
+                        )
+                        .map(|elapsed_ms| P2pBuildOutcome {
+                            elapsed_ms,
+                            p2p_evidence: false,
+                            http_evidence: true,
+                            provider_count: None,
+                            nar_size: vm_nar_size,
+                        }),
+                        BenchmarkMode::P2pOnly
+                        | BenchmarkMode::P2pFirst
+                        | BenchmarkMode::HttpFirst => {
+                            let policy = mode.as_policy().expect("p2p mode has a policy");
+                            vm_remove(
+                                &condition_config,
+                                &opts.fetch_node,
+                                Some(&store_path),
+                                Some(&package.name),
+                            )?;
+                            vm_fetch_timed(
+                                &condition_config,
+                                &opts.fetch_node,
+                                Some(&store_path),
+                                Some(&package.name),
+                                policy,
+                            )
+                            .map(|elapsed_ms| P2pBuildOutcome {
+                                elapsed_ms,
+                                p2p_evidence: true,
+                                http_evidence: *mode == BenchmarkMode::HttpFirst,
+                                provider_count: Some(opts.seed_nodes.len()),
+                                nar_size: vm_nar_size,
+                            })
+                        },
+                    };
+
+                    match result {
+                        Ok(outcome) => records.push(BenchmarkRecord {
+                            tier: package.tier,
+                            package: package.name.clone(),
+                            store_path: store_path.clone(),
+                            nar_hash: vm_nar_hash.clone(),
+                            nar_size: outcome.nar_size.or(vm_nar_size),
+                            mode: *mode,
+                            http_condition: *condition,
+                            seed_count: if *mode == BenchmarkMode::Http {
+                                0
+                            } else {
+                                opts.seed_nodes.len()
+                            },
+                            iteration,
+                            elapsed_ms: Some(outcome.elapsed_ms),
+                            success: true,
+                            skipped: false,
+                            p2p_evidence: outcome.p2p_evidence,
+                            http_evidence: outcome.http_evidence,
+                            provider_count: outcome.provider_count,
+                            run_dir: output_dir.clone(),
+                            error: None,
+                            skip_reason: None,
+                        }),
+                        Err(e) => {
+                            let message = e.to_string();
+                            failures.push(format!(
+                                "{} {} {} iteration {}: {}",
+                                package.name, condition, mode, iteration, message
+                            ));
+                            records.push(BenchmarkRecord {
+                                tier: package.tier,
+                                package: package.name.clone(),
+                                store_path: store_path.clone(),
+                                nar_hash: vm_nar_hash.clone(),
+                                nar_size: None,
+                                mode: *mode,
+                                http_condition: *condition,
+                                seed_count: if *mode == BenchmarkMode::Http {
+                                    0
+                                } else {
+                                    opts.seed_nodes.len()
+                                },
+                                iteration,
+                                elapsed_ms: None,
+                                success: false,
+                                skipped: false,
+                                p2p_evidence: false,
+                                http_evidence: false,
+                                provider_count: None,
+                                run_dir: output_dir.clone(),
+                                error: Some(message),
+                                skip_reason: None,
+                            });
+                        },
+                    }
+                }
+            }
+        }
+    }
+
+    let csv_path = output_dir.join("results.csv");
+    write_benchmark_csv(&csv_path, &records)?;
+    write_benchmark_report(
+        &project_root().join("docs/benchmark-results.md"),
+        &records,
+        &packages,
+        HarnessTransport::Tcp,
+        opts.iterations,
+    )?;
+    tracing::info!("VM benchmark CSV: {}", csv_path.display());
+    tracing::info!("VM benchmark report: docs/benchmark-results.md");
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "VM benchmark completed with {} failed run(s); see docs/benchmark-results.md",
+            failures.len()
+        );
+    }
+}
+
+fn ensure_vm_benchmark_nodes_ready(
+    config: &VmConfig,
+    seed_nodes: &[String],
+    fetch_node: &str,
+    http_node: &str,
+) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    registry
+        .bootstrap_multiaddr()?
+        .ok_or_else(|| anyhow::anyhow!("no bootstrap node configured; run: vm bootstrap <node>"))?;
+    let mut names = seed_nodes.to_vec();
+    names.push(fetch_node.to_string());
+    names.push(http_node.to_string());
+    names.sort();
+    names.dedup();
+    for name in names {
+        let node = registry.node(&name)?;
+        if !is_pid_running(node.pid) {
+            anyhow::bail!("VM node {} is not running; run: vm run {}", node.name, node.name);
+        }
+        wait_ssh(config, node)?;
+    }
+    Ok(())
+}
+
+fn wait_for_vm_seed_metadata(
+    dashboard_port: u16,
+    store_path: &str,
+) -> anyhow::Result<(Option<String>, Option<u64>)> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let seeds = dashboard_json(dashboard_port, "/api/seeds")?;
+        if let Some(entry) = matching_seed_entry(&seeds, store_path) {
+            return Ok((
+                json_string(entry, "nar_hash"),
+                entry.get("nar_size").and_then(serde_json::Value::as_u64),
+            ));
+        }
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!("seed dashboard did not include {store_path}");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
 }
 
@@ -2797,6 +3230,18 @@ fn compute_nar_hash(guix: &std::path::Path, store_path: &str) -> anyhow::Result<
     Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
+fn substitute_urls_for_guix(urls: &str) -> String {
+    split_substitute_urls(urls).join(" ")
+}
+
+fn substitute_urls_for_guix_p2p(urls: &str) -> String {
+    split_substitute_urls(urls).join(",")
+}
+
+fn split_substitute_urls(urls: &str) -> Vec<&str> {
+    urls.split([',', ' ', '\n', '\t']).filter(|url| !url.is_empty()).collect()
+}
+
 fn checked_status(mut command: std::process::Command, description: &str) -> anyhow::Result<()> {
     let output = command.output().with_context(|| format!("failed to run {description}"))?;
     if output.status.success() {
@@ -2913,7 +3358,7 @@ fn write_benchmark_report(
 ) -> anyhow::Result<()> {
     let mut report = String::new();
     report.push_str("# Benchmark Results\n\n");
-    report.push_str("Generated by `guix-p2p-e2e benchmark`.\n\n");
+    report.push_str("Generated by `guix-p2p-e2e benchmark` or `guix-p2p-e2e vm benchmark`.\n\n");
     report.push_str("## Host\n\n");
     report.push_str(&format!("- Date: {}\n", unix_timestamp()));
     report.push_str(&format!("- Platform: {} {}\n", std::env::consts::OS, std::env::consts::ARCH));
@@ -3542,7 +3987,7 @@ printf 'pid=%s\nlog=%s\nsocket=%s\ndashboard=http://127.0.0.1:%s\n' "$PID" "$LOG
 "#,
         package = shell_quote(package),
         bootstrap = shell_quote(bootstrap),
-        substitute_urls = shell_quote(substitute_urls),
+        substitute_urls = shell_quote(&substitute_urls_for_guix(substitute_urls)),
         external_address = shell_quote(external_address)
     )
 }
@@ -3578,13 +4023,20 @@ exit 1
     )
 }
 
-fn fetch_node_command(target: &VmFetch, bootstrap: &str, external_address: &str) -> String {
+fn fetch_node_command(
+    target: &VmFetch,
+    bootstrap: &str,
+    external_address: &str,
+    policy: &str,
+    substitute_urls: &str,
+) -> String {
     format!(
         r#"
 set -eu
 STORE_PATH={store_path}
 BOOTSTRAP={bootstrap}
 EXTERNAL_ADDRESS={external_address}
+POLICY={policy}
 P2P="${{GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}}"
 CACHE_DIR="${{GUIX_P2P_E2E_B_CACHE:-/tmp/guix-p2p-b}}"
 LOG="${{GUIX_P2P_E2E_B_LOG:-/tmp/guix-p2p-b.log}}"
@@ -3597,7 +4049,10 @@ if [ -e "$STORE_PATH" ]; then
   exit 1
 fi
 mkdir -p "$CACHE_DIR" "$HOME/.config/guix-p2p"
-printf 'min_providers = 1\n' > "$HOME/.config/guix-p2p/config.toml"
+cat > "$HOME/.config/guix-p2p/config.toml" <<'EOF'
+min_providers = 1
+substitute_urls = {substitute_urls_toml}
+EOF
 if [ -f /tmp/guix-p2p-b.pid ]; then
   OLD_PID="$(cat /tmp/guix-p2p-b.pid 2>/dev/null || true)"
   if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
@@ -3613,7 +4068,7 @@ RUST_LOG="${{RUST_LOG:-info}}" "$P2P" --daemon \
   --dashboard --dashboard-bind "$DASHBOARD_BIND" --dashboard-port "$DASHBOARD_PORT" \
   --bootstrap-peers "$BOOTSTRAP" \
   --external-addresses "$EXTERNAL_ADDRESS" \
-  --policy p2p-only \
+  --policy "$POLICY" \
   > "$LOG" 2>&1 &
 PID="$!"
 printf '%s\n' "$PID" > /tmp/guix-p2p-b.pid
@@ -3635,7 +4090,9 @@ fi
 "#,
         store_path = shell_quote(&target.store_path),
         bootstrap = shell_quote(bootstrap),
-        external_address = shell_quote(external_address)
+        external_address = shell_quote(external_address),
+        policy = shell_quote(policy),
+        substitute_urls_toml = toml_string(&substitute_urls_for_guix_p2p(substitute_urls))
     )
 }
 

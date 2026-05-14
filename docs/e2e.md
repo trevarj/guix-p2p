@@ -43,11 +43,31 @@ cargo run -p guix-p2p-e2e -- vm remove Bob
 cargo run -p guix-p2p-e2e -- vm fetch Bob
 ```
 
+Run a VM benchmark after the same setup:
+
+```sh
+cargo run -p guix-p2p-e2e -- vm benchmark \
+  --suite smoke \
+  --modes http,p2p-only,p2p-first \
+  --http-conditions normal \
+  --seed-nodes Alice \
+  --fetch-node Bob \
+  --http-node Bob \
+  --iterations 1
+```
+
 `bootstrap` starts a seedless DHT node and saves it as the default bootstrap
 peer for the VM registry. `seed` uses that configured bootstrap peer, saves the
 latest `store_path` and `peer_id` for the seed node, and announces the NAR
 provider record through the DHT. Re-running `seed` updates the latest target
 used by later `fetch` and `remove` commands.
+
+`benchmark` assumes the same VM state is already configured: the base image
+exists, the named VMs are running, SSH is ready, the binary has been pushed,
+and a bootstrap node has been saved with `vm bootstrap`. It seeds the requested
+package on each `--seed-nodes` node, removes the target from the fetcher before
+each fetch, runs HTTP-only fetches with the regular Guix daemon, and runs P2P
+fetches through the same wrapper path as `vm fetch`.
 
 The VM harness passes each node's host-forwarded P2P port as an
 `--external-addresses` value. This is required for QEMU user-mode networking:

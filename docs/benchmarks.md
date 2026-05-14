@@ -70,6 +70,57 @@ imported store path is a restored directory.
 
 ## Benchmark
 
+The authoritative benchmark path is the VM workflow. First complete the setup
+from `docs/e2e.md`:
+
+```sh
+cargo run -p guix-p2p-e2e -- vm image
+cargo run -p guix-p2p-e2e -- vm run Bootstrap
+cargo run -p guix-p2p-e2e -- vm run Alice
+cargo run -p guix-p2p-e2e -- vm run Bob
+cargo run -p guix-p2p-e2e -- vm wait-ssh Bootstrap Alice Bob
+cargo run -p guix-p2p-e2e -- vm push-binary --all
+cargo run -p guix-p2p-e2e -- vm bootstrap Bootstrap
+```
+
+Then run the VM benchmark:
+
+```sh
+cargo run -p guix-p2p-e2e -- vm benchmark \
+  --suite smoke \
+  --modes http,p2p-only,p2p-first \
+  --http-conditions normal \
+  --seed-nodes Alice \
+  --fetch-node Bob \
+  --http-node Bob \
+  --iterations 1
+```
+
+For multiple seeders, start and push additional VM nodes, then pass them as a
+comma-separated list:
+
+```sh
+cargo run -p guix-p2p-e2e -- vm benchmark \
+  --suite standard \
+  --modes http,p2p-only,p2p-first,http-first \
+  --http-conditions normal,dead-primary \
+  --seed-nodes Alice,Carol,Dave \
+  --fetch-node Bob \
+  --http-node Bob \
+  --iterations 3
+```
+
+The VM benchmark writes:
+
+- `target/guix-p2p-e2e/benchmarks/results.csv`
+- `docs/benchmark-results.md`
+
+The older top-level `benchmark` command remains a fast container harness, but
+VM benchmarks are the publishable path because each node has its own writable
+store and daemon state.
+
+## Container Benchmark
+
 ```sh
 guix shell -m manifest.scm -- \
   cargo run -p guix-p2p-e2e -- benchmark --suite smoke --iterations 1 --transport tcp
