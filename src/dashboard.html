@@ -153,11 +153,26 @@ main{
 }
 .package-row .seed-action:hover{border-color:var(--acc)}
 .package-row.seeded .seed-action{color:var(--dim)}
-.transfer-card{display:grid;grid-template-columns:minmax(220px,.9fr) 2fr;gap:14px;min-height:128px}
-.transfer-subject{border-right:1px solid var(--line);padding-right:12px;min-width:0}
-.transfer-name{font-size:16px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.transfer-card{
+  display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:12px;align-items:center;
+  border:1px solid var(--line);background:var(--bg2);padding:8px;border-radius:4px;
+  min-height:0;cursor:pointer
+}
+.transfer-card:hover{border-color:var(--acc);background:var(--panel2)}
+.transfer-summary{min-width:0}
+.transfer-subject{min-width:0}
+.transfer-name{font-size:14px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .transfer-hash{font-size:10px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:4px}
-.transfer-meta{font-size:10px;color:var(--acc);margin-top:6px}
+.transfer-meta{display:inline-block;font-size:10px;color:var(--acc);margin:6px 10px 0 0}
+.transfer-metrics{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.transfer-metric{border:1px solid var(--line);background:var(--panel);padding:5px 7px;border-radius:4px;min-width:72px;text-align:right}
+.transfer-metric .k{display:block;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim)}
+.transfer-metric .v{display:block;font-size:12px;color:var(--fg);margin-top:2px}
+.transfer-open{width:100%;font-size:10px;color:var(--dim);text-align:right;margin-top:2px}
+.transfer-compact-stages{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;margin-top:8px}
+.transfer-dot{height:6px;border:1px solid var(--line);background:var(--bg3);border-radius:8px}
+.transfer-dot.done{background:var(--ok);border-color:var(--ok)}
+.transfer-dot.active{background:var(--acc);border-color:var(--acc)}
 .transfer-stages{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;align-items:stretch}
 .transfer-stage{border:1px solid var(--line);background:var(--bg3);padding:7px;min-width:0;border-radius:4px}
 .transfer-stage.done{border-color:var(--ok);box-shadow:inset 0 0 0 1px rgba(51,204,51,.2)}
@@ -174,6 +189,10 @@ main{
 .transfer-peer-id{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
 .transfer-peer-count{text-align:right;color:var(--acc)}
 .transfer-peer-indices{grid-column:1 / 3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+.detail .transfer-stages{grid-template-columns:1fr}
+.detail .transfer-stage{display:grid;grid-template-columns:150px minmax(0,1fr);gap:8px;align-items:center}
+.detail .transfer-stage .value{margin-top:0;white-space:normal;word-break:break-word}
+.detail .transfer-peers{grid-template-columns:1fr}
 
 /* transfer flash animation */
 .seed-row.flash{animation:flash .6s ease}
@@ -250,7 +269,9 @@ main{
       "events events"
   }
   .transfer-card{grid-template-columns:1fr}
-  .transfer-subject{border-right:none;border-bottom:1px solid var(--dim);padding:0 0 8px}
+  .transfer-metrics{justify-content:flex-start}
+  .transfer-open{text-align:left}
+  .transfer-compact-stages{grid-template-columns:repeat(3,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:repeat(3,1fr)}
 }
 @media (max-width:720px){
@@ -262,6 +283,7 @@ main{
   .events{max-height:260px}
   .package-tools{display:block}
   .package-hint{text-align:left;margin-top:4px}
+  .transfer-compact-stages{grid-template-columns:repeat(2,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:1fr 1fr}
   .transfer-peers{grid-template-columns:1fr}
   .events .entry{grid-template-columns:62px 18px 1fr}
@@ -766,43 +788,87 @@ function renderTransferPeers(title,peers){
     +'</div>'
 }
 
-function renderTransferPath(){
-  var el=document.getElementById('transfer-path');
-  if(!TRANSFER){el.innerHTML='<div class="empty">no transfer observed</div>';return}
-  var labels=[
+function transferStageLabels(){
+  return [
     ['observed','package observed'],
     ['trusted','narinfo trusted'],
     ['providers','providers found'],
     ['blocks','blocks moved'],
     ['verified','verified/imported'],
     ['reseeded','re-seeded locally']
-  ];
-  var activeSeen=false;
-  var stages=labels.map(function(item){
-    var key=item[0],label=item[1],done=TRANSFER.stages[key];
-    var cls=done?'done':(!activeSeen?'active':'');
-    if(!done)activeSeen=true;
+  ]
+}
+
+function transferStageClass(t,key,state){
+  var done=t.stages[key];
+  var cls=done?'done':(!state.activeSeen?'active':'');
+  if(!done)state.activeSeen=true;
+  return cls
+}
+
+function renderTransferStageDetails(t){
+  var state={activeSeen:false};
+  return transferStageLabels().map(function(item){
+    var key=item[0],label=item[1],cls=transferStageClass(t,key,state);
     return '<div class="transfer-stage '+cls+'" data-help="transfer-stage-'+attr(key)+'">'
       +'<div class="label">'+esc(label)+'</div>'
-      +'<div class="value">'+esc(TRANSFER.values[key]||'pending')+'</div>'
+      +'<div class="value">'+esc(t.values[key]||'pending')+'</div>'
       +'</div>'
-  }).join('');
-  el.innerHTML='<div class="transfer-card">'
+  }).join('')
+}
+
+function renderTransferStageDots(t){
+  var state={activeSeen:false};
+  return transferStageLabels().map(function(item){
+    var key=item[0],label=item[1],cls=transferStageClass(t,key,state);
+    return '<div class="transfer-dot '+cls+'" data-tip="'+attr(label+': '+(t.values[key]||'pending'))+'"></div>'
+  }).join('')
+}
+
+function renderTransferPath(){
+  var el=document.getElementById('transfer-path');
+  if(!TRANSFER){el.innerHTML='<div class="empty">no transfer observed</div>';return}
+  var downloadPeers=Object.keys(TRANSFER.download_peers||{}).length;
+  var servingPeers=Object.keys(TRANSFER.serving_peers||{}).length;
+  el.innerHTML='<div class="transfer-card" onclick="openTransferDetail()">'
+    +'<div class="transfer-summary">'
     +'<div class="transfer-subject">'
     +'<div class="transfer-name">'+esc(transferSubjectName(TRANSFER))+'</div>'
     +'<div class="transfer-hash">'+esc(TRANSFER.nar_hash||'?')+'</div>'
     +'<div class="transfer-meta">'+esc(TRANSFER.nar_size!=null?fmtSize(TRANSFER.nar_size):'size unknown')+'</div>'
     +'<div class="transfer-meta">'+esc((TRANSFER.total_blocks_received||0)+' blocks down / '+(TRANSFER.total_blocks_served||0)+' blocks up')+'</div>'
     +'</div>'
-    +'<div class="transfer-detail">'
-    +'<div class="transfer-stages">'+stages+'</div>'
-    +'<div class="transfer-peers">'
-    +renderTransferPeers('downloaded from',TRANSFER.download_peers)
-    +renderTransferPeers('served to',TRANSFER.serving_peers)
+    +'<div class="transfer-compact-stages">'+renderTransferStageDots(TRANSFER)+'</div>'
     +'</div>'
+    +'<div class="transfer-metrics">'
+    +'<div class="transfer-metric"><span class="k">providers</span><span class="v">'+esc(downloadPeers)+'</span></div>'
+    +'<div class="transfer-metric"><span class="k">requesters</span><span class="v">'+esc(servingPeers)+'</span></div>'
+    +'<div class="transfer-metric"><span class="k">bytes down</span><span class="v">'+esc(fmtBytes(TRANSFER.total_bytes_received||0))+'</span></div>'
+    +'<div class="transfer-open">details &gt;</div>'
     +'</div>'
     +'</div>';
   decorateHelpButtons(el)
+}
+
+function openTransferDetail(){
+  if(!TRANSFER)return;
+  var c=document.getElementById('detail-content');
+  c.innerHTML='<h2>transfer evidence</h2>'
+    +'<div class="field"><label>package</label><span class="val">'+esc(transferSubjectName(TRANSFER))+'</span></div>'
+    +'<div class="field"><label>store</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(TRANSFER.store_path||'?')+'</span></div>'
+    +'<div class="field"><label>hash</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(TRANSFER.nar_hash||'?')+'</span></div>'
+    +'<div class="field"><label>size</label><span class="val">'+esc(TRANSFER.nar_size!=null?fmtSize(TRANSFER.nar_size):'unknown')+'</span></div>'
+    +'<div class="field"><label>downloaded</label><span class="val">'+esc((TRANSFER.total_blocks_received||0)+' blocks, '+fmtBytes(TRANSFER.total_bytes_received||0))+'</span></div>'
+    +'<div class="field"><label>served</label><span class="val">'+esc((TRANSFER.total_blocks_served||0)+' blocks')+'</span></div>'
+    +'<h3>proof stages</h3>'
+    +'<div class="transfer-stages">'+renderTransferStageDetails(TRANSFER)+'</div>'
+    +'<h3>peer contributions</h3>'
+    +'<div class="transfer-peers">'
+    +renderTransferPeers('downloaded from',TRANSFER.download_peers)
+    +renderTransferPeers('served to',TRANSFER.serving_peers)
+    +'</div>';
+  document.getElementById('overlay').classList.remove('hidden');
+  decorateHelpButtons(c)
 }
 
 function seedPackage(ev,storePath){
