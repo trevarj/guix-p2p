@@ -568,6 +568,9 @@ locally-seeded nars in real time:
   transfer evidence is the primary proof surface, packages and active seeds
   are the main workspace, peers/catalog/builds are secondary diagnostics, and
   the filtered event history stays full-width at the bottom.
+- Dashboard sections and controls expose faded `?` affordances. Hovering them
+  highlights the help control, and clicking opens a concise explanatory popup
+  for that component.
 - Active seed rows display the package/store item name when store-path metadata
   is available, with the full store path and NAR hash available in details.
   Each active seed row can stop seeding directly by NAR hash, which works even

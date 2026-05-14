@@ -210,6 +210,25 @@ main{
 }
 .tip.hidden{display:none}
 [data-tip]{cursor:help}
+.help-btn{
+  width:16px;height:16px;border:1px solid var(--dim);border-radius:50%;
+  background:transparent;color:var(--dim);font-family:var(--font);font-size:10px;
+  line-height:14px;text-align:center;padding:0;cursor:pointer;opacity:.55;flex:0 0 auto
+}
+.help-btn:hover,.help-btn:focus{color:var(--fg);border-color:var(--acc);opacity:1;outline:none}
+.help-popover{
+  position:fixed;z-index:1001;inset:auto 24px 24px auto;width:420px;max-width:calc(100vw - 32px);
+  background:#0b0c0a;border:1px solid var(--acc);box-shadow:0 12px 36px rgba(0,0,0,.55);
+  padding:14px;border-radius:6px
+}
+.help-popover.hidden{display:none}
+.help-popover h3{font-size:12px;color:var(--acc);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}
+.help-popover p{font-size:12px;color:var(--fg);line-height:1.5}
+.help-popover .close-help{
+  position:absolute;top:8px;right:10px;background:transparent;border:0;color:var(--dim);
+  font-family:var(--font);font-size:16px;cursor:pointer
+}
+.help-popover .close-help:hover{color:var(--fg)}
 
 @media (max-width:1100px){
   header{align-items:flex-start;flex-wrap:wrap}
@@ -246,60 +265,60 @@ main{
 <body class="theme-yellow">
 <header>
   <div>
-    <strong data-tip="Local daemon dashboard for P2P substitute discovery, seeding, and transfer evidence.">guix-p2p</strong>
+    <strong data-tip="Local daemon dashboard for P2P substitute discovery, seeding, and transfer evidence." data-help="dashboard">guix-p2p</strong>
     <br><span class="id" id="peer-id" data-tip="Full libp2p peer id for this node.">--</span>
   </div>
   <div class="stats">
-    <div data-tip="Currently connected swarm peers.">CONN <span id="connected">0</span></div>
-    <div data-tip="Known peers with reputation records.">PEERS <span id="total-peers">0</span></div>
-    <div data-tip="Provider records known in the local DHT cache.">DHT <span id="dht-entries">0</span></div>
-    <div data-tip="Installed packages discovered from system, kernel, and Guix Home profiles.">PACKAGES <span id="package-count">0</span></div>
-    <div data-tip="Store paths observed through substitute/narinfo lookups.">CATALOG <span id="catalog-count">0</span></div>
-    <div data-tip="NARs currently cached locally and available for block serving.">SEEDS <span id="seed-count">0</span></div>
-    <div data-tip="Daemon dashboard uptime since this process started.">UPTIME <span id="uptime">00:00:00</span></div>
+    <div data-tip="Currently connected swarm peers." data-help="connected">CONN <span id="connected">0</span></div>
+    <div data-tip="Known peers with reputation records." data-help="known-peers">PEERS <span id="total-peers">0</span></div>
+    <div data-tip="Provider records known in the local DHT cache." data-help="dht">DHT <span id="dht-entries">0</span></div>
+    <div data-tip="Installed packages discovered from system, kernel, and Guix Home profiles." data-help="package-count">PACKAGES <span id="package-count">0</span></div>
+    <div data-tip="Store paths observed through substitute/narinfo lookups." data-help="catalog-count">CATALOG <span id="catalog-count">0</span></div>
+    <div data-tip="NARs currently cached locally and available for block serving." data-help="seed-count">SEEDS <span id="seed-count">0</span></div>
+    <div data-tip="Daemon dashboard uptime since this process started." data-help="uptime">UPTIME <span id="uptime">00:00:00</span></div>
   </div>
   <div>
-    <button onclick="cycleTheme()" data-tip="Cycle dashboard color theme.">theme</button>
+    <button onclick="cycleTheme()" data-tip="Cycle dashboard color theme." data-help="theme">theme</button>
   </div>
 </header>
 <main>
   <div class="panel packages-panel">
-    <h2 data-tip="Installed store paths that can be seeded into the local P2P cache.">packages <span class="badge" id="package-badge">0</span></h2>
+    <h2 data-tip="Installed store paths that can be seeded into the local P2P cache." data-help="packages">packages <span class="badge" id="package-badge">0</span></h2>
     <div class="package-tools">
-      <input class="package-search" id="package-search" placeholder="search name, version, store path" data-tip="Filter installed packages by name, version, or full /gnu/store path.">
+      <input class="package-search" id="package-search" placeholder="search name, version, store path" data-tip="Filter installed packages by name, version, or full /gnu/store path." data-help="package-search">
       <div class="package-hint" data-tip="Profiles scanned: system, kernel, and Guix Home.">installed profiles</div>
     </div>
     <div id="packages-list"><div class="empty">loading packages</div></div>
   </div>
   <div class="panel seeds-panel">
-    <h2 data-tip="NARs this node can serve to other peers.">active seeds <span class="badge" id="seed-badge">0</span></h2>
+    <h2 data-tip="NARs this node can serve to other peers." data-help="seeds">active seeds <span class="badge" id="seed-badge">0</span></h2>
     <div id="seeds-list"><div class="empty">not seeding</div></div>
   </div>
   <div class="panel transfer-panel">
-    <h2 data-tip="Latest P2P proof path: observed package, trusted narinfo, providers, block movement, import, and re-seeding.">transfer path</h2>
+    <h2 data-tip="Latest P2P proof path: observed package, trusted narinfo, providers, block movement, import, and re-seeding." data-help="transfer">transfer path</h2>
     <div id="transfer-path"><div class="empty">no transfer observed</div></div>
   </div>
   <div class="panel peers-panel">
-    <h2 data-tip="Peers known through reputation records and live connection events.">peers</h2>
+    <h2 data-tip="Peers known through reputation records and live connection events." data-help="peers">peers</h2>
     <div id="peers-list"><div class="empty">no peers yet</div></div>
   </div>
   <div class="panel catalog-panel">
-    <h2 data-tip="Substitute lookups observed by this node, including whether P2P providers were found.">catalog <span class="badge" id="catalog-badge">0</span></h2>
+    <h2 data-tip="Substitute lookups observed by this node, including whether P2P providers were found." data-help="catalog">catalog <span class="badge" id="catalog-badge">0</span></h2>
     <div id="catalog-list"><div class="empty">no packages discovered</div></div>
   </div>
   <div class="panel builds-panel">
-    <h2 data-tip="Observed narinfo/build records with provider counts and detail drill-down.">builds</h2>
+    <h2 data-tip="Observed narinfo/build records with provider counts and detail drill-down." data-help="builds">builds</h2>
     <div id="builds-list"><div class="empty">no builds observed</div></div>
   </div>
   <div class="panel events">
-    <h2 data-tip="Daemon event history. Reloading the page keeps the latest 500 events from daemon memory.">events</h2>
+    <h2 data-tip="Daemon event history. Reloading the page keeps the latest 500 events from daemon memory." data-help="events">events</h2>
     <div class="event-tools">
-      <button class="event-filter active" data-filter="all" onclick="setEventFilter('all')" data-tip="Show every persisted and live dashboard event.">all</button>
-      <button class="event-filter" data-filter="transfer" onclick="setEventFilter('transfer')" data-tip="Downloads, block movement, transfer success, and transfer failures.">transfers</button>
-      <button class="event-filter" data-filter="seed" onclick="setEventFilter('seed')" data-tip="Seed creation/removal and local seed actions.">seeds</button>
-      <button class="event-filter" data-filter="peer" onclick="setEventFilter('peer')" data-tip="Peer connection and disconnection activity.">peers</button>
-      <button class="event-filter" data-filter="discovery" onclick="setEventFilter('discovery')" data-tip="Narinfo, catalog, and provider discovery events.">discovery</button>
-      <button class="event-filter" data-filter="failure" onclick="setEventFilter('failure')" data-tip="Only failed downloads and local dashboard action errors.">failures</button>
+      <button class="event-filter active" data-filter="all" onclick="setEventFilter('all')" data-tip="Show every persisted and live dashboard event." data-help="event-filter-all">all</button>
+      <button class="event-filter" data-filter="transfer" onclick="setEventFilter('transfer')" data-tip="Downloads, block movement, transfer success, and transfer failures." data-help="event-filter-transfer">transfers</button>
+      <button class="event-filter" data-filter="seed" onclick="setEventFilter('seed')" data-tip="Seed creation/removal and local seed actions." data-help="event-filter-seed">seeds</button>
+      <button class="event-filter" data-filter="peer" onclick="setEventFilter('peer')" data-tip="Peer connection and disconnection activity." data-help="event-filter-peer">peers</button>
+      <button class="event-filter" data-filter="discovery" onclick="setEventFilter('discovery')" data-tip="Narinfo, catalog, and provider discovery events." data-help="event-filter-discovery">discovery</button>
+      <button class="event-filter" data-filter="failure" onclick="setEventFilter('failure')" data-tip="Only failed downloads and local dashboard action errors." data-help="event-filter-failure">failures</button>
     </div>
     <div id="events-list"></div>
   </div>
@@ -311,6 +330,11 @@ main{
   </div>
 </div>
 <div class="tip hidden" id="tip"></div>
+<div class="help-popover hidden" id="help-popover">
+  <button class="close-help" onclick="closeHelp()" aria-label="close help">x</button>
+  <h3 id="help-title"></h3>
+  <p id="help-body"></p>
+</div>
 <script>
 var THEMES=['theme-yellow','theme-green','theme-amber'];
 var THEME_IDX=THEMES.indexOf('theme-yellow');
@@ -328,6 +352,39 @@ var TRANSFERS={};
 var WS=null;
 var WS_RETRY=1000;
 var SERVER_STARTED=null;
+var HELP_TEXT={
+  dashboard:['Dashboard','This page is the local operational view for a guix-p2p daemon. It combines seed inventory, transfer proof evidence, peer health, discovered substitute metadata, and recent daemon events.'],
+  connected:['Connected Peers','The number of currently connected swarm peers reported by the daemon connection manager. A low value can be normal before discovery or when only bootstrap forwarding is available.'],
+  'known-peers':['Known Peers','Peers that have reputation records. This can include disconnected peers if the daemon has seen successful or failed work from them before.'],
+  dht:['DHT Records','Provider records currently known in the local DHT cache. These records help the node find peers that claim they can serve a desired NAR.'],
+  'package-count':['Installed Packages','The total number of installed packages discovered from the system, kernel, and Guix Home profiles. These are candidates for manual seeding.'],
+  'catalog-count':['Catalog Entries','Store paths observed during substitute lookups. Catalog entries show what the daemon has learned about possible packages and whether P2P providers were found.'],
+  'seed-count':['Active Seeds','NARs in the local cache that this node can serve to requesting peers. A seed may come from manual seeding or from a successful P2P download that was cached locally.'],
+  uptime:['Uptime','How long this dashboard-enabled daemon process has been running. Event history is in memory and resets when the daemon restarts.'],
+  theme:['Theme','Cycles between the built-in dashboard color themes. This only affects the current browser and is saved in local storage.'],
+  packages:['Packages','Installed package rows let you seed local store paths into the P2P cache. Use search to narrow the list, then press seed to serialize and announce the package NAR.'],
+  'package-search':['Package Search','Filters the installed package snapshot by package name, version, and full /gnu/store path. It does not query Guix again; the package list refreshes periodically.'],
+  seeds:['Active Seeds','Shows cached NARs this node can serve. Open a row for details, or stop a seed to remove the cached NAR and persisted seed path when metadata is available.'],
+  transfer:['Transfer Path','Shows the latest proof path for P2P substitution: observed package, trusted narinfo, providers, block movement, import, and local re-seeding. Peer contribution rows show who served or received blocks.'],
+  peers:['Peers','Ranks known peers by reputation score and shows available address metadata. Offline rows are peers remembered from reputation history rather than active connections.'],
+  catalog:['Catalog','Tracks substitute lookups this node has processed. P2P entries indicate a provider lookup found peers; HTTP entries indicate no P2P provider was known for that item at the time.'],
+  builds:['Builds','Shows observed narinfo/build records with provider counts. Open a build row to inspect store path, size, references, providers, and raw narinfo when available.'],
+  events:['Events','A daemon-memory event log capped at 500 entries. It survives browser reloads but not daemon restarts. Use filters to focus on transfer, seed, peer, discovery, or failure activity.'],
+  'event-filter-all':['All Events','Shows every dashboard event currently retained by the daemon, including historical events loaded on page refresh and new live WebSocket events.'],
+  'event-filter-transfer':['Transfer Events','Shows download starts, accepted block movement, upload/block-serving evidence, successful imports, and transfer failures.'],
+  'event-filter-seed':['Seed Events','Shows manual seed additions, automatic post-download seed additions, and seed removals.'],
+  'event-filter-peer':['Peer Events','Shows peer connection and disconnection activity. Use this to see whether VM or local nodes are actually connecting.'],
+  'event-filter-discovery':['Discovery Events','Shows package observations, catalog updates, and provider discovery results from narinfo/substitute queries.'],
+  'event-filter-failure':['Failure Events','Shows failed downloads and local dashboard action failures, useful when deciding what log to inspect next.'],
+  'transfer-stage-observed':['Package Observed','The daemon saw a substitute request or narinfo lookup for this store path or NAR hash. This is the start of the proof trail.'],
+  'transfer-stage-trusted':['Narinfo Trusted','The daemon accepted signed narinfo metadata. P2P block transfer still depends on finding providers for the NAR hash.'],
+  'transfer-stage-providers':['Providers Found','The DHT returned one or more peers that claim to provide this NAR. More providers can improve resilience and, with sharded fetching, throughput.'],
+  'transfer-stage-blocks':['Blocks Moved','The daemon exchanged block requests and accepted verified blocks. Download rows show provider contributions; serving rows show requesters served by this node.'],
+  'transfer-stage-verified':['Verified And Imported','The downloaded NAR was verified/imported into the store successfully. Failures here usually mean hash or import errors.'],
+  'transfer-stage-reseeded':['Re-Seeded Locally','After a successful download, this node cached and announced the NAR so later peers can fetch it from here.'],
+  'transfer-downloaded':['Downloaded From','Provider contribution evidence for accepted blocks. Bytes are counted only for downloaded blocks accepted by this node.'],
+  'transfer-served':['Served To','Upload evidence for blocks this node served to requesting peers. Handshakes are shown in events but only non-empty block responses count here.']
+};
 
 function fmtTime(s){
   var h=Math.floor(s/3600),m=Math.floor(s%3600/60),se=s%60;
@@ -360,6 +417,37 @@ function esc(v){
 function attr(v){return esc(v)}
 
 function jsArg(v){return String(v==null?'':v).replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
+
+function helpButton(id){
+  return '<button class="help-btn" type="button" aria-label="help" data-help-key="'+attr(id)+'" data-tip="Open help for this component" onclick="openHelp(event,\''+jsArg(id)+'\')">?</button>'
+}
+
+function decorateHelpButtons(root){
+  (root||document).querySelectorAll('[data-help]').forEach(function(el){
+    if(el.dataset.helpReady)return;
+    el.dataset.helpReady='1';
+    if(el.tagName==='INPUT'||el.tagName==='BUTTON'){
+      el.insertAdjacentHTML('afterend',helpButton(el.dataset.help))
+    }else{
+      el.insertAdjacentHTML('beforeend',helpButton(el.dataset.help))
+    }
+  })
+}
+
+function openHelp(ev,id){
+  if(ev){
+    ev.preventDefault();
+    ev.stopPropagation()
+  }
+  var entry=HELP_TEXT[id]||['Dashboard help','No additional help is available for this component yet.'];
+  document.getElementById('help-title').textContent=entry[0];
+  document.getElementById('help-body').textContent=entry[1];
+  document.getElementById('help-popover').classList.remove('hidden')
+}
+
+function closeHelp(){
+  document.getElementById('help-popover').classList.add('hidden')
+}
 
 function updatePeerCount(){
   document.getElementById('total-peers').textContent=Object.keys(PEERS).length
@@ -664,7 +752,8 @@ function renderTransferPeers(title,peers){
       +'</div>'
   }).join('');
   if(ids.length>4)rows+='<div class="transfer-peer-row"><div class="transfer-peer-id">+'+(ids.length-4)+' more</div><div></div></div>';
-  return '<div class="transfer-peer-group">'
+  var helpKey=title==='downloaded from'?'transfer-downloaded':'transfer-served';
+  return '<div class="transfer-peer-group" data-help="'+attr(helpKey)+'">'
     +'<div class="transfer-peer-title">'+esc(title)+'</div>'
     +(rows||'<div class="empty">none observed</div>')
     +'</div>'
@@ -686,7 +775,7 @@ function renderTransferPath(){
     var key=item[0],label=item[1],done=TRANSFER.stages[key];
     var cls=done?'done':(!activeSeen?'active':'');
     if(!done)activeSeen=true;
-    return '<div class="transfer-stage '+cls+'">'
+    return '<div class="transfer-stage '+cls+'" data-help="transfer-stage-'+attr(key)+'">'
       +'<div class="label">'+esc(label)+'</div>'
       +'<div class="value">'+esc(TRANSFER.values[key]||'pending')+'</div>'
       +'</div>'
@@ -705,7 +794,8 @@ function renderTransferPath(){
     +renderTransferPeers('served to',TRANSFER.serving_peers)
     +'</div>'
     +'</div>'
-    +'</div>'
+    +'</div>';
+  decorateHelpButtons(el)
 }
 
 function seedPackage(ev,storePath){
@@ -1081,6 +1171,16 @@ function initTooltips(){
   document.addEventListener('focusout',hide)
 }
 
+document.addEventListener('click',function(ev){
+  var pop=document.getElementById('help-popover');
+  if(pop&&!pop.classList.contains('hidden')&&!pop.contains(ev.target)&&!ev.target.closest('.help-btn')){
+    closeHelp()
+  }
+});
+document.addEventListener('keydown',function(ev){
+  if(ev.key==='Escape')closeHelp()
+});
+
 (function(){
   var saved=localStorage.getItem('guix-p2p-theme');
   if(saved&&THEMES.indexOf(saved)>=0){THEME_IDX=THEMES.indexOf(saved)}
@@ -1190,6 +1290,7 @@ function initTooltips(){
   loadTransfers();
   loadEvents().then(connectWS);
   initTooltips();
+  decorateHelpButtons(document);
   document.getElementById('package-search').addEventListener('input',renderPackages);
 })();
 </script>
