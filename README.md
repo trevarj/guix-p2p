@@ -137,11 +137,12 @@ Run local controlled benchmarks:
 
 ```sh
 guix shell -m manifest.scm -- \
-  cargo run -p guix-p2p-e2e -- benchmark --packages hello,git,emacs --iterations 3 --transport tcp
+  cargo run -p guix-p2p-e2e -- benchmark --suite smoke --iterations 1 --transport tcp
 ```
 
 Benchmark CSV output is written under `target/guix-p2p-bench/`; the markdown
-report is written to `docs/benchmark-results.md`.
+report is written to `docs/benchmark-results.md`. Use `--suite standard` for
+small, medium, and large package tiers.
 
 ## Documentation
 

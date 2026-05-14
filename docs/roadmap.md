@@ -34,12 +34,16 @@ local dashboard access. Remaining work is mostly operational:
 The current benchmark evidence proves local P2P correctness, not superiority
 over HTTP. Before making performance claims:
 
-- Compare `http`, `p2p-only`, and `p2p-first` for the same package set.
+- Compare `http`, `p2p-only`, `p2p-first`, and `http-first` for the same
+  package tiers.
 - Use repeated runs and report medians plus p95 values.
-- Test small, medium, and large packages such as `hello`, `git`, and `emacs`.
+- Test small, medium, and large packages: `hello`, `git`, and `linux-libre`.
 - Add multi-seeder runs with 1, 3, 5, and 8 seed nodes serving the same NAR.
 - Record provider count, time to first provider, time to first block, restored
   bytes, elapsed time, and per-seeder block-serving evidence.
+- Compare real substitute-server conditions: normal, single-server,
+  dead-primary, slow, and flaky. Record slow/flaky as skipped when OS traffic
+  shaping is unavailable.
 - Keep HTTP fallback usage explicit in reports for mixed-policy modes.
 
 The detailed benchmark method lives in [benchmarks.md](benchmarks.md).

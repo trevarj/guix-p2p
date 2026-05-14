@@ -74,12 +74,21 @@ enum Commands {
     },
     /// Run controlled local substitute benchmarks
     Benchmark {
-        /// Comma-separated Guix package names
-        #[arg(long, value_delimiter = ',', default_value = "hello,git,emacs")]
-        packages: Vec<String>,
+        /// Benchmark package tier suite
+        #[arg(long, value_enum, default_value_t = BenchmarkSuite::Standard)]
+        suite: BenchmarkSuite,
+        /// Comma-separated Guix package names. Overrides --suite when set.
+        #[arg(long, value_delimiter = ',')]
+        packages: Option<Vec<String>>,
         /// Benchmark modes
         #[arg(long, value_enum, value_delimiter = ',', default_value = "http,p2p-only,p2p-first")]
         modes: Vec<BenchmarkMode>,
+        /// HTTP substitute-server condition profiles
+        #[arg(long, value_enum, value_delimiter = ',', default_value = "normal")]
+        http_conditions: Vec<HttpCondition>,
+        /// P2P seed node counts
+        #[arg(long, value_delimiter = ',', default_value = "1")]
+        seed_counts: Vec<usize>,
         /// Iterations per package/mode
         #[arg(long, default_value_t = 3)]
         iterations: usize,
@@ -217,13 +226,15 @@ impl std::fmt::Display for HarnessTransport {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, ValueEnum)]
 enum BenchmarkMode {
     Http,
     #[value(name = "p2p-only")]
     P2pOnly,
     #[value(name = "p2p-first")]
     P2pFirst,
+    #[value(name = "http-first")]
+    HttpFirst,
 }
 
 impl BenchmarkMode {
@@ -232,6 +243,7 @@ impl BenchmarkMode {
             BenchmarkMode::Http => None,
             BenchmarkMode::P2pOnly => Some("p2p-only"),
             BenchmarkMode::P2pFirst => Some("p2p-first"),
+            BenchmarkMode::HttpFirst => Some("http-first"),
         }
     }
 }
@@ -242,6 +254,87 @@ impl std::fmt::Display for BenchmarkMode {
             BenchmarkMode::Http => write!(f, "http"),
             BenchmarkMode::P2pOnly => write!(f, "p2p-only"),
             BenchmarkMode::P2pFirst => write!(f, "p2p-first"),
+            BenchmarkMode::HttpFirst => write!(f, "http-first"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum BenchmarkSuite {
+    Smoke,
+    Standard,
+    Large,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum BenchmarkTier {
+    Small,
+    Medium,
+    Large,
+    Custom,
+}
+
+impl std::fmt::Display for BenchmarkTier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BenchmarkTier::Small => write!(f, "small"),
+            BenchmarkTier::Medium => write!(f, "medium"),
+            BenchmarkTier::Large => write!(f, "large"),
+            BenchmarkTier::Custom => write!(f, "custom"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, ValueEnum)]
+enum HttpCondition {
+    Normal,
+    #[value(name = "single-primary")]
+    SinglePrimary,
+    #[value(name = "single-secondary")]
+    SingleSecondary,
+    #[value(name = "dead-primary")]
+    DeadPrimary,
+    Slow,
+    Flaky,
+}
+
+impl HttpCondition {
+    fn substitute_urls(self) -> &'static str {
+        match self {
+            HttpCondition::Normal | HttpCondition::Slow | HttpCondition::Flaky => {
+                "https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org"
+            },
+            HttpCondition::SinglePrimary => "https://bordeaux.guix.gnu.org",
+            HttpCondition::SingleSecondary => "https://ci.guix.gnu.org",
+            HttpCondition::DeadPrimary => {
+                "http://127.0.0.1:9,https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org"
+            },
+        }
+    }
+
+    fn skip_reason(self) -> Option<&'static str> {
+        match self {
+            HttpCondition::Slow => Some(
+                "real-network slow profile requires OS traffic shaping; not applied by the harness",
+            ),
+            HttpCondition::Flaky => Some(
+                "real-network flaky profile requires OS traffic shaping; not applied by the \
+                 harness",
+            ),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for HttpCondition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HttpCondition::Normal => write!(f, "normal"),
+            HttpCondition::SinglePrimary => write!(f, "single-primary"),
+            HttpCondition::SingleSecondary => write!(f, "single-secondary"),
+            HttpCondition::DeadPrimary => write!(f, "dead-primary"),
+            HttpCondition::Slow => write!(f, "slow"),
+            HttpCondition::Flaky => write!(f, "flaky"),
         }
     }
 }
@@ -291,8 +384,11 @@ async fn main() -> anyhow::Result<()> {
             .await
         },
         Commands::Benchmark {
+            suite,
             packages,
             modes,
+            http_conditions,
+            seed_counts,
             iterations,
             transport,
             base,
@@ -300,8 +396,11 @@ async fn main() -> anyhow::Result<()> {
             keep_temp,
         } => {
             run_benchmark(BenchmarkOptions {
+                suite,
                 packages,
                 modes,
+                http_conditions,
+                seed_counts,
                 iterations,
                 transport,
                 base,
@@ -353,8 +452,11 @@ struct ContainerSmokeOptions {
 }
 
 struct BenchmarkOptions {
-    packages: Vec<String>,
+    suite: BenchmarkSuite,
+    packages: Option<Vec<String>>,
     modes: Vec<BenchmarkMode>,
+    http_conditions: Vec<HttpCondition>,
+    seed_counts: Vec<usize>,
     iterations: usize,
     transport: HarnessTransport,
     base: PathBuf,
@@ -451,12 +553,13 @@ struct P2pBuildSpec<'a> {
     nar_hash: &'a str,
     closure_paths: &'a [String],
     transport: HarnessTransport,
-    node_a_port: u16,
+    seed_ports: &'a [u16],
     node_b_port: u16,
-    node_a_dashboard_port: u16,
+    seed_dashboard_ports: &'a [u16],
     node_b_dashboard_port: u16,
     dashboard_bind: &'a str,
     node_b_policy: &'a str,
+    substitute_urls: &'a str,
     strict_p2p_evidence: bool,
     hold_after_success: bool,
     vm_direct: bool,
@@ -466,10 +569,13 @@ struct P2pBuildSpec<'a> {
 struct P2pBuildOutcome {
     elapsed_ms: u128,
     p2p_evidence: bool,
+    http_evidence: bool,
+    provider_count: Option<usize>,
     nar_size: Option<u64>,
 }
 
 struct BenchmarkPackage {
+    tier: BenchmarkTier,
     name: String,
     store_path: String,
     nar_hash: String,
@@ -477,17 +583,63 @@ struct BenchmarkPackage {
 }
 
 struct BenchmarkRecord {
+    tier: BenchmarkTier,
     package: String,
     store_path: String,
     nar_hash: String,
     nar_size: Option<u64>,
     mode: BenchmarkMode,
+    http_condition: HttpCondition,
+    seed_count: usize,
     iteration: usize,
     elapsed_ms: Option<u128>,
     success: bool,
+    skipped: bool,
     p2p_evidence: bool,
+    http_evidence: bool,
+    provider_count: Option<usize>,
     run_dir: PathBuf,
     error: Option<String>,
+    skip_reason: Option<String>,
+}
+
+struct BenchmarkPackageSelection {
+    tier: BenchmarkTier,
+    name: String,
+}
+
+fn benchmark_package_selections(
+    suite: BenchmarkSuite,
+    packages: Option<&[String]>,
+) -> Vec<BenchmarkPackageSelection> {
+    if let Some(packages) = packages {
+        return packages
+            .iter()
+            .map(|name| BenchmarkPackageSelection {
+                tier: BenchmarkTier::Custom,
+                name: name.clone(),
+            })
+            .collect();
+    }
+
+    match suite {
+        BenchmarkSuite::Smoke => vec![BenchmarkPackageSelection {
+            tier: BenchmarkTier::Small,
+            name: "hello".to_string(),
+        }],
+        BenchmarkSuite::Standard => vec![
+            BenchmarkPackageSelection { tier: BenchmarkTier::Small, name: "hello".to_string() },
+            BenchmarkPackageSelection { tier: BenchmarkTier::Medium, name: "git".to_string() },
+            BenchmarkPackageSelection {
+                tier: BenchmarkTier::Large,
+                name: "linux-libre".to_string(),
+            },
+        ],
+        BenchmarkSuite::Large => vec![BenchmarkPackageSelection {
+            tier: BenchmarkTier::Large,
+            name: "linux-libre".to_string(),
+        }],
+    }
 }
 
 struct ManagedChild {
@@ -1279,12 +1431,13 @@ async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> 
         nar_hash: &nar_hash,
         closure_paths: &closure_paths,
         transport: opts.transport,
-        node_a_port: opts.node_a_port,
+        seed_ports: &[opts.node_a_port],
         node_b_port: opts.node_b_port,
-        node_a_dashboard_port: opts.node_a_dashboard_port,
+        seed_dashboard_ports: &[opts.node_a_dashboard_port],
         node_b_dashboard_port: opts.node_b_dashboard_port,
         dashboard_bind: &opts.dashboard_bind,
         node_b_policy: "p2p-only",
+        substitute_urls: "https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org",
         strict_p2p_evidence: true,
         hold_after_success: opts.hold,
         vm_direct: opts.vm_direct,
@@ -1321,11 +1474,18 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
     if opts.iterations == 0 {
         anyhow::bail!("--iterations must be greater than zero");
     }
-    if opts.packages.is_empty() {
+    let selections = benchmark_package_selections(opts.suite, opts.packages.as_deref());
+    if selections.is_empty() {
         anyhow::bail!("--packages must contain at least one package");
     }
     if opts.modes.is_empty() {
         anyhow::bail!("--modes must contain at least one mode");
+    }
+    if opts.http_conditions.is_empty() {
+        anyhow::bail!("--http-conditions must contain at least one condition");
+    }
+    if opts.seed_counts.is_empty() || opts.seed_counts.contains(&0) {
+        anyhow::bail!("--seed-counts must contain positive integers");
     }
 
     let tools = prepare_harness_tools(opts.guix_p2p_bin.as_deref())?;
@@ -1336,18 +1496,19 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
     ensure_container_guix_store_writable(&tools, &tmp_root, false)?;
 
     let mut packages = Vec::new();
-    for package in &opts.packages {
-        tracing::info!("resolving benchmark package {}", package);
-        let store_path = resolve_package(&tools.guix, package)?;
+    for selection in &selections {
+        tracing::info!("resolving benchmark package {} ({})", selection.name, selection.tier);
+        let store_path = resolve_package(&tools.guix, &selection.name)?;
         let nar_hash = compute_nar_hash(&tools.guix, &store_path)?;
         let closure_paths = resolve_requisites(&tools.guix, &store_path)?;
         tracing::info!(
             "benchmark package {} closure has {} store paths",
-            package,
+            selection.name,
             closure_paths.len()
         );
         packages.push(BenchmarkPackage {
-            name: package.clone(),
+            tier: selection.tier,
+            name: selection.name.clone(),
             store_path,
             nar_hash,
             closure_paths,
@@ -1360,94 +1521,162 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
     let mut dash_seed = 31_000_u16;
 
     for package in &packages {
-        for mode in &opts.modes {
-            for iteration in 1..=opts.iterations {
-                let run_dir = tmp_root.join(format!(
-                    "{}-{}-{}",
-                    sanitize_name(&package.name),
-                    mode,
-                    iteration
-                ));
-                reset_dir(&run_dir)?;
-                std::fs::create_dir_all(run_dir.join("logs"))?;
-
-                tracing::info!(
-                    "benchmark package={} mode={} iteration={}/{}",
-                    package.name,
-                    mode,
-                    iteration,
-                    opts.iterations
-                );
-
-                let result = match mode {
-                    BenchmarkMode::Http => run_http_benchmark(&run_dir, &package.name, &tools)
-                        .map(|elapsed_ms| (elapsed_ms, false, None)),
-                    BenchmarkMode::P2pOnly | BenchmarkMode::P2pFirst => {
-                        let node_a_port = reserve_transport_port(opts.transport, &mut port_seed)?;
-                        let node_b_port = reserve_transport_port(opts.transport, &mut port_seed)?;
-                        let node_a_dashboard_port = reserve_tcp_port(&mut dash_seed)?;
-                        let node_b_dashboard_port = reserve_tcp_port(&mut dash_seed)?;
-                        let policy = mode.as_policy().expect("p2p mode has a policy");
-                        run_p2p_build(P2pBuildSpec {
-                            base: &run_dir,
-                            store_path: &package.store_path,
-                            nar_hash: &package.nar_hash,
-                            closure_paths: &package.closure_paths,
-                            transport: opts.transport,
-                            node_a_port,
-                            node_b_port,
-                            node_a_dashboard_port,
-                            node_b_dashboard_port,
-                            dashboard_bind: "127.0.0.1",
-                            node_b_policy: policy,
-                            strict_p2p_evidence: *mode == BenchmarkMode::P2pOnly,
-                            hold_after_success: false,
-                            vm_direct: false,
-                            tools: &tools,
-                        })
-                        .await
-                        .map(|outcome| (outcome.elapsed_ms, outcome.p2p_evidence, outcome.nar_size))
-                    },
-                };
-
-                match result {
-                    Ok((elapsed_ms, p2p_evidence, nar_size)) => records.push(BenchmarkRecord {
-                        package: package.name.clone(),
-                        store_path: package.store_path.clone(),
-                        nar_hash: package.nar_hash.clone(),
-                        nar_size,
-                        mode: *mode,
-                        iteration,
-                        elapsed_ms: Some(elapsed_ms),
-                        success: true,
-                        p2p_evidence,
-                        run_dir: run_dir.clone(),
-                        error: None,
-                    }),
-                    Err(e) => {
-                        let message = e.to_string();
-                        failures.push(format!(
-                            "{} {} iteration {}: {}",
-                            package.name, mode, iteration, message
+        for condition in &opts.http_conditions {
+            for mode in &opts.modes {
+                let seed_counts: Vec<usize> =
+                    if *mode == BenchmarkMode::Http { vec![1] } else { opts.seed_counts.clone() };
+                for seed_count in seed_counts {
+                    for iteration in 1..=opts.iterations {
+                        let run_dir = tmp_root.join(format!(
+                            "{}-{}-{}-seed{}-{}",
+                            sanitize_name(&package.name),
+                            condition,
+                            mode,
+                            seed_count,
+                            iteration
                         ));
-                        records.push(BenchmarkRecord {
-                            package: package.name.clone(),
-                            store_path: package.store_path.clone(),
-                            nar_hash: package.nar_hash.clone(),
-                            nar_size: None,
-                            mode: *mode,
-                            iteration,
-                            elapsed_ms: None,
-                            success: false,
-                            p2p_evidence: false,
-                            run_dir: run_dir.clone(),
-                            error: Some(message),
-                        });
-                    },
-                }
+                        reset_dir(&run_dir)?;
+                        std::fs::create_dir_all(run_dir.join("logs"))?;
 
-                if !opts.keep_temp {
-                    let _ = std::fs::remove_dir_all(&run_dir);
+                        tracing::info!(
+                            "benchmark package={} tier={} condition={} mode={} seeds={} \
+                             iteration={}/{}",
+                            package.name,
+                            package.tier,
+                            condition,
+                            mode,
+                            seed_count,
+                            iteration,
+                            opts.iterations
+                        );
+
+                        if let Some(reason) = condition.skip_reason() {
+                            records.push(BenchmarkRecord {
+                                tier: package.tier,
+                                package: package.name.clone(),
+                                store_path: package.store_path.clone(),
+                                nar_hash: package.nar_hash.clone(),
+                                nar_size: None,
+                                mode: *mode,
+                                http_condition: *condition,
+                                seed_count,
+                                iteration,
+                                elapsed_ms: None,
+                                success: false,
+                                skipped: true,
+                                p2p_evidence: false,
+                                http_evidence: false,
+                                provider_count: None,
+                                run_dir: run_dir.clone(),
+                                error: None,
+                                skip_reason: Some(reason.to_string()),
+                            });
+                            continue;
+                        }
+
+                        let result = match mode {
+                            BenchmarkMode::Http => run_http_benchmark(
+                                &run_dir,
+                                &package.name,
+                                &tools,
+                                condition.substitute_urls(),
+                            )
+                            .map(|elapsed_ms| P2pBuildOutcome {
+                                elapsed_ms,
+                                p2p_evidence: false,
+                                http_evidence: true,
+                                provider_count: None,
+                                nar_size: None,
+                            }),
+                            BenchmarkMode::P2pOnly
+                            | BenchmarkMode::P2pFirst
+                            | BenchmarkMode::HttpFirst => {
+                                let seed_ports = (0..seed_count)
+                                    .map(|_| reserve_transport_port(opts.transport, &mut port_seed))
+                                    .collect::<anyhow::Result<Vec<_>>>()?;
+                                let node_b_port =
+                                    reserve_transport_port(opts.transport, &mut port_seed)?;
+                                let seed_dashboard_ports = (0..seed_count)
+                                    .map(|_| reserve_tcp_port(&mut dash_seed))
+                                    .collect::<anyhow::Result<Vec<_>>>()?;
+                                let node_b_dashboard_port = reserve_tcp_port(&mut dash_seed)?;
+                                let policy = mode.as_policy().expect("p2p mode has a policy");
+                                run_p2p_build(P2pBuildSpec {
+                                    base: &run_dir,
+                                    store_path: &package.store_path,
+                                    nar_hash: &package.nar_hash,
+                                    closure_paths: &package.closure_paths,
+                                    transport: opts.transport,
+                                    seed_ports: &seed_ports,
+                                    node_b_port,
+                                    seed_dashboard_ports: &seed_dashboard_ports,
+                                    node_b_dashboard_port,
+                                    dashboard_bind: "127.0.0.1",
+                                    node_b_policy: policy,
+                                    substitute_urls: condition.substitute_urls(),
+                                    strict_p2p_evidence: *mode == BenchmarkMode::P2pOnly,
+                                    hold_after_success: false,
+                                    vm_direct: false,
+                                    tools: &tools,
+                                })
+                                .await
+                            },
+                        };
+
+                        match result {
+                            Ok(outcome) => records.push(BenchmarkRecord {
+                                tier: package.tier,
+                                package: package.name.clone(),
+                                store_path: package.store_path.clone(),
+                                nar_hash: package.nar_hash.clone(),
+                                nar_size: outcome.nar_size,
+                                mode: *mode,
+                                http_condition: *condition,
+                                seed_count,
+                                iteration,
+                                elapsed_ms: Some(outcome.elapsed_ms),
+                                success: true,
+                                skipped: false,
+                                p2p_evidence: outcome.p2p_evidence,
+                                http_evidence: outcome.http_evidence,
+                                provider_count: outcome.provider_count,
+                                run_dir: run_dir.clone(),
+                                error: None,
+                                skip_reason: None,
+                            }),
+                            Err(e) => {
+                                let message = e.to_string();
+                                failures.push(format!(
+                                    "{} {} {} seed {} iteration {}: {}",
+                                    package.name, condition, mode, seed_count, iteration, message
+                                ));
+                                records.push(BenchmarkRecord {
+                                    tier: package.tier,
+                                    package: package.name.clone(),
+                                    store_path: package.store_path.clone(),
+                                    nar_hash: package.nar_hash.clone(),
+                                    nar_size: None,
+                                    mode: *mode,
+                                    http_condition: *condition,
+                                    seed_count,
+                                    iteration,
+                                    elapsed_ms: None,
+                                    success: false,
+                                    skipped: false,
+                                    p2p_evidence: false,
+                                    http_evidence: false,
+                                    provider_count: None,
+                                    run_dir: run_dir.clone(),
+                                    error: Some(message),
+                                    skip_reason: None,
+                                });
+                            },
+                        }
+
+                        if !opts.keep_temp {
+                            let _ = std::fs::remove_dir_all(&run_dir);
+                        }
+                    }
                 }
             }
         }
@@ -1655,27 +1884,24 @@ fn ensure_container_guix_store_writable(
 }
 
 async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome> {
+    if spec.seed_ports.len() != spec.seed_dashboard_ports.len() || spec.seed_ports.is_empty() {
+        anyhow::bail!("p2p benchmark requires at least one seed port/dashboard port pair");
+    }
+
     let logs_dir = spec.base.join("logs");
     std::fs::create_dir_all(&logs_dir)?;
 
-    let node_a_dir = spec.base.join("node-a");
     let node_b_dir = spec.base.join("node-b");
-    let node_a_cache = node_a_dir.join("cache");
     let node_b_cache = node_b_dir.join("cache");
-    let node_a_config_home = node_a_dir.join("config-home");
     let node_b_config_home = node_b_dir.join("config-home");
-    let node_a_socket = node_a_dir.join("guix-p2p.sock");
     let node_b_socket = node_b_dir.join("guix-p2p.sock");
     let daemon_socket = node_b_dir.join("guix-daemon.sock");
     let wrapper_path = node_b_dir.join("guix-wrapper.sh");
     let local_narinfo_path = spec.base.join("local-narinfo.json");
 
-    std::fs::create_dir_all(&node_a_cache)?;
     std::fs::create_dir_all(&node_b_cache)?;
-    std::fs::create_dir_all(&node_a_config_home)?;
     std::fs::create_dir_all(&node_b_config_home)?;
 
-    let node_a_addr = spec.transport.listen_addr(spec.node_a_port);
     let node_b_addr = spec.transport.listen_addr(spec.node_b_port);
     let daemon_runtime_paths: BTreeSet<&str> =
         spec.tools.guix_daemon_closure.iter().map(String::as_str).collect();
@@ -1697,19 +1923,6 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
     write_local_narinfo_metadata(&local_narinfo_path, spec.tools, &p2p_closure_paths)?;
 
     write_node_config(NodeConfigSpec {
-        xdg_config_home: &node_a_config_home,
-        listen_addr: &node_a_addr,
-        cache_dir: &node_a_cache,
-        socket_path: &node_a_socket,
-        substitute_policy: "p2p-only",
-        min_providers: 1,
-        dashboard_port: spec.node_a_dashboard_port,
-        dashboard_bind: spec.dashboard_bind,
-        bootstrap_peers: None,
-        seed_paths: &seed_paths,
-        local_narinfo_path: None,
-    })?;
-    write_node_config(NodeConfigSpec {
         xdg_config_home: &node_b_config_home,
         listen_addr: &node_b_addr,
         cache_dir: &node_b_cache,
@@ -1721,6 +1934,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         bootstrap_peers: None,
         seed_paths: &[],
         local_narinfo_path: Some(&local_narinfo_path),
+        substitute_urls: spec.substitute_urls,
     })?;
 
     write_wrapper(
@@ -1733,52 +1947,85 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
     )?;
 
     let mut processes = ProcessSet::default();
+    let mut bootstrap_peers = Vec::new();
+    let mut seed_logs = Vec::new();
 
-    let mut node_a_cmd = guix_container_command_with_packages_and_exposes(
-        spec.tools,
-        spec.base,
-        spec.vm_direct,
-        &["guix", "guile", "libgcrypt", "gcc-toolchain"],
-        &p2p_closure_paths,
-    );
-    node_a_cmd
-        .arg("/bin/sh")
-        .arg("-c")
-        .arg(format!(
-            "LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{} exec \"$@\"",
-            shell_quote(&spec.tools.guix_p2p_library_path)
-        ))
-        .arg("guix-p2p-node-a")
-        .arg(&spec.tools.guix_p2p)
-        .arg("--daemon")
-        .arg("--listen-addr")
-        .arg(&node_a_addr)
-        .arg("--cache-dir")
-        .arg(&node_a_cache)
-        .arg("--socket")
-        .arg(&node_a_socket)
-        .arg("--dashboard")
-        .arg("--dashboard-port")
-        .arg(spec.node_a_dashboard_port.to_string())
-        .arg("--dashboard-bind")
-        .arg(spec.dashboard_bind)
-        .arg("--policy")
-        .arg("p2p-only")
-        .arg("--min-providers")
-        .arg("1")
-        .arg("--seed")
-        .arg(&seed_arg)
-        .env("HOME", &node_a_dir)
-        .env("XDG_CONFIG_HOME", &node_a_config_home)
-        .env("RUST_LOG", "guix_p2p=trace,info");
-    let node_a_log = logs_dir.join("node-a.log");
-    processes.spawn_logged("node-a", &mut node_a_cmd, &node_a_log)?;
-    wait_dashboard(spec.node_a_dashboard_port, "node A", Some(&node_a_log))?;
+    for (idx, (&seed_port, &dashboard_port)) in
+        spec.seed_ports.iter().zip(spec.seed_dashboard_ports.iter()).enumerate()
+    {
+        let seed_idx = idx + 1;
+        let seed_dir = spec.base.join(format!("seed-{seed_idx}"));
+        let seed_cache = seed_dir.join("cache");
+        let seed_config_home = seed_dir.join("config-home");
+        let seed_socket = seed_dir.join("guix-p2p.sock");
+        std::fs::create_dir_all(&seed_cache)?;
+        std::fs::create_dir_all(&seed_config_home)?;
+        let seed_addr = spec.transport.listen_addr(seed_port);
 
-    let node_a_status = dashboard_json(spec.node_a_dashboard_port, "/api/status")?;
-    let node_a_peer = json_string(&node_a_status, "peer_id")
-        .context("node A dashboard did not expose peer_id")?;
-    let bootstrap = format!("{node_a_addr}/p2p/{node_a_peer}");
+        write_node_config(NodeConfigSpec {
+            xdg_config_home: &seed_config_home,
+            listen_addr: &seed_addr,
+            cache_dir: &seed_cache,
+            socket_path: &seed_socket,
+            substitute_policy: "p2p-only",
+            min_providers: 1,
+            dashboard_port,
+            dashboard_bind: spec.dashboard_bind,
+            bootstrap_peers: None,
+            seed_paths: &seed_paths,
+            local_narinfo_path: None,
+            substitute_urls: spec.substitute_urls,
+        })?;
+
+        let mut seed_cmd = guix_container_command_with_packages_and_exposes(
+            spec.tools,
+            spec.base,
+            spec.vm_direct,
+            &["guix", "guile", "libgcrypt", "gcc-toolchain"],
+            &p2p_closure_paths,
+        );
+        seed_cmd
+            .arg("/bin/sh")
+            .arg("-c")
+            .arg(format!(
+                "LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{} exec \"$@\"",
+                shell_quote(&spec.tools.guix_p2p_library_path)
+            ))
+            .arg(format!("guix-p2p-seed-{seed_idx}"))
+            .arg(&spec.tools.guix_p2p)
+            .arg("--daemon")
+            .arg("--listen-addr")
+            .arg(&seed_addr)
+            .arg("--cache-dir")
+            .arg(&seed_cache)
+            .arg("--socket")
+            .arg(&seed_socket)
+            .arg("--dashboard")
+            .arg("--dashboard-port")
+            .arg(dashboard_port.to_string())
+            .arg("--dashboard-bind")
+            .arg(spec.dashboard_bind)
+            .arg("--policy")
+            .arg("p2p-only")
+            .arg("--min-providers")
+            .arg("1")
+            .arg("--seed")
+            .arg(&seed_arg)
+            .env("HOME", &seed_dir)
+            .env("XDG_CONFIG_HOME", &seed_config_home)
+            .env("RUST_LOG", "guix_p2p=trace,info");
+        let seed_log = logs_dir.join(format!("seed-{seed_idx}.log"));
+        processes.spawn_logged(&format!("seed-{seed_idx}"), &mut seed_cmd, &seed_log)?;
+        wait_dashboard(dashboard_port, &format!("seed {seed_idx}"), Some(&seed_log))?;
+
+        let seed_status = dashboard_json(dashboard_port, "/api/status")?;
+        let seed_peer = json_string(&seed_status, "peer_id")
+            .with_context(|| format!("seed {seed_idx} dashboard did not expose peer_id"))?;
+        bootstrap_peers.push(format!("{seed_addr}/p2p/{seed_peer}"));
+        seed_logs.push(seed_log);
+    }
+
+    let bootstrap = bootstrap_peers.join(",");
 
     maybe_remove_seed_store_path(spec.store_path)?;
 
@@ -1794,6 +2041,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         bootstrap_peers: Some(&bootstrap),
         seed_paths: &[],
         local_narinfo_path: Some(&local_narinfo_path),
+        substitute_urls: spec.substitute_urls,
     })?;
 
     let mut node_b_cmd = guix_container_command_with_packages(
@@ -1874,6 +2122,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         &daemon_socket,
         &logs_dir.join("build.log"),
         spec.vm_direct,
+        Some(spec.substitute_urls),
     )?;
     run_direct_substitute_logged(
         spec.tools,
@@ -1884,8 +2133,13 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         spec.vm_direct,
     )?;
 
-    let seeds = dashboard_json(spec.node_a_dashboard_port, "/api/seeds")?;
-    let nar_size = validate_seeds(&seeds, spec.nar_hash)?;
+    let mut nar_size = None;
+    for (idx, &dashboard_port) in spec.seed_dashboard_ports.iter().enumerate() {
+        let seeds = dashboard_json(dashboard_port, "/api/seeds")?;
+        let seed_nar_size = validate_seeds(&seeds, spec.nar_hash)
+            .with_context(|| format!("seed {} did not expose seeded nar", idx + 1))?;
+        nar_size = nar_size.or(seed_nar_size);
+    }
     let _catalog = wait_for_catalog_entry(
         spec.node_b_dashboard_port,
         spec.store_path,
@@ -1893,20 +2147,23 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         std::time::Duration::from_secs(30),
     )?;
 
-    let node_a_log = std::fs::read_to_string(logs_dir.join("node-a.log")).unwrap_or_default();
+    let seed_log_text = seed_logs
+        .iter()
+        .map(|path| std::fs::read_to_string(path).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("\n");
     let node_b_log = std::fs::read_to_string(logs_dir.join("node-b.log")).unwrap_or_default();
     let p2p_evidence =
-        contains_any(&node_a_log, &["Served block request", "serving ", "BlockServed"]);
+        contains_any(&seed_log_text, &["Served block request", "serving ", "BlockServed"]);
+    let http_evidence =
+        contains_any(&node_b_log, &["falling back to HTTP", "Attempting HTTP nar download"]);
     let node_b_success = contains_any(
         &node_b_log,
         &["Substitute download succeeded", "DownloadSucceeded", "download-succeeded"],
     );
 
     if spec.strict_p2p_evidence && !p2p_evidence {
-        anyhow::bail!(
-            "node A log did not show block serving evidence; see {}",
-            logs_dir.join("node-a.log").display()
-        );
+        anyhow::bail!("seed logs did not show block serving evidence; see {}", logs_dir.display());
     }
     if !node_b_success {
         anyhow::bail!(
@@ -1934,7 +2191,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         tracing::info!(
             "node A dashboard: http://{}:{}",
             spec.dashboard_bind,
-            spec.node_a_dashboard_port
+            spec.seed_dashboard_ports[0]
         );
         tracing::info!(
             "node B dashboard: http://{}:{}",
@@ -1947,7 +2204,13 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
 
     drop(processes);
 
-    Ok(P2pBuildOutcome { elapsed_ms, p2p_evidence, nar_size })
+    Ok(P2pBuildOutcome {
+        elapsed_ms,
+        p2p_evidence,
+        http_evidence,
+        provider_count: Some(spec.seed_ports.len()),
+        nar_size,
+    })
 }
 
 fn maybe_remove_seed_store_path(store_path: &str) -> anyhow::Result<()> {
@@ -1967,6 +2230,7 @@ fn run_http_benchmark(
     run_dir: &std::path::Path,
     package: &str,
     tools: &HarnessTools,
+    substitute_urls: &str,
 ) -> anyhow::Result<u128> {
     let logs_dir = run_dir.join("logs");
     std::fs::create_dir_all(&logs_dir)?;
@@ -2005,6 +2269,7 @@ fn run_http_benchmark(
         &daemon_socket,
         &logs_dir.join("build.log"),
         false,
+        Some(substitute_urls),
     )?;
     drop(processes);
     Ok(elapsed_ms)
@@ -2022,6 +2287,7 @@ struct NodeConfigSpec<'a> {
     bootstrap_peers: Option<&'a str>,
     seed_paths: &'a [&'a str],
     local_narinfo_path: Option<&'a std::path::Path>,
+    substitute_urls: &'a str,
 }
 
 fn write_node_config(spec: NodeConfigSpec<'_>) -> anyhow::Result<()> {
@@ -2041,7 +2307,7 @@ fn write_node_config(spec: NodeConfigSpec<'_>) -> anyhow::Result<()> {
     toml.push_str("dashboard_enabled = true\n");
     toml.push_str(&format!("dashboard_port = {}\n", spec.dashboard_port));
     toml.push_str(&format!("dashboard_bind = {}\n", toml_string(spec.dashboard_bind)));
-    toml.push_str("substitute_urls = \"https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org\"\n");
+    toml.push_str(&format!("substitute_urls = {}\n", toml_string(spec.substitute_urls)));
     if let Some(peers) = spec.bootstrap_peers {
         toml.push_str(&format!("bootstrap_peers = {}\n", toml_string(peers)));
     }
@@ -2141,6 +2407,7 @@ fn run_guix_build_logged(
     daemon_socket: &std::path::Path,
     log_path: &std::path::Path,
     vm_direct: bool,
+    substitute_urls: Option<&str>,
 ) -> anyhow::Result<u128> {
     let log = std::fs::OpenOptions::new().create(true).append(true).open(log_path)?;
     let stderr = log.try_clone()?;
@@ -2163,8 +2430,11 @@ fn run_guix_build_logged(
         .arg("guix-build-wrapper")
         .arg("build")
         .arg("--no-grafts")
-        .arg("--max-jobs=0")
-        .arg(target);
+        .arg("--max-jobs=0");
+    if let Some(urls) = substitute_urls {
+        command.arg(format!("--substitute-urls={}", urls.replace(',', " ")));
+    }
+    command.arg(target);
     tracing::debug!("running build command: {:?}", command);
     let status = command
         .stdout(std::process::Stdio::from(log))
@@ -2603,22 +2873,30 @@ fn reserve_udp_port(next: &mut u16) -> anyhow::Result<u16> {
 
 fn write_benchmark_csv(path: &std::path::Path, records: &[BenchmarkRecord]) -> anyhow::Result<()> {
     let mut csv = String::from(
-        "package,store_path,nar_hash,nar_size,mode,iteration,elapsed_ms,success,p2p_evidence,\
-         run_dir,error\n",
+        "tier,package,store_path,nar_hash,nar_size,mode,http_condition,seed_count,iteration,\
+         elapsed_ms,success,skipped,p2p_evidence,http_evidence,provider_count,run_dir,error,\
+         skip_reason\n",
     );
     for record in records {
         csv.push_str(&csv_row(&[
+            record.tier.to_string(),
             record.package.clone(),
             record.store_path.clone(),
             record.nar_hash.clone(),
             record.nar_size.map(|n| n.to_string()).unwrap_or_default(),
             record.mode.to_string(),
+            record.http_condition.to_string(),
+            record.seed_count.to_string(),
             record.iteration.to_string(),
             record.elapsed_ms.map(|n| n.to_string()).unwrap_or_default(),
             record.success.to_string(),
+            record.skipped.to_string(),
             record.p2p_evidence.to_string(),
+            record.http_evidence.to_string(),
+            record.provider_count.map(|n| n.to_string()).unwrap_or_default(),
             record.run_dir.display().to_string(),
             record.error.clone().unwrap_or_default(),
+            record.skip_reason.clone().unwrap_or_default(),
         ]));
         csv.push('\n');
     }
@@ -2644,8 +2922,8 @@ fn write_benchmark_report(
     report.push_str(&format!("- Rust: {}\n\n", rust_version()));
 
     report.push_str("## Packages\n\n");
-    report.push_str("| Package | Store path | Nar hash | Nar size |\n");
-    report.push_str("|---------|------------|----------|----------|\n");
+    report.push_str("| Tier | Package | Store path | Nar hash | Nar size |\n");
+    report.push_str("|------|---------|------------|----------|----------|\n");
     for package in packages {
         let nar_size = records
             .iter()
@@ -2654,70 +2932,121 @@ fn write_benchmark_report(
             .map(format_bytes)
             .unwrap_or_else(|| "unknown".to_string());
         report.push_str(&format!(
-            "| {} | `{}` | `{}` | {} |\n",
-            package.name, package.store_path, package.nar_hash, nar_size
+            "| {} | {} | `{}` | `{}` | {} |\n",
+            package.tier, package.name, package.store_path, package.nar_hash, nar_size
         ));
     }
 
     report.push_str("\n## Runs\n\n");
-    report.push_str("| Package | Mode | Iteration | Elapsed | Success | P2P evidence |\n");
-    report.push_str("|---------|------|-----------|---------|---------|--------------|\n");
+    report.push_str(
+        "| Tier | Package | HTTP condition | Mode | Seeds | Iteration | Elapsed | Status | P2P | \
+         HTTP | Providers |\n",
+    );
+    report.push_str(
+        "|------|---------|----------------|------|-------|-----------|---------|--------|-----|---------------|-----------|\n",
+    );
     for record in records {
         let elapsed = record
             .elapsed_ms
             .map(|ms| format!("{:.3}s", ms as f64 / 1000.0))
-            .unwrap_or_else(|| "failed".to_string());
+            .unwrap_or_else(|| {
+                if record.skipped { "skipped".to_string() } else { "failed".to_string() }
+            });
+        let status = if record.skipped {
+            "skipped"
+        } else if record.success {
+            "ok"
+        } else {
+            "failed"
+        };
         report.push_str(&format!(
-            "| {} | {} | {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            record.tier,
             record.package,
+            record.http_condition,
             record.mode,
+            record.seed_count,
             record.iteration,
             elapsed,
-            record.success,
-            record.p2p_evidence
+            status,
+            record.p2p_evidence,
+            record.http_evidence,
+            record.provider_count.map(|n| n.to_string()).unwrap_or_else(|| "n/a".to_string())
         ));
     }
 
-    report.push_str("\n## Medians\n\n");
+    report.push_str("\n## Summary\n\n");
     report.push_str(
-        "| Package | Mode | Median elapsed | Successful runs | P2P evidence observed |\n",
+        "| Tier | Package | HTTP condition | Mode | Seeds | Median | P95 | Successful runs | P2P \
+         observed | HTTP observed |\n",
     );
     report.push_str(
-        "|---------|------|----------------|-----------------|-----------------------|\n",
+        "|------|---------|----------------|------|-------|--------|-----|-----------------|--------------|------------------------|\n",
     );
-    for package in packages {
-        let mut modes: Vec<BenchmarkMode> =
-            records.iter().filter(|r| r.package == package.name).map(|r| r.mode).collect();
-        modes.sort_by_key(|m| m.to_string());
-        modes.dedup();
-        for mode in modes {
-            let subset: Vec<&BenchmarkRecord> =
-                records.iter().filter(|r| r.package == package.name && r.mode == mode).collect();
-            let median = median_ms(subset.iter().filter_map(|r| r.elapsed_ms).collect());
-            let successes = subset.iter().filter(|r| r.success).count();
-            let p2p = subset.iter().any(|r| r.p2p_evidence);
+    let groups: BTreeSet<_> = records
+        .iter()
+        .map(|r| (r.tier, r.package.clone(), r.http_condition, r.mode, r.seed_count))
+        .collect();
+    for (tier, package, condition, mode, seed_count) in groups {
+        let subset: Vec<&BenchmarkRecord> = records
+            .iter()
+            .filter(|r| {
+                r.tier == tier
+                    && r.package == package
+                    && r.http_condition == condition
+                    && r.mode == mode
+                    && r.seed_count == seed_count
+            })
+            .collect();
+        let elapsed: Vec<u128> = subset.iter().filter_map(|r| r.elapsed_ms).collect();
+        let median = median_ms(elapsed.clone());
+        let p95 = percentile_ms(elapsed, 95);
+        let successes = subset.iter().filter(|r| r.success).count();
+        let p2p = subset.iter().any(|r| r.p2p_evidence);
+        let http = subset.iter().any(|r| r.http_evidence);
+        report.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} | {}/{} | {} | {} |\n",
+            tier,
+            package,
+            condition,
+            mode,
+            seed_count,
+            format_ms_option(median),
+            format_ms_option(p95),
+            successes,
+            subset.len(),
+            p2p,
+            http
+        ));
+    }
+
+    let skipped: Vec<&BenchmarkRecord> = records.iter().filter(|r| r.skipped).collect();
+    if !skipped.is_empty() {
+        report.push_str("\n## Skipped Runs\n\n");
+        for record in skipped {
             report.push_str(&format!(
-                "| {} | {} | {} | {}/{} | {} |\n",
-                package.name,
-                mode,
-                median
-                    .map(|ms| format!("{:.3}s", ms as f64 / 1000.0))
-                    .unwrap_or_else(|| "n/a".to_string()),
-                successes,
-                subset.len(),
-                p2p
+                "- {} {} {} seed {} iteration {}: {}\n",
+                record.package,
+                record.http_condition,
+                record.mode,
+                record.seed_count,
+                record.iteration,
+                record.skip_reason.as_deref().unwrap_or("skipped")
             ));
         }
     }
 
-    let failures: Vec<&BenchmarkRecord> = records.iter().filter(|r| !r.success).collect();
+    let failures: Vec<&BenchmarkRecord> =
+        records.iter().filter(|r| !r.success && !r.skipped).collect();
     if !failures.is_empty() {
         report.push_str("\n## Failed Runs\n\n");
         for failure in failures {
             report.push_str(&format!(
-                "- {} {} iteration {}: {}\n",
+                "- {} {} {} seed {} iteration {}: {}\n",
                 failure.package,
+                failure.http_condition,
                 failure.mode,
+                failure.seed_count,
                 failure.iteration,
                 failure.error.as_deref().unwrap_or("unknown error")
             ));
@@ -2734,6 +3063,19 @@ fn median_ms(mut values: Vec<u128>) -> Option<u128> {
     }
     values.sort_unstable();
     Some(values[values.len() / 2])
+}
+
+fn percentile_ms(mut values: Vec<u128>, percentile: usize) -> Option<u128> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_unstable();
+    let idx = ((values.len() - 1) * percentile).div_ceil(100);
+    Some(values[idx])
+}
+
+fn format_ms_option(value: Option<u128>) -> String {
+    value.map(|ms| format!("{:.3}s", ms as f64 / 1000.0)).unwrap_or_else(|| "n/a".to_string())
 }
 
 fn csv_row(fields: &[String]) -> String {
@@ -3508,6 +3850,38 @@ mod tests {
 
         assert_eq!(json_string(seed_entry, "nar_hash").as_deref(), Some("deadbeef"));
         assert_eq!(json_string(catalog_entry, "hash_part").as_deref(), Some("abcd"));
+    }
+
+    #[test]
+    fn benchmark_suite_selects_tiered_packages() {
+        let smoke = benchmark_package_selections(BenchmarkSuite::Smoke, None);
+        assert_eq!(smoke.len(), 1);
+        assert_eq!(smoke[0].tier, BenchmarkTier::Small);
+        assert_eq!(smoke[0].name, "hello");
+
+        let standard = benchmark_package_selections(BenchmarkSuite::Standard, None);
+        let tiers: Vec<BenchmarkTier> = standard.iter().map(|package| package.tier).collect();
+        let names: Vec<&str> = standard.iter().map(|package| package.name.as_str()).collect();
+        assert_eq!(tiers, vec![BenchmarkTier::Small, BenchmarkTier::Medium, BenchmarkTier::Large]);
+        assert_eq!(names, vec!["hello", "git", "linux-libre"]);
+    }
+
+    #[test]
+    fn benchmark_explicit_packages_override_suite() {
+        let packages = vec!["emacs".to_string(), "rust".to_string()];
+        let selected = benchmark_package_selections(BenchmarkSuite::Standard, Some(&packages));
+        assert_eq!(selected.len(), 2);
+        assert!(selected.iter().all(|package| package.tier == BenchmarkTier::Custom));
+        assert_eq!(selected[0].name, "emacs");
+        assert_eq!(selected[1].name, "rust");
+    }
+
+    #[test]
+    fn percentile_uses_nearest_rank_ceiling() {
+        assert_eq!(percentile_ms(vec![], 95), None);
+        assert_eq!(percentile_ms(vec![100], 95), Some(100));
+        assert_eq!(percentile_ms(vec![100, 200, 300, 400, 500], 95), Some(500));
+        assert_eq!(median_ms(vec![100, 200, 300]), Some(200));
     }
 
     #[test]

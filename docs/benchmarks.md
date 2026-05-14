@@ -72,30 +72,69 @@ imported store path is a restored directory.
 
 ```sh
 guix shell -m manifest.scm -- \
-  cargo run -p guix-p2p-e2e -- benchmark --packages hello,git,emacs --iterations 3 --transport tcp
+  cargo run -p guix-p2p-e2e -- benchmark --suite smoke --iterations 1 --transport tcp
 ```
 
 Defaults:
 
-- packages: `hello,git,emacs`
+- suite: `standard`
+- standard tiers: small `hello`, medium `git`, large `linux-libre`
 - modes: `http,p2p-only,p2p-first`
+- HTTP conditions: `normal`
+- seed counts: `1`
 - iterations: `3`
 - output directory: `target/guix-p2p-bench/`
+
+Use the smoke suite for quick local checks:
+
+```sh
+guix shell -m manifest.scm -- \
+  cargo run -p guix-p2p-e2e -- benchmark --suite smoke --iterations 1 --transport tcp
+```
+
+Use the standard suite for publishable evidence across small, medium, and
+large packages:
+
+```sh
+guix shell -m manifest.scm -- \
+  cargo run -p guix-p2p-e2e -- benchmark \
+  --suite standard \
+  --modes http,p2p-only,p2p-first,http-first \
+  --http-conditions normal,dead-primary \
+  --seed-counts 1,3 \
+  --iterations 3 \
+  --transport tcp \
+  --keep-temp
+```
 
 Modes:
 
 - `http`: isolated raw `guix-daemon` without the P2P wrapper.
-- `p2p-only`: Node A seeded, Node B p2p-only, `min_providers = 1`.
-- `p2p-first`: Node A seeded, Node B p2p-first, `min_providers = 1`.
+- `p2p-only`: seed nodes provide the NAR, fetch node is p2p-only,
+  `min_providers = 1`.
+- `p2p-first`: seed nodes provide the NAR, fetch node tries P2P before HTTP.
+- `http-first`: seed nodes provide the NAR, fetch node tries HTTP before P2P.
+
+HTTP conditions:
+
+- `normal`: Bordeaux first, CI second.
+- `single-primary`: Bordeaux only.
+- `single-secondary`: CI only.
+- `dead-primary`: an unreachable local URL first, then Bordeaux and CI.
+- `slow`: reserved for real-network traffic shaping; skipped when shaping is
+  unavailable.
+- `flaky`: reserved for real-network traffic shaping; skipped when shaping is
+  unavailable.
 
 Outputs:
 
 - `target/guix-p2p-bench/results.csv`
 - `docs/benchmark-results.md`
 
-The report includes host and Rust summary, package store paths, nar hashes,
-nar sizes when observed from dashboard seed data, per-run elapsed time,
-medians, and whether P2P block-serving evidence was observed.
+The report includes host and Rust summary, tier, package store paths, nar
+hashes, nar sizes when observed from dashboard seed data, HTTP condition, seed
+count, per-run elapsed time, medians, p95 values, provider counts, P2P
+block-serving evidence, HTTP evidence, skipped runs, and failed runs.
 
 Per-run temp directories are removed unless `--keep-temp` is passed.
 
@@ -103,10 +142,10 @@ For p2p modes, the container benchmark also runs an explicit relay substitute
 restore because shared host-store containers can make exact store-path builds a
 no-op. With `--keep-temp`, inspect:
 
-- `$BASE/tmp/<package>-<mode>-<iteration>/manual-substitute-output`
-- `$BASE/tmp/<package>-<mode>-<iteration>/logs/direct-substitute.log`
-- `$BASE/tmp/<package>-<mode>-<iteration>/logs/node-a.log`
-- `$BASE/tmp/<package>-<mode>-<iteration>/logs/node-b.log`
+- `$BASE/tmp/<package>-<condition>-<mode>-seed<count>-<iteration>/manual-substitute-output`
+- `$BASE/tmp/<package>-<condition>-<mode>-seed<count>-<iteration>/logs/direct-substitute.log`
+- `$BASE/tmp/<package>-<condition>-<mode>-seed<count>-<iteration>/logs/seed-1.log`
+- `$BASE/tmp/<package>-<condition>-<mode>-seed<count>-<iteration>/logs/node-b.log`
 
 If a kept temp directory contains container-owned files, rerun with a fresh
 `--base` rather than deleting the evidence directory.
@@ -133,17 +172,15 @@ Baseline comparison:
 - Record substitute URLs, host Guix revision, transport, package store paths,
   NAR hashes, and NAR sizes.
 
-Package set:
+Package tiers:
 
 - `hello`: small correctness and harness sanity check.
 - `git`: medium package with non-trivial closure and transfer size.
-- `emacs` or another large already-realized package: useful for bandwidth and
-  multi-peer behavior.
+- `linux-libre`: large binary package for bandwidth and multi-peer behavior.
 
 Multi-peer P2P comparison:
 
-- Use one fetch node, one neutral bootstrap node, and N seed nodes all seeding
-  the same desired NAR.
+- Use one fetch node and N seed nodes all seeding the same desired NAR.
 - Run seed counts of 1, 3, 5, and 8 for the same package and transport.
 - Record provider count, time to first provider, time to first block, total
   restored bytes, elapsed time, and per-seeder block-serving evidence.
@@ -153,8 +190,10 @@ Multi-peer P2P comparison:
 Mixed-policy comparison:
 
 - Compare `p2p-first` and `http-first` when P2P providers are available.
-- Repeat with slow or bandwidth-limited seeders once upload limits are wired
-  into block serving.
+- Repeat with `dead-primary`, `slow`, and `flaky` HTTP conditions to measure
+  substitute-server failure, latency, and packet-loss behavior. The `slow` and
+  `flaky` profiles are recorded as skipped when OS traffic shaping is not
+  available.
 - Repeat with no providers to measure HTTP fallback latency and confirm the
   fallback path is visible in logs.
 
@@ -163,4 +202,5 @@ Acceptance criteria for publishing a benchmark claim:
 - Every p2p run has block-serving evidence in seed-node logs.
 - Every restored output exists under the kept run directory.
 - HTTP fallback usage is explicitly recorded for `p2p-first` and `http-first`.
-- Report median and p95 elapsed time for each package/mode/seed-count group.
+- Report median and p95 elapsed time for each tier/package/mode/HTTP
+  condition/seed-count group.
