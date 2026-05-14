@@ -1357,7 +1357,7 @@ fn vm_seed(config: &VmConfig, name: &str, package: &str) -> anyhow::Result<()> {
             &vm_external_multiaddr(&node),
         ),
     )?;
-    print!("{output}");
+    print_vm_node_output(config, &node, &output);
     let store_path = parse_key_line(&output, "store_path")
         .ok_or_else(|| anyhow::anyhow!("seed output did not include store_path"))?;
     let peer_id = parse_key_line(&output, "peer_id")
@@ -1381,7 +1381,7 @@ fn vm_bootstrap(config: &VmConfig, name: &str) -> anyhow::Result<()> {
         bootstrap_node_command()
     );
     let output = ssh_run(config, &node, &command)?;
-    print!("{output}");
+    print_vm_node_output(config, &node, &output);
     let peer_id = parse_key_line(&output, "peer_id")
         .ok_or_else(|| anyhow::anyhow!("bootstrap output did not include peer_id"))?;
     registry.default_bootstrap = Some(VmBootstrap { node: node.name.clone(), peer_id });
@@ -1515,8 +1515,34 @@ fn vm_start_fetch_p2p(
         max_in_flight_blocks_per_peer,
     );
     let output = ssh_run(config, node, &command)?;
-    print!("{output}");
+    print_vm_node_output(config, node, &output);
     Ok(())
+}
+
+fn print_vm_node_output(config: &VmConfig, node: &VmNode, output: &str) {
+    print!("{}", rewrite_vm_dashboard_output(config, node, output));
+}
+
+fn rewrite_vm_dashboard_output(config: &VmConfig, node: &VmNode, output: &str) -> String {
+    if !config.forward_dashboard {
+        return output.to_string();
+    }
+
+    let mut rewritten = output
+        .lines()
+        .map(|line| {
+            if line.starts_with("dashboard=http://127.0.0.1:") {
+                format!("dashboard=http://127.0.0.1:{}", node.dashboard_port)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if output.ends_with('\n') {
+        rewritten.push('\n');
+    }
+    rewritten
 }
 
 fn vm_fetch(
@@ -4685,6 +4711,66 @@ mod tests {
 
         assert_eq!(json_string(seed_entry, "nar_hash").as_deref(), Some("deadbeef"));
         assert_eq!(json_string(catalog_entry, "hash_part").as_deref(), Some("abcd"));
+    }
+
+    #[test]
+    fn vm_dashboard_output_uses_host_forwarded_port() {
+        let config = test_vm_config(true);
+        let node = VmNode {
+            name: "Bob".to_string(),
+            slug: "bob".to_string(),
+            ssh_port: 2223,
+            dashboard_port: 3033,
+            p2p_port: 6883,
+            disk: PathBuf::from("bob.qcow2"),
+            pid: None,
+            last_seed: None,
+            last_fetch: None,
+        };
+        let output = "pid=1\nlog=/tmp/guix-p2p-b.log\ndashboard=http://127.0.0.1:3031\n";
+
+        assert_eq!(
+            rewrite_vm_dashboard_output(&config, &node, output),
+            "pid=1\nlog=/tmp/guix-p2p-b.log\ndashboard=http://127.0.0.1:3033\n"
+        );
+    }
+
+    #[test]
+    fn vm_dashboard_output_keeps_guest_port_when_not_forwarded() {
+        let config = test_vm_config(false);
+        let node = VmNode {
+            name: "Bob".to_string(),
+            slug: "bob".to_string(),
+            ssh_port: 2223,
+            dashboard_port: 3033,
+            p2p_port: 6883,
+            disk: PathBuf::from("bob.qcow2"),
+            pid: None,
+            last_seed: None,
+            last_fetch: None,
+        };
+        let output = "dashboard=http://127.0.0.1:3031\n";
+
+        assert_eq!(rewrite_vm_dashboard_output(&config, &node, output), output);
+    }
+
+    fn test_vm_config(forward_dashboard: bool) -> VmConfig {
+        VmConfig {
+            state_dir: PathBuf::from("state"),
+            image_size: "20G".to_string(),
+            memory: 2048,
+            cpus: 2,
+            enable_kvm: "auto".to_string(),
+            forward_dashboard,
+            substitute_urls: "https://ci.guix.gnu.org".to_string(),
+            node_system: PathBuf::from("node.scm"),
+            guix_p2p_binary: PathBuf::from("guix-p2p"),
+            ssh_dir: PathBuf::from("ssh"),
+            ssh_host_key: PathBuf::from("ssh/host"),
+            ssh_host_key_pub: PathBuf::from("ssh/host.pub"),
+            ssh_client_key: PathBuf::from("ssh/client"),
+            ssh_client_key_pub: PathBuf::from("ssh/client.pub"),
+        }
     }
 
     #[test]

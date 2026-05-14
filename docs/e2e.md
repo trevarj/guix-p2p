@@ -155,5 +155,6 @@ Important files:
 - Dashboard forwarding is enabled by default. Disable it with
   `--forward-dashboard=false` or `GUIX_P2P_E2E_FORWARD_DASHBOARD=false`.
   Each VM node gets a unique host-side dashboard port (3031, 3032, ...) mapped
-  to guest port 3031 inside the VM.
+  to guest port 3031 inside the VM. VM command output prints the host-forwarded
+  dashboard URL.
 - The VM login remains `e2e:e2e`.
