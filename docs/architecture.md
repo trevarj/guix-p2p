@@ -571,6 +571,9 @@ locally-seeded nars in real time:
 - Dashboard sections and controls expose faded `?` affordances. Hovering them
   highlights the help control, and clicking opens a concise explanatory popup
   for that component.
+- Dashboard scrollbars are themed with the active console palette, and active
+  seed rows reserve separate columns for package path, size/block metadata, and
+  stop controls to avoid overlap.
 - Active seed rows display the package/store item name when store-path metadata
   is available, with the full store path and NAR hash available in details.
   Each active seed row can stop seeding directly by NAR hash, which works even

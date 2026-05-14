@@ -26,6 +26,12 @@ body::before{
   background:repeating-linear-gradient(rgba(0,0,0,.03) 0px,transparent 2px);
   pointer-events:none;z-index:999
 }
+*{scrollbar-width:thin;scrollbar-color:var(--dim) var(--bg2)}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-track{background:var(--bg2);border-left:1px solid var(--line)}
+*::-webkit-scrollbar-thumb{background:var(--dim);border:2px solid var(--bg2);border-radius:8px}
+*::-webkit-scrollbar-thumb:hover{background:var(--acc)}
+*::-webkit-scrollbar-corner{background:var(--bg2)}
 header{
   background:linear-gradient(180deg,var(--bg2),var(--bg));border-bottom:1px solid var(--line);
   padding:10px 16px;display:flex;justify-content:space-between;align-items:center;
@@ -116,15 +122,16 @@ main{
 .build-row .path,.seed-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
 .build-row .providers{min-width:60px;text-align:right;color:var(--acc)}
 .seed-row .hash{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7;font-family:var(--font)}
-.seed-row .seed-name{flex:1;min-width:0}
-.seed-row .seed-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.seed-row .seed-subtitle{font-size:10px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.seed-row .seed-meta{min-width:100px;text-align:right;font-size:11px;opacity:.8}
+.seed-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(96px,auto) auto;align-items:center;column-gap:8px}
+.seed-row .seed-name{min-width:0;overflow:hidden}
+.seed-row .seed-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seed-row .seed-subtitle{display:block;font-size:10px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seed-row .seed-meta{min-width:96px;text-align:right;font-size:11px;opacity:.8;white-space:nowrap}
 .seed-row .seed-meta .sz{color:var(--fg)}
-.seed-row .seed-meta .bl{color:var(--dim);font-size:10px;margin-left:4px}
+.seed-row .seed-meta .bl{display:block;color:var(--dim);font-size:10px;margin-left:0}
 .seed-row .stop-seed{
   background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
-  padding:2px 6px;font-family:var(--font);font-size:10px;cursor:pointer
+  padding:2px 6px;font-family:var(--font);font-size:10px;cursor:pointer;justify-self:end
 }
 .seed-row .stop-seed:hover{border-color:var(--acc);color:var(--err)}
 .package-tools{display:flex;gap:8px;align-items:center;margin-bottom:6px}
