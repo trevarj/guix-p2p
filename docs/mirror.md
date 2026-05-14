@@ -64,6 +64,22 @@ The workflow:
 
 The workflow deliberately does not auto-commit generated benchmark output.
 
+## GitHub Benchmarks
+
+The manual benchmark workflow is `.github/workflows/benchmarks.yml`.
+
+To run it:
+
+- Open the GitHub mirror.
+- Go to `Actions > Benchmarks`.
+- Click `Run workflow`.
+- Choose `suite`, `iterations`, and `transport`.
+- Download the `guix-p2p-benchmark-*` artifact from the completed run.
+
+The workflow runs the container benchmark harness and uploads
+`target/guix-p2p-bench/results.csv` plus `docs/benchmark-results.md`. It does
+not commit generated benchmark output back to the repository.
+
 ## References
 
 - Forgejo repository mirroring: <https://forgejo.org/docs/next/user/repo-mirror/>

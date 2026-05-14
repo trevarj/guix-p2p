@@ -1,0 +1,65 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Benchmark suite
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - standard
+      iterations:
+        description: Iterations per benchmark case
+        required: true
+        default: "1"
+        type: string
+      transport:
+        description: libp2p transport
+        required: true
+        default: tcp
+        type: choice
+        options:
+          - tcp
+          - quic
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  container-benchmark:
+    name: Container benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Guix
+        uses: PromyLOPh/guix-install-action@v1
+        with:
+          pullAfterInstall: false
+
+      - name: Run benchmark
+        run: >
+          guix shell rust gcc-toolchain pkg-config openssl libgcrypt eudev
+          libsecp256k1 perl sqlite -- cargo run -p guix-p2p-e2e --
+          benchmark --suite "${{ inputs.suite }}" --iterations
+          "${{ inputs.iterations }}" --transport "${{ inputs.transport }}"
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: guix-p2p-benchmark-${{ inputs.suite }}-${{ github.run_number }}
+          if-no-files-found: ignore
+          path: |
+            target/guix-p2p-bench/results.csv
+            docs/benchmark-results.md

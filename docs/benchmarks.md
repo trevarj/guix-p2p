@@ -200,6 +200,28 @@ Outputs:
 - `target/guix-p2p-bench/results.csv`
 - `docs/benchmark-results.md`
 
+### GitHub Benchmark Workflow
+
+GitHub benchmarks are manual-only and run the container benchmark harness from
+the mirrored repository. They are useful for smoke timing and artifact capture,
+not for the authoritative VM proof.
+
+To run one:
+
+- Open the GitHub mirror.
+- Go to `Actions > Benchmarks`.
+- Click `Run workflow`.
+- Choose `suite`, `iterations`, and `transport`.
+- Download the `guix-p2p-benchmark-*` artifact after the run completes.
+
+The artifact contains:
+
+- `results.csv`
+- `benchmark-results.md`
+
+The workflow does not commit generated benchmark output back to either GitHub
+or Codeberg.
+
 The report includes host and Rust summary, tier, package store paths, nar
 hashes, nar sizes when observed from dashboard seed data, HTTP condition, seed
 count, per-run elapsed time, medians, p95 values, provider counts, P2P
