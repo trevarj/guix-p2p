@@ -572,6 +572,9 @@ locally-seeded nars in real time:
   so seeded item text has more room.
 - The dashboard header uses an inline `guix-p2p` SVG wordmark so the embedded
   dashboard can render the logo without a separate static asset route.
+- The main dashboard grid scrolls as a whole when zoom or viewport height makes
+  the fixed panels taller than the available space, so the bottom Events panel
+  remains reachable instead of being clipped.
 - Each main dashboard panel exposes one faded `?` affordance in the top-right
   corner. Clicking it opens a concise overview for that panel, including the
   important controls and row elements inside it.
