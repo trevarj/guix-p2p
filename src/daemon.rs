@@ -342,7 +342,7 @@ pub async fn run_substitute_mode(
 #[allow(clippy::too_many_arguments)]
 async fn try_swarm_substitute(
     config: &Config,
-    _cache: &ProviderCache,
+    cache: &ProviderCache,
     cmd_tx: &UnboundedSender<SwarmCommand>,
     reply: &mut ReplyWriter,
     path: &str,
@@ -441,6 +441,7 @@ async fn try_swarm_substitute(
             ));
             try_p2p_download(
                 config,
+                cache,
                 cmd_tx,
                 notify_rx,
                 &nar_hash_hex,
@@ -463,6 +464,7 @@ async fn try_swarm_substitute(
             ));
             match try_p2p_download(
                 config,
+                cache,
                 cmd_tx,
                 notify_rx,
                 &nar_hash_hex,
@@ -510,6 +512,7 @@ async fn try_swarm_substitute(
                     ));
                     try_p2p_download(
                         config,
+                        cache,
                         cmd_tx,
                         notify_rx,
                         &nar_hash_hex,
@@ -677,6 +680,7 @@ async fn try_swarm_substitute(
 #[allow(clippy::too_many_arguments)]
 async fn try_p2p_download(
     config: &Config,
+    cache: &ProviderCache,
     cmd_tx: &UnboundedSender<SwarmCommand>,
     notify_rx: &mut NotifyRx,
     nar_hash: &str,
@@ -700,7 +704,7 @@ async fn try_p2p_download(
     let dht_key = hex::encode(nar_hash_bytes);
     let _ = cmd_tx.send(SwarmCommand::GetProviders { hash: dht_key.clone() });
 
-    let providers = wait_for_providers(notify_rx, &dht_key, config).await;
+    let providers = wait_for_providers(cache, notify_rx, &dht_key, config).await;
 
     if providers.len() < config.min_providers {
         return Err(format!(
@@ -726,6 +730,13 @@ async fn try_p2p_download(
 
     if handshakes.is_empty() {
         return Err("no successful P2P handshakes".into());
+    }
+    if handshakes.len() < config.min_providers {
+        return Err(format!(
+            "not enough successful P2P handshakes ({}/{})",
+            handshakes.len(),
+            config.min_providers
+        ));
     }
 
     let download_block_info = if nar_size == 0 {
@@ -800,10 +811,17 @@ async fn try_http_download(
 
 /// Wait for provider notifications for the given DHT key, with a timeout.
 async fn wait_for_providers(
+    cache: &ProviderCache,
     notify_rx: &mut NotifyRx,
     dht_key: &str,
     config: &Config,
 ) -> Vec<PeerId> {
+    let cached = crate::dht::get_providers(cache, dht_key).await;
+    if cached.len() >= config.min_providers {
+        tracing::debug!("Using {} cached providers for {}", cached.len(), dht_key);
+        return cached;
+    }
+
     wait_for_providers_for_duration(
         notify_rx,
         dht_key,
@@ -895,12 +913,10 @@ async fn handshake_with_providers(
     let mut pending = HashMap::new();
 
     // Send handshakes
-    for (i, peer) in providers.iter().take(max).enumerate() {
+    for peer in providers.iter().take(max) {
         let request = BlockRequest::Handshake { nar_hash: nar_hash_bytes.to_vec() };
         let _ = cmd_tx.send(SwarmCommand::SendBlockRequest { peer: *peer, request });
-
-        // Use the index as a lightweight request-id for tracking
-        pending.insert(i as u64, *peer);
+        pending.insert(*peer, (1_usize, tokio::time::Instant::now()));
     }
 
     // Collect replies with timeout
@@ -941,11 +957,31 @@ async fn handshake_with_providers(
                     block_hashes: hashes,
                     block_count,
                 });
-                pending.retain(|_, p| *p != peer);
+                pending.remove(&peer);
             },
             Ok(Ok(_)) => {},
             Ok(Err(_)) => break,
-            Err(_elapsed) => continue,
+            Err(_elapsed) => {
+                let now = tokio::time::Instant::now();
+                for (peer, (attempts, last_sent)) in &mut pending {
+                    if *attempts < 3
+                        && now.duration_since(*last_sent) >= tokio::time::Duration::from_secs(3)
+                    {
+                        let request = BlockRequest::Handshake { nar_hash: nar_hash_bytes.to_vec() };
+                        let _ =
+                            cmd_tx.send(SwarmCommand::SendBlockRequest { peer: *peer, request });
+                        *attempts += 1;
+                        *last_sent = now;
+                        tracing::debug!(
+                            "Retrying handshake with {} (attempt {}/{})",
+                            peer,
+                            attempts,
+                            3
+                        );
+                    }
+                }
+                continue;
+            },
         }
     }
 

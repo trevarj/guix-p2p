@@ -22,12 +22,13 @@ Build the base image:
 cargo run -p guix-p2p-e2e -- vm image
 ```
 
-Start three named nodes. Unknown names are auto-created from the base image and
+Start four named nodes. Unknown names are auto-created from the base image and
 assigned persistent ports:
 
 ```sh
 cargo run -p guix-p2p-e2e -- vm run Bootstrap
 cargo run -p guix-p2p-e2e -- vm run Alice
+cargo run -p guix-p2p-e2e -- vm run Charles
 cargo run -p guix-p2p-e2e -- vm run Bob
 cargo run -p guix-p2p-e2e -- vm status --all
 ```
@@ -38,18 +39,22 @@ Run the proof:
 cargo run -p guix-p2p-e2e -- vm proof
 ```
 
-`vm proof` runs the documented Bootstrap/Alice/Bob sequence: wait for SSH,
-push the release binary, start the bootstrap node, seed Alice, remove the
-target from Bob, and fetch through Bob's p2p-only daemon. Use this after large
-feature changes before trusting benchmark results.
+`vm proof` runs the documented Bootstrap/Alice/Charles/Bob sequence: wait for
+SSH, push the release binary, start the bootstrap node, seed Alice and Charles,
+remove the target from Bob, and fetch through Bob's p2p-only daemon. The proof
+sets Bob's `max_in_flight_blocks_per_peer` to `1` so the small `hello` NAR must
+download blocks from both seeders, then checks each seeder log for block-serving
+evidence. Use this after large feature changes before trusting benchmark
+results.
 
 The steps are also available individually:
 
 ```sh
-cargo run -p guix-p2p-e2e -- vm wait-ssh Bootstrap Alice Bob
+cargo run -p guix-p2p-e2e -- vm wait-ssh Bootstrap Alice Charles Bob
 cargo run -p guix-p2p-e2e -- vm push-binary --all
 cargo run -p guix-p2p-e2e -- vm bootstrap Bootstrap
 cargo run -p guix-p2p-e2e -- vm seed Alice hello
+cargo run -p guix-p2p-e2e -- vm seed Charles hello
 cargo run -p guix-p2p-e2e -- vm remove Bob
 cargo run -p guix-p2p-e2e -- vm fetch Bob
 ```

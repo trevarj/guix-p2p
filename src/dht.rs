@@ -75,7 +75,12 @@ pub fn handle_kad_event(cache: &ProviderCache, notify_tx: &NotifyTx, event: &Kad
     let peers_clone = providers.clone();
     tokio::spawn(async move {
         let mut guard = cache_clone.lock().await;
-        guard.insert(hex_clone, peers_clone);
+        let entry = guard.entry(hex_clone).or_default();
+        for peer in peers_clone {
+            if !entry.contains(&peer) {
+                entry.push(peer);
+            }
+        }
     });
 
     let _ = notify_tx.send(SwarmNotification::ProvidersFound { hash: key_hex, peers: providers });

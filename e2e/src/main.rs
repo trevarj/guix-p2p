@@ -210,9 +210,9 @@ enum VmCommand {
         /// Seedless DHT bootstrap node
         #[arg(long, default_value = "Bootstrap")]
         bootstrap_node: String,
-        /// Seeder node
-        #[arg(long, default_value = "Alice")]
-        seed_node: String,
+        /// Seeder node names, comma-separated
+        #[arg(long, value_delimiter = ',', default_value = "Alice,Charles")]
+        seed_nodes: Vec<String>,
         /// Fetcher node
         #[arg(long, default_value = "Bob")]
         fetch_node: String,
@@ -693,6 +693,15 @@ struct BenchmarkPhaseTimings {
     total_ms: Option<u128>,
 }
 
+struct VmProofOptions {
+    bootstrap_node: String,
+    seed_nodes: Vec<String>,
+    fetch_node: String,
+    package: String,
+    policy: String,
+    skip_push_binary: bool,
+}
+
 impl BenchmarkPhaseTimings {
     fn with_total(total_ms: u128) -> Self {
         Self { total_ms: Some(total_ms), ..Self::default() }
@@ -824,19 +833,21 @@ fn run_vm_command(opts: VmOptions) -> anyhow::Result<()> {
         },
         VmCommand::Proof {
             bootstrap_node,
-            seed_node,
+            seed_nodes,
             fetch_node,
             package,
             policy,
             skip_push_binary,
         } => vm_proof(
             &config,
-            &bootstrap_node,
-            &seed_node,
-            &fetch_node,
-            &package,
-            &policy,
-            skip_push_binary,
+            VmProofOptions {
+                bootstrap_node,
+                seed_nodes,
+                fetch_node,
+                package,
+                policy,
+                skip_push_binary,
+            },
         ),
         VmCommand::Benchmark {
             suite,
@@ -1480,18 +1491,28 @@ fn vm_start_fetch_p2p(
     name: &str,
     target: &VmFetch,
     policy: &str,
+    extra_bootstrap_peers: &[String],
+    min_providers: Option<usize>,
+    max_in_flight_blocks_per_peer: Option<usize>,
 ) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
     let bootstrap = registry
         .bootstrap_multiaddr()?
         .ok_or_else(|| anyhow::anyhow!("no bootstrap node configured; run: vm bootstrap <node>"))?;
+    let mut bootstrap_peers = vec![bootstrap];
+    bootstrap_peers.extend(extra_bootstrap_peers.iter().cloned());
+    bootstrap_peers.sort();
+    bootstrap_peers.dedup();
+    let bootstrap = bootstrap_peers.join(",");
     let command = fetch_node_command(
         target,
         &bootstrap,
         &vm_external_multiaddr(node),
         policy,
         &config.substitute_urls,
+        min_providers.unwrap_or(1),
+        max_in_flight_blocks_per_peer,
     );
     let output = ssh_run(config, node, &command)?;
     print!("{output}");
@@ -1509,41 +1530,62 @@ fn vm_fetch(
     Ok(())
 }
 
-fn vm_proof(
-    config: &VmConfig,
-    bootstrap_node: &str,
-    seed_node: &str,
-    fetch_node: &str,
-    package: &str,
-    policy: &str,
-    skip_push_binary: bool,
-) -> anyhow::Result<()> {
-    let node_names = [bootstrap_node.to_string(), seed_node.to_string(), fetch_node.to_string()];
+fn vm_proof(config: &VmConfig, opts: VmProofOptions) -> anyhow::Result<()> {
+    if opts.seed_nodes.is_empty() {
+        anyhow::bail!("vm proof requires at least one seed node");
+    }
+
+    let mut node_names = vec![opts.bootstrap_node.clone(), opts.fetch_node.clone()];
+    node_names.extend(opts.seed_nodes.iter().cloned());
+    node_names.sort();
+    node_names.dedup();
     ensure_vm_proof_nodes(config, &node_names)?;
 
     println!("VM_PROOF_STEP wait-ssh");
     vm_wait_ssh(config, &node_names)?;
 
-    if !skip_push_binary {
+    if !opts.skip_push_binary {
         println!("VM_PROOF_STEP push-binary");
         for node in &node_names {
             vm_push_binary(config, Some(node), false)?;
         }
     }
 
-    println!("VM_PROOF_STEP bootstrap node={bootstrap_node}");
-    vm_bootstrap(config, bootstrap_node)?;
+    println!("VM_PROOF_STEP bootstrap node={}", opts.bootstrap_node);
+    vm_bootstrap(config, &opts.bootstrap_node)?;
 
-    println!("VM_PROOF_STEP seed node={seed_node} package={package}");
-    vm_seed(config, seed_node, package)?;
+    for seed_node in &opts.seed_nodes {
+        println!("VM_PROOF_STEP seed node={seed_node} package={}", opts.package);
+        vm_seed(config, seed_node, &opts.package)?;
+    }
+    let seed_bootstrap_peers = vm_seed_bootstrap_peers(config, &opts.seed_nodes)?;
 
-    println!("VM_PROOF_STEP remove node={fetch_node} package={package}");
-    vm_remove(config, fetch_node, None, Some(package))?;
+    println!("VM_PROOF_STEP remove node={} package={}", opts.fetch_node, opts.package);
+    vm_remove(config, &opts.fetch_node, None, Some(&opts.package))?;
 
-    println!("VM_PROOF_STEP fetch node={fetch_node} package={package} policy={policy}");
-    vm_fetch(config, fetch_node, None, Some(package), policy)?;
+    println!(
+        "VM_PROOF_STEP fetch node={} package={} policy={} max_in_flight_blocks_per_peer=1",
+        opts.fetch_node, opts.package, opts.policy
+    );
+    let _ = vm_fetch_timed_with_options(
+        config,
+        &opts.fetch_node,
+        None,
+        Some(&opts.package),
+        &opts.policy,
+        &seed_bootstrap_peers,
+        Some(opts.seed_nodes.len()),
+        Some(1),
+    )?;
 
-    println!("VM_PROOF_SUCCEEDED package={package} seed_node={seed_node} fetch_node={fetch_node}");
+    vm_require_seeders_served_blocks(config, &opts.seed_nodes)?;
+
+    println!(
+        "VM_PROOF_SUCCEEDED package={} seed_nodes={} fetch_node={}",
+        opts.package,
+        opts.seed_nodes.join(","),
+        opts.fetch_node
+    );
     Ok(())
 }
 
@@ -1554,6 +1596,19 @@ fn vm_fetch_timed(
     package: Option<&str>,
     policy: &str,
 ) -> anyhow::Result<BenchmarkPhaseTimings> {
+    vm_fetch_timed_with_options(config, name, store_path, package, policy, &[], None, None)
+}
+
+fn vm_fetch_timed_with_options(
+    config: &VmConfig,
+    name: &str,
+    store_path: Option<&str>,
+    package: Option<&str>,
+    policy: &str,
+    extra_bootstrap_peers: &[String],
+    min_providers: Option<usize>,
+    max_in_flight_blocks_per_peer: Option<usize>,
+) -> anyhow::Result<BenchmarkPhaseTimings> {
     let mut registry = VmRegistry::load(config)?;
     let node = registry.node(name)?.clone();
     let target = resolve_fetch_target(&registry, &node, store_path, package)?;
@@ -1562,7 +1617,15 @@ fn vm_fetch_timed(
     let started = std::time::Instant::now();
 
     let phase_start = std::time::Instant::now();
-    vm_start_fetch_p2p(config, name, &target, policy)?;
+    vm_start_fetch_p2p(
+        config,
+        name,
+        &target,
+        policy,
+        extra_bootstrap_peers,
+        min_providers,
+        max_in_flight_blocks_per_peer,
+    )?;
     let p2p_start_ms = phase_start.elapsed().as_millis();
 
     let phase_start = std::time::Instant::now();
@@ -1574,17 +1637,32 @@ fn vm_fetch_timed(
     let daemon_start_ms = phase_start.elapsed().as_millis();
 
     let phase_start = std::time::Instant::now();
-    let output = ssh_run(
-        config,
-        &node,
-        &format!(
-            "set -eu; test ! -e {}; GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build \
-             --no-grafts {}; test -d {} && echo IMPORTED_OUTPUT_IN_NODE_STORE",
-            shell_quote(&target.store_path),
-            shell_quote(&target.package),
-            shell_quote(&target.store_path)
-        ),
-    )?;
+    let build_command = format!(
+        "set -eu; test ! -e {}; GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build \
+         --no-grafts {}; test -d {} && echo IMPORTED_OUTPUT_IN_NODE_STORE",
+        shell_quote(&target.store_path),
+        shell_quote(&target.package),
+        shell_quote(&target.store_path)
+    );
+    let output = match ssh_run(config, &node, &build_command) {
+        Ok(output) => output,
+        Err(e) => {
+            let p2p_tail =
+                ssh_run(config, &node, "tail -n 160 /tmp/guix-p2p-b.log 2>/dev/null || true")
+                    .unwrap_or_else(|tail_err| format!("failed to read p2p log tail: {tail_err}"));
+            let daemon_tail =
+                ssh_run(config, &node, "tail -n 80 /tmp/e2e-guix-daemon.log 2>/dev/null || true")
+                    .unwrap_or_else(|tail_err| {
+                        format!("failed to read daemon log tail: {tail_err}")
+                    });
+            return Err(e).with_context(|| {
+                format!(
+                    "fetch failed; fetch-node p2p log tail:\n{p2p_tail}\nfetch-node guix-daemon \
+                     log tail:\n{daemon_tail}"
+                )
+            });
+        },
+    };
     let import_ms = phase_start.elapsed().as_millis();
 
     print!("{output}");
@@ -2293,6 +2371,52 @@ fn ensure_vm_proof_nodes(config: &VmConfig, names: &[String]) -> anyhow::Result<
     }
 
     Ok(())
+}
+
+fn vm_require_seeders_served_blocks(
+    config: &VmConfig,
+    seed_nodes: &[String],
+) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    let mut missing = Vec::new();
+
+    for name in seed_nodes {
+        let node = registry.node(name)?;
+        let log = ssh_run(config, node, "cat /tmp/guix-p2p-a.log 2>/dev/null || true")?;
+        let served = contains_any(&log, &["serving ", "Served block request", "BlockServed"]);
+        if served {
+            println!("VM_PROOF_SEEDER_BLOCKS_SERVED node={name}");
+        } else {
+            missing.push(name.clone());
+        }
+    }
+
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "VM proof did not observe block-serving evidence from seed node(s): {}",
+            missing.join(",")
+        );
+    }
+
+    Ok(())
+}
+
+fn vm_seed_bootstrap_peers(
+    config: &VmConfig,
+    seed_nodes: &[String],
+) -> anyhow::Result<Vec<String>> {
+    let registry = VmRegistry::load(config)?;
+    seed_nodes
+        .iter()
+        .map(|name| {
+            let node = registry.node(name)?;
+            let seed = node
+                .last_seed
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("seed node {name} has no saved seed metadata"))?;
+            Ok(vm_peer_multiaddr(node, &seed.peer_id))
+        })
+        .collect()
 }
 
 fn wait_for_vm_seed_metadata(
@@ -4276,6 +4400,8 @@ fn fetch_node_command(
     external_address: &str,
     policy: &str,
     substitute_urls: &str,
+    min_providers: usize,
+    max_in_flight_blocks_per_peer: Option<usize>,
 ) -> String {
     format!(
         r#"
@@ -4295,11 +4421,12 @@ if [ -e "$STORE_PATH" ]; then
   echo "fetch node already has $STORE_PATH; stop before mutating the proof" >&2
   exit 1
 fi
+rm -rf "$CACHE_DIR"
 mkdir -p "$CACHE_DIR" "$HOME/.config/guix-p2p"
 cat > "$HOME/.config/guix-p2p/config.toml" <<'EOF'
-min_providers = 1
+min_providers = {min_providers}
 substitute_urls = {substitute_urls_toml}
-EOF
+{max_in_flight_toml}EOF
 if [ -f /tmp/guix-p2p-b.pid ]; then
   OLD_PID="$(cat /tmp/guix-p2p-b.pid 2>/dev/null || true)"
   if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
@@ -4339,7 +4466,11 @@ fi
         bootstrap = shell_quote(bootstrap),
         external_address = shell_quote(external_address),
         policy = shell_quote(policy),
-        substitute_urls_toml = toml_string(&substitute_urls_for_guix_p2p(substitute_urls))
+        min_providers = min_providers,
+        substitute_urls_toml = toml_string(&substitute_urls_for_guix_p2p(substitute_urls)),
+        max_in_flight_toml = max_in_flight_blocks_per_peer
+            .map(|value| format!("max_in_flight_blocks_per_peer = {value}\n"))
+            .unwrap_or_default()
     )
 }
 

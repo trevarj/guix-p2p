@@ -208,6 +208,10 @@ the narinfo's expected `NarHash`. If they don't match:
 8. Reply "success sha256:... <size>" or "not-found <path>"
 ```
 
+Provider lookup results are merged into the in-memory provider cache instead of
+replacing earlier peers. A later sparse DHT response should not erase providers
+observed by a previous `have` query.
+
 ## Swarm Block Protocol
 
 Block size: 256 KiB (configurable)
@@ -226,13 +230,15 @@ Peer → Client: BLOCKS { data: [(u32, Vec<u8>); 1..8] }
 - Final: SHA-256(block_0 || ... || block_N) must equal nar-SHA-256 from narinfo
 
 ### Block Selection
-- Rarest-first across all connected peers
-- Track availability per peer via handshake bitfields
-- Prioritize blocks available from fewest peers
+- Track availability per peer via handshake replies.
+- Retry handshakes during the handshake window.
+- Require at least `min_providers` successful handshakes before downloading.
+- Assign pending blocks to the least-loaded peer that advertises the block.
+- Requeue stalled or invalid in-flight blocks for another provider.
 
 ### Parallelism
 - Max 8 concurrent peer connections per nar download
-- Pipeline: request next batch before current batch completes
+- Keep up to `max_in_flight_blocks_per_peer` block requests active per peer.
 
 ## Anti-Spam
 
