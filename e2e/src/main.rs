@@ -4440,7 +4440,12 @@ SOCKET="${{GUIX_P2P_E2E_A_SOCKET:-$CACHE_DIR/guix-p2p.sock}}"
 LISTEN="${{GUIX_P2P_E2E_A_LISTEN:-/ip4/0.0.0.0/tcp/6881}}"
 DASHBOARD_BIND="${{GUIX_P2P_E2E_A_DASHBOARD_BIND:-0.0.0.0}}"
 DASHBOARD_PORT="${{GUIX_P2P_E2E_A_DASHBOARD_PORT:-3031}}"
-STORE_PATH="$(guix build --no-grafts --substitute-urls="$SUBSTITUTE_URLS" "$PACKAGE")"
+GUIX_BUILD_OUTPUT="$(guix build --no-grafts --substitute-urls="$SUBSTITUTE_URLS" "$PACKAGE")"
+STORE_PATH="$(printf '%s\n' "$GUIX_BUILD_OUTPUT" | awk '/^\/gnu\/store\// {{ path=$0 }} END {{ if (path != "") print path }}')"
+if [ -z "$STORE_PATH" ]; then
+  echo "guix build did not print a store path for $PACKAGE" >&2
+  exit 1
+fi
 STORE_HASH="${{STORE_PATH#/gnu/store/}}"
 STORE_HASH="${{STORE_HASH%%-*}}"
 NARINFO_URL=''
@@ -4690,6 +4695,16 @@ mod tests {
         assert_eq!(parse_key_line(output, "store_path").as_deref(), Some("/gnu/store/new"));
         assert_eq!(parse_key_line(output, "peer_id").as_deref(), Some("one"));
         assert_eq!(parse_key_line(output, "missing"), None);
+    }
+
+    #[test]
+    fn seed_command_selects_one_store_path_from_multi_output_builds() {
+        let command =
+            seed_node_command("git", None, "https://ci.guix.gnu.org", "/ip4/127.0.0.1/tcp/6881");
+
+        assert!(command.contains("GUIX_BUILD_OUTPUT=\"$(guix build --no-grafts"));
+        assert!(command.contains("STORE_PATH=\"$(printf '%s\\n' \"$GUIX_BUILD_OUTPUT\" | awk"));
+        assert!(command.contains("guix build did not print a store path"));
     }
 
     #[test]

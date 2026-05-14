@@ -201,8 +201,11 @@ mod tests {
         tracker.save(&path).unwrap();
 
         let loaded = ReputationTracker::load(&path, 5).unwrap();
-        let s1 = tracker.score(&peer);
-        let s2 = loaded.score(&peer);
-        assert!((s1 - s2).abs() < 1e-6);
+        let entries = loaded.peer_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, peer);
+        assert_eq!(entries[0].1.completed, 1);
+        assert_eq!(entries[0].1.failed, 1);
+        assert_eq!(entries[0].1.bytes_served, 4096);
     }
 }
