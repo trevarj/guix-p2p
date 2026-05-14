@@ -37,7 +37,11 @@ header{
   padding:10px 16px;display:flex;justify-content:space-between;align-items:center;
   flex-shrink:0;gap:16px
 }
-header strong{font-size:15px;letter-spacing:1px}
+header .brand-logo{display:block;width:150px;height:38px;color:var(--fg)}
+header .brand-logo text{font-family:var(--font);font-weight:800;letter-spacing:0}
+header .brand-logo .brand-main{fill:var(--fg)}
+header .brand-logo .brand-accent{fill:var(--acc)}
+header .brand-logo .brand-link{stroke:var(--acc)}
 header .id{font-size:11px;opacity:.6}
 header .stats{display:grid;grid-template-columns:repeat(7,auto);gap:8px;font-size:11px}
 header .stats div{border:1px solid var(--line);background:var(--panel);padding:4px 7px;min-width:74px}
@@ -295,7 +299,17 @@ main{
 <body class="theme-yellow">
 <header>
   <div>
-    <strong data-tip="Local daemon dashboard for P2P substitute discovery, seeding, and transfer evidence.">guix-p2p</strong>
+    <svg class="brand-logo" viewBox="0 0 240 60" role="img" aria-labelledby="brand-title brand-desc" data-tip="Local daemon dashboard for P2P substitute discovery, seeding, and transfer evidence.">
+      <title id="brand-title">guix-p2p</title>
+      <desc id="brand-desc">guix-p2p dashboard logo</desc>
+      <text x="0" y="35" font-size="30"><tspan class="brand-main">guix</tspan><tspan class="brand-accent">-p2p</tspan></text>
+      <g class="brand-accent">
+        <circle cx="76" cy="50" r="2.6"/>
+        <circle cx="120" cy="50" r="2.6"/>
+        <circle cx="164" cy="50" r="2.6"/>
+      </g>
+      <path class="brand-link" d="M80 50H116M124 50H160" fill="none" stroke-width="2.2" stroke-linecap="round"/>
+    </svg>
     <br><span class="id" id="peer-id" data-tip="Full libp2p peer id for this node.">--</span>
   </div>
   <div class="stats">
