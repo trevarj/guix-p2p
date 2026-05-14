@@ -241,7 +241,18 @@ async fn handle_info(
             },
         };
 
-        match crate::http_client::fetch_narinfo(config, &hash_part, cache, client).await {
+        let cached_info = cache.lock().unwrap().get(&hash_part);
+        let info_result = match (config.substitute_policy, cached_info) {
+            (SubstitutePolicy::P2pOnly, Some(info)) => Ok(info),
+            (SubstitutePolicy::P2pOnly, None) => {
+                tracing::debug!("No cached p2p-only narinfo for {}", hash_part);
+                continue;
+            },
+            (_, Some(info)) => Ok(info),
+            (_, None) => crate::http_client::fetch_narinfo(config, &hash_part, cache, client).await,
+        };
+
+        match info_result {
             Ok(info) => {
                 let nar_hash_bytes = match extract_nar_hash_bytes(&info.nar_hash) {
                     Some(bytes) => bytes,

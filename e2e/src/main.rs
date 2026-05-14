@@ -1494,6 +1494,7 @@ fn vm_start_fetch_p2p(
     extra_bootstrap_peers: &[String],
     min_providers: Option<usize>,
     max_in_flight_blocks_per_peer: Option<usize>,
+    local_narinfo_path: Option<&str>,
 ) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
@@ -1513,6 +1514,7 @@ fn vm_start_fetch_p2p(
         &config.substitute_urls,
         min_providers.unwrap_or(1),
         max_in_flight_blocks_per_peer,
+        local_narinfo_path,
     );
     let output = ssh_run(config, node, &command)?;
     print_vm_node_output(config, node, &output);
@@ -1602,6 +1604,7 @@ fn vm_proof(config: &VmConfig, opts: VmProofOptions) -> anyhow::Result<()> {
         &seed_bootstrap_peers,
         Some(opts.seed_nodes.len()),
         Some(1),
+        None,
     )?;
 
     vm_require_seeders_served_blocks(config, &opts.seed_nodes)?;
@@ -1622,7 +1625,7 @@ fn vm_fetch_timed(
     package: Option<&str>,
     policy: &str,
 ) -> anyhow::Result<BenchmarkPhaseTimings> {
-    vm_fetch_timed_with_options(config, name, store_path, package, policy, &[], None, None)
+    vm_fetch_timed_with_options(config, name, store_path, package, policy, &[], None, None, None)
 }
 
 fn vm_fetch_timed_with_options(
@@ -1634,6 +1637,7 @@ fn vm_fetch_timed_with_options(
     extra_bootstrap_peers: &[String],
     min_providers: Option<usize>,
     max_in_flight_blocks_per_peer: Option<usize>,
+    local_narinfo_path: Option<&str>,
 ) -> anyhow::Result<BenchmarkPhaseTimings> {
     let mut registry = VmRegistry::load(config)?;
     let node = registry.node(name)?.clone();
@@ -1651,6 +1655,7 @@ fn vm_fetch_timed_with_options(
         extra_bootstrap_peers,
         min_providers,
         max_in_flight_blocks_per_peer,
+        local_narinfo_path,
     )?;
     let p2p_start_ms = phase_start.elapsed().as_millis();
 
@@ -2211,6 +2216,33 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
             let vm_nar_size = seed_metadata.1;
             package.store_path = store_path.clone();
             package.nar_hash = vm_nar_hash.clone();
+            let local_narinfo_path = output_dir.join(format!(
+                "{}-{}-local-narinfo.json",
+                slugify_node_name(&package.name),
+                condition
+            ));
+            write_vm_benchmark_local_narinfo_metadata(
+                &local_narinfo_path,
+                &guix,
+                &package.closure_paths,
+                &store_path,
+                &vm_nar_hash,
+                vm_nar_size,
+            )
+            .with_context(|| {
+                format!("failed to write VM benchmark narinfo metadata for {}", package.name)
+            })?;
+            let fetch_node = registry.node(&opts.fetch_node)?;
+            let remote_local_narinfo_path = "/tmp/guix-p2p-b-local-narinfo.json";
+            push_file_to_node(
+                &condition_config,
+                fetch_node,
+                &local_narinfo_path,
+                remote_local_narinfo_path,
+            )
+            .with_context(|| {
+                format!("failed to push local narinfo metadata to {}", opts.fetch_node)
+            })?;
 
             for mode in &opts.modes {
                 for iteration in 1..=opts.iterations {
@@ -2249,12 +2281,16 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                                 Some(&package.name),
                             )?;
                             let prepare_ms = phase_start.elapsed().as_millis();
-                            vm_fetch_timed(
+                            vm_fetch_timed_with_options(
                                 &condition_config,
                                 &opts.fetch_node,
                                 Some(&store_path),
                                 Some(&package.name),
                                 policy,
+                                &[],
+                                None,
+                                None,
+                                Some(remote_local_narinfo_path),
                             )
                             .map(|mut phases| {
                                 phases.seed_ms = Some(seed_ms);
@@ -3534,11 +3570,19 @@ fn write_local_narinfo_metadata(
     tools: &HarnessTools,
     closure_paths: &[String],
 ) -> anyhow::Result<()> {
+    write_local_narinfo_metadata_with_guix(path, &tools.guix, closure_paths)
+}
+
+fn write_local_narinfo_metadata_with_guix(
+    path: &std::path::Path,
+    guix: &std::path::Path,
+    closure_paths: &[String],
+) -> anyhow::Result<()> {
     let narinfos: Vec<serde_json::Value> = closure_paths
         .iter()
         .map(|store_path| {
-            let nar_hash = compute_nar_hash(&tools.guix, store_path)?;
-            let references = resolve_references(&tools.guix, store_path)?;
+            let nar_hash = compute_nar_hash(guix, store_path)?;
+            let references = resolve_references(guix, store_path)?;
             Ok(serde_json::json!({
                 "store_path": store_path,
                 "nar_hash": nar_hash,
@@ -3549,6 +3593,46 @@ fn write_local_narinfo_metadata(
             }))
         })
         .collect::<anyhow::Result<_>>()?;
+    let document = serde_json::json!({ "narinfos": narinfos });
+    std::fs::write(path, serde_json::to_vec_pretty(&document)?)
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn write_vm_benchmark_local_narinfo_metadata(
+    path: &std::path::Path,
+    guix: &std::path::Path,
+    closure_paths: &[String],
+    vm_store_path: &str,
+    vm_nar_hash: &str,
+    vm_nar_size: Option<u64>,
+) -> anyhow::Result<()> {
+    let mut narinfos = vec![serde_json::json!({
+        "store_path": vm_store_path,
+        "nar_hash": vm_nar_hash,
+        "nar_size": vm_nar_size.unwrap_or(0),
+        "references": [],
+        "deriver": null,
+        "download_size": vm_nar_size.unwrap_or(0)
+    })];
+
+    let mut closure_narinfos: Vec<serde_json::Value> = closure_paths
+        .iter()
+        .filter(|store_path| store_path.as_str() != vm_store_path)
+        .map(|store_path| {
+            let nar_hash = compute_nar_hash(guix, store_path)?;
+            let references = resolve_references(guix, store_path)?;
+            Ok(serde_json::json!({
+                "store_path": store_path,
+                "nar_hash": nar_hash,
+                "nar_size": 0,
+                "references": references,
+                "deriver": null,
+                "download_size": 0
+            }))
+        })
+        .collect::<anyhow::Result<_>>()?;
+
+    narinfos.append(&mut closure_narinfos);
     let document = serde_json::json!({ "narinfos": narinfos });
     std::fs::write(path, serde_json::to_vec_pretty(&document)?)
         .with_context(|| format!("failed to write {}", path.display()))
@@ -4239,6 +4323,35 @@ chmod 755 /tmp/guix-p2p /tmp/guix-p2p-real
     Ok(())
 }
 
+fn push_file_to_node(
+    config: &VmConfig,
+    node: &VmNode,
+    local_path: &std::path::Path,
+    remote_path: &str,
+) -> anyhow::Result<()> {
+    ensure_ssh_client_key(config)?;
+    let status = std::process::Command::new("scp")
+        .arg("-i")
+        .arg(&config.ssh_client_key)
+        .arg("-o")
+        .arg(format!("UserKnownHostsFile={}", config.ssh_dir.join("known_hosts").display()))
+        .arg("-o")
+        .arg("StrictHostKeyChecking=accept-new")
+        .arg("-o")
+        .arg("BatchMode=yes")
+        .arg("-o")
+        .arg("ConnectTimeout=10")
+        .arg("-P")
+        .arg(node.ssh_port.to_string())
+        .arg(local_path)
+        .arg(format!("e2e@127.0.0.1:{remote_path}"))
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("scp {} to {} failed with {status}", local_path.display(), node.name);
+    }
+    Ok(())
+}
+
 fn guix_build_last_path(package: &str) -> anyhow::Result<String> {
     let output = checked_output(
         std::process::Command::new("guix").arg("build").arg(package),
@@ -4428,6 +4541,7 @@ fn fetch_node_command(
     substitute_urls: &str,
     min_providers: usize,
     max_in_flight_blocks_per_peer: Option<usize>,
+    local_narinfo_path: Option<&str>,
 ) -> String {
     format!(
         r#"
@@ -4452,6 +4566,7 @@ mkdir -p "$CACHE_DIR" "$HOME/.config/guix-p2p"
 cat > "$HOME/.config/guix-p2p/config.toml" <<'EOF'
 min_providers = {min_providers}
 substitute_urls = {substitute_urls_toml}
+{local_narinfo_toml}
 {max_in_flight_toml}EOF
 if [ -f /tmp/guix-p2p-b.pid ]; then
   OLD_PID="$(cat /tmp/guix-p2p-b.pid 2>/dev/null || true)"
@@ -4494,6 +4609,9 @@ fi
         policy = shell_quote(policy),
         min_providers = min_providers,
         substitute_urls_toml = toml_string(&substitute_urls_for_guix_p2p(substitute_urls)),
+        local_narinfo_toml = local_narinfo_path
+            .map(|path| format!("local_narinfo_path = {}\n", toml_string(path)))
+            .unwrap_or_default(),
         max_in_flight_toml = max_in_flight_blocks_per_peer
             .map(|value| format!("max_in_flight_blocks_per_peer = {value}\n"))
             .unwrap_or_default()
@@ -4667,6 +4785,28 @@ mod tests {
         assert!(command.contains("BOOTSTRAP='/ip4/10.0.2.2/tcp/6883/p2p/12D3KooWbootstrap'"));
         assert!(command.contains("--bootstrap-peers $BOOTSTRAP"));
         assert!(command.contains("--external-addresses \"$EXTERNAL_ADDRESS\""));
+    }
+
+    #[test]
+    fn fetch_node_command_includes_local_narinfo_path() {
+        let target = VmFetch {
+            from: "Alice".to_string(),
+            package: "hello".to_string(),
+            store_path: "/gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2".to_string(),
+            peer_id: "12D3KooWseed".to_string(),
+        };
+        let command = fetch_node_command(
+            &target,
+            "/ip4/10.0.2.2/tcp/6881/p2p/12D3KooWbootstrap",
+            "/ip4/10.0.2.2/tcp/6883",
+            "p2p-only",
+            "https://ci.guix.gnu.org",
+            1,
+            None,
+            Some("/tmp/local-narinfo.json"),
+        );
+
+        assert!(command.contains("local_narinfo_path = \"/tmp/local-narinfo.json\""));
     }
 
     #[test]

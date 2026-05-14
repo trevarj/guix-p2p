@@ -151,15 +151,19 @@ matching guix-daemon's permission model.
 - **info**: daemon writes `info <path1> ...\n`. Reply per path: store_path,
   deriver, ref_count, refs, download_size, nar_size, then blank line.
   Narinfo derivers and references are returned as full `/gnu/store/...` paths.
-  `p2p-only` info replies are not DHT-gated; availability is enforced by
-  `have` and the final `substitute` request.
+  In `p2p-only`, `info` replies are served from the narinfo cache only. This
+  avoids turning unrelated Guix metadata queries into remote substitute-server
+  timeouts; availability is enforced by `have` and the final `substitute`
+  request.
 
 `--local-narinfo PATH` or `local_narinfo_path = "PATH"` loads a JSON metadata
 file into the narinfo cache at daemon startup. The file has a top-level
 `narinfos` array with `store_path`, `nar_hash`, `nar_size`, `references`,
 optional `deriver`, and optional `download_size` fields. This is intended for
 offline/local benchmark harnesses that pre-seed store paths and already know the
-corresponding NAR hashes. If local metadata has `nar_size = 0`, p2p downloads
+corresponding NAR hashes. VM benchmarks copy target metadata into the fetch
+node before p2p modes so the target lookup does not depend on live substitute
+server narinfo latency. If local metadata has `nar_size = 0`, p2p downloads
 derive the block count from the provider handshake and still verify the final
 NAR hash.
 

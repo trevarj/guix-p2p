@@ -125,13 +125,13 @@ The CSV keeps the original result columns and appends phase timings:
 - `import_ms`: run the final `guix build` import.
 - `total_ms`: total measured mode time.
 
-Current smoke VM evidence shows the p2p-only import path dominates run time.
-An earlier `hello` run had P2P import around 53s versus HTTP import around 2s.
-A later two-seeder `hello` VM benchmark found the target over P2P with 2
-providers, then stalled in the wrapped `guix build` import because the fetch
-node repeatedly waited about 30s for failed `bordeaux.guix.gnu.org` narinfo
-requests for other queried store items. Treat substitute metadata timeout
-handling as the next blocker before making performance claims.
+The VM benchmark now writes local narinfo metadata for the VM-observed target
+into the fetch node before p2p modes. This keeps p2p-only query handling from
+blocking on substitute-server narinfo timeouts for the target. The latest
+two-seeder `hello` run completed successfully, found multiple providers, and
+imported the NAR through P2P. Remaining benchmark work should focus on stale
+provider handling, larger packages, repeated runs, and HTTP comparison modes
+before making performance claims.
 
 The older top-level `benchmark` command remains a fast container harness, but
 VM benchmarks are the publishable path because each node has its own writable
