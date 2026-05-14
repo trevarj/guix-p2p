@@ -6,6 +6,12 @@ Make the next task release evidence: finish the last VM proof reporting gap,
 generate current benchmark data, and update docs so the completed known-tester
 work has measurable proof attached.
 
+## Current Status
+
+- Dashboard evidence output is implemented in `guix-p2p-e2e vm fetch`.
+- Strict VM proof rerun is still pending.
+- Benchmark harness run is still pending.
+
 ## Key Changes
 
 - Add dashboard evidence output to the VM proof path.

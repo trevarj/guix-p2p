@@ -1205,6 +1205,7 @@ fn vm_fetch(
         ),
     )?;
     print!("{output}");
+    print_vm_dashboard_evidence(config, &registry, &node, &target)?;
     Ok(())
 }
 
@@ -2068,6 +2069,80 @@ fn validate_seeds(seeds: &serde_json::Value, nar_hash: &str) -> anyhow::Result<O
         }
     }
     anyhow::bail!("node A /api/seeds did not include seeded nar {}", nar_hash);
+}
+
+fn print_vm_dashboard_evidence(
+    config: &VmConfig,
+    registry: &VmRegistry,
+    fetch_node: &VmNode,
+    target: &VmFetch,
+) -> anyhow::Result<()> {
+    if !config.forward_dashboard {
+        println!("DASHBOARD_EVIDENCE_SKIPPED dashboard forwarding disabled");
+        return Ok(());
+    }
+
+    let seed_node = registry.node(&target.from)?;
+    let seeds = dashboard_json(seed_node.dashboard_port, "/api/seeds")
+        .with_context(|| format!("failed to read {} /api/seeds", seed_node.name))?;
+    let seed_entry = matching_seed_entry(&seeds, &target.store_path).ok_or_else(|| {
+        anyhow::anyhow!("{} /api/seeds did not include {}", seed_node.name, target.store_path)
+    })?;
+    let catalog = wait_for_catalog_entry(
+        fetch_node.dashboard_port,
+        &target.store_path,
+        json_string(seed_entry, "nar_hash").as_deref().unwrap_or(""),
+        std::time::Duration::from_secs(30),
+    )
+    .with_context(|| format!("failed to read {} /api/catalog", fetch_node.name))?;
+    let catalog_entry = matching_catalog_entry(&catalog, &target.store_path, seed_entry)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "{} /api/catalog did not include {}",
+                fetch_node.name,
+                target.store_path
+            )
+        })?;
+
+    println!("DASHBOARD_EVIDENCE_BEGIN");
+    println!("seed_node={} seeds_count={}", seed_node.name, json_array_len(&seeds));
+    println!("seed_entry={}", serde_json::to_string(seed_entry)?);
+    println!("fetch_node={} catalog_count={}", fetch_node.name, json_array_len(&catalog));
+    println!("catalog_entry={}", serde_json::to_string(catalog_entry)?);
+    println!("DASHBOARD_EVIDENCE_END");
+    Ok(())
+}
+
+fn matching_seed_entry<'a>(
+    seeds: &'a serde_json::Value,
+    store_path: &str,
+) -> Option<&'a serde_json::Value> {
+    seeds.as_array()?.iter().find(|entry| {
+        entry.get("store_path").and_then(serde_json::Value::as_str) == Some(store_path)
+    })
+}
+
+fn matching_catalog_entry<'a>(
+    catalog: &'a serde_json::Value,
+    store_path: &str,
+    seed_entry: &serde_json::Value,
+) -> Option<&'a serde_json::Value> {
+    let nar_hash = json_string(seed_entry, "nar_hash");
+    let prefixed_nar_hash = nar_hash.as_ref().map(|hash| format!("sha256:{hash}"));
+    let hash_part = store_hash_part(store_path);
+    catalog.as_array()?.iter().find(|entry| {
+        entry.get("store_path").and_then(serde_json::Value::as_str) == Some(store_path)
+            || prefixed_nar_hash.as_deref().is_some_and(|hash| {
+                entry.get("nar_hash").and_then(serde_json::Value::as_str) == Some(hash)
+            })
+            || hash_part.as_deref().is_some_and(|hash| {
+                entry.get("hash_part").and_then(serde_json::Value::as_str) == Some(hash)
+            })
+    })
+}
+
+fn json_array_len(value: &serde_json::Value) -> usize {
+    value.as_array().map_or(0, Vec::len)
 }
 
 fn catalog_entry_matches(catalog: &serde_json::Value, store_path: &str, nar_hash: &str) -> bool {
@@ -3092,6 +3167,25 @@ mod tests {
             registry.bootstrap_multiaddr().unwrap().as_deref(),
             Some("/ip4/10.0.2.2/tcp/6881/p2p/12D3KooWbootstrap")
         );
+    }
+
+    #[test]
+    fn dashboard_evidence_matches_seed_and_catalog_entries() {
+        let store_path = "/gnu/store/abcd-hello";
+        let seeds = serde_json::json!([
+            {"nar_hash": "0123", "store_path": "/gnu/store/other"},
+            {"nar_hash": "deadbeef", "store_path": store_path}
+        ]);
+        let seed_entry = matching_seed_entry(&seeds, store_path).unwrap();
+        let catalog = serde_json::json!([
+            {"hash_part": "other", "nar_hash": "sha256:0123"},
+            {"hash_part": "abcd", "nar_hash": "sha256:deadbeef"}
+        ]);
+
+        let catalog_entry = matching_catalog_entry(&catalog, store_path, seed_entry).unwrap();
+
+        assert_eq!(json_string(seed_entry, "nar_hash").as_deref(), Some("deadbeef"));
+        assert_eq!(json_string(catalog_entry, "hash_part").as_deref(), Some("abcd"));
     }
 
     #[test]
