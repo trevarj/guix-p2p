@@ -16,7 +16,11 @@ work has measurable proof attached.
   gating; availability is enforced by `have` and the final `substitute`
   request, so Guix dependency metadata checks do not stall the VM proof.
 - Strict VM proof rerun passed for `hello` and printed dashboard evidence.
-- Benchmark harness run is still pending.
+- Benchmark harness run is still blocked. Runtime setup now starts local P2P
+  nodes and the isolated daemon, but p2p-only benchmark runs seed only the
+  target output while the isolated daemon has an empty dependency closure. Guix
+  falls back to building dependencies from source with `--max-jobs=0`, so the
+  harness fails before producing useful throughput data.
 
 ## Key Changes
 
@@ -72,4 +76,7 @@ cargo run -p guix-p2p-e2e -- benchmark --packages hello,git,emacs --iterations 3
 - Do not claim benchmark completion if the host cannot run the harness, for
   example because `/gnu/store` is read-only for the container benchmark
   preflight.
+- Do not claim benchmark completion while p2p-only benchmark setup seeds only
+  the target output instead of the dependency closure needed by the isolated
+  daemon.
 - Make one Conventional Commit after code, docs, and verification are complete.
