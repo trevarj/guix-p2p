@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Guix
+        uses: PromyLOPh/guix-install-action@v1
+        with:
+          pullAfterInstall: false
+
+      - name: Check formatting
+        run: guix shell rust -- cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: >
+          guix shell rust gcc-toolchain pkg-config openssl libgcrypt eudev
+          libsecp256k1 -- cargo clippy --all-targets --all-features --
+          -D warnings
+
+      - name: Run tests
+        run: >
+          guix shell rust gcc-toolchain pkg-config openssl libgcrypt eudev
+          libsecp256k1 perl sqlite -- cargo test

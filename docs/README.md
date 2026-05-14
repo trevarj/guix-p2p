@@ -12,6 +12,7 @@ developing `guix-p2p`.
 | [e2e.md](e2e.md) | Strict two-node VM proof |
 | [benchmarks.md](benchmarks.md) | Smoke tests, benchmark harness, future benchmark method |
 | [benchmark-results.md](benchmark-results.md) | Latest generated benchmark report |
+| [mirror.md](mirror.md) | Codeberg-to-GitHub mirror and GitHub CI setup |
 | [dht-protocol.md](dht-protocol.md) | Kademlia DHT design |
 | [swarm-protocol.md](swarm-protocol.md) | Block exchange wire protocol |
 | [roadmap.md](roadmap.md) | Current remaining work |
