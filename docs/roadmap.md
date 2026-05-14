@@ -41,8 +41,10 @@ over HTTP. Before making performance claims:
 - Add multi-seeder runs with 1, 3, 5, and 8 seed nodes serving the same NAR.
 - Record provider count, time to first provider, time to first block, restored
   bytes, elapsed time, and per-seeder block-serving evidence.
-- Investigate why VM p2p-only `import_ms` dominates smoke runs. The latest
-  `hello` evidence had P2P import around 53s versus HTTP import around 2s.
+- Investigate why VM p2p-only import dominates smoke runs. The latest
+  two-seeder `hello` attempt found 2 P2P providers, then stalled in
+  `guix build` while repeated failed `bordeaux.guix.gnu.org` narinfo requests
+  each consumed roughly 30s.
 - Compare real substitute-server conditions: normal, single-server,
   dead-primary, slow, and flaky. Record slow/flaky as skipped when OS traffic
   shaping is unavailable.

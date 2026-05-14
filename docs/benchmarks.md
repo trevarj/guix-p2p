@@ -125,10 +125,13 @@ The CSV keeps the original result columns and appends phase timings:
 - `import_ms`: run the final `guix build` import.
 - `total_ms`: total measured mode time.
 
-Current smoke VM evidence shows the p2p-only `import_ms` phase dominates the
-run time. In the latest `hello` run, the P2P import phase took about 53s while
-HTTP import took about 2s. Treat this as an open investigation item before
-making any performance claims.
+Current smoke VM evidence shows the p2p-only import path dominates run time.
+An earlier `hello` run had P2P import around 53s versus HTTP import around 2s.
+A later two-seeder `hello` VM benchmark found the target over P2P with 2
+providers, then stalled in the wrapped `guix build` import because the fetch
+node repeatedly waited about 30s for failed `bordeaux.guix.gnu.org` narinfo
+requests for other queried store items. Treat substitute metadata timeout
+handling as the next blocker before making performance claims.
 
 The older top-level `benchmark` command remains a fast container harness, but
 VM benchmarks are the publishable path because each node has its own writable
