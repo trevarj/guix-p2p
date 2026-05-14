@@ -55,18 +55,23 @@ impl ActiveDownload {
         );
     }
 
-    pub fn record_blocks(&mut self, peer: PeerId, blocks: &[(u32, Vec<u8>)]) {
+    pub fn record_blocks(&mut self, peer: PeerId, blocks: &[(u32, Vec<u8>)]) -> Vec<u32> {
+        let mut accepted = Vec::new();
+
         if let Some(result) = self.receivers.get_mut(&peer) {
             for (idx, data) in blocks {
                 if *idx < result.blocks.len() as u32 {
                     let expected = &self.block_info.block_hashes[*idx as usize];
                     let actual = Sha256::digest(data);
-                    if actual.as_slice() == expected {
+                    if actual.as_slice() == expected && result.blocks[*idx as usize].is_none() {
                         result.blocks[*idx as usize] = Some(data.clone());
+                        accepted.push(*idx);
                     }
                 }
             }
         }
+
+        accepted
     }
 
     pub fn is_complete(&self) -> bool {
@@ -111,5 +116,57 @@ impl ActiveDownload {
         }
 
         Ok(nar)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn download_for_blocks(blocks: &[&[u8]]) -> ActiveDownload {
+        let data = blocks.concat();
+        let mut info = BlockInfo::from_file_size(data.len() as u64, 4);
+        info.block_hashes = blocks
+            .iter()
+            .map(|block| {
+                let hash = Sha256::digest(block);
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&hash);
+                arr
+            })
+            .collect();
+        info.block_count = blocks.len() as u32;
+
+        ActiveDownload::new(
+            format!("{:x}", Sha256::digest(&data)),
+            data.len() as u64,
+            info,
+            PathBuf::new(),
+            String::new(),
+        )
+    }
+
+    #[test]
+    fn record_blocks_returns_newly_accepted_indices() {
+        let peer = PeerId::random();
+        let mut download = download_for_blocks(&[b"abcd", b"efgh"]);
+        download.add_peer(peer);
+
+        let accepted = download.record_blocks(peer, &[(0, b"abcd".to_vec())]);
+        assert_eq!(accepted, vec![0]);
+
+        let duplicate = download.record_blocks(peer, &[(0, b"abcd".to_vec())]);
+        assert!(duplicate.is_empty());
+    }
+
+    #[test]
+    fn record_blocks_rejects_hash_mismatches() {
+        let peer = PeerId::random();
+        let mut download = download_for_blocks(&[b"abcd"]);
+        download.add_peer(peer);
+
+        let accepted = download.record_blocks(peer, &[(0, b"wxyz".to_vec())]);
+        assert!(accepted.is_empty());
+        assert!(!download.is_complete());
     }
 }

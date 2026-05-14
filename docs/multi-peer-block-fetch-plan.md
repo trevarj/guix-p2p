@@ -1,5 +1,8 @@
 # Multi-Peer Block Fetch Plan
 
+Status: implemented for the daemon block downloader. Benchmark evidence with
+multiple VM seeders is still needed.
+
 ## Summary
 
 Prioritize BitTorrent-style block fetching across multiple providers after VM
@@ -10,8 +13,8 @@ providers are available.
 ## Implementation
 
 - Replace one-shot contiguous block assignment in `download_blocks_from_peers`
-  with a dynamic scheduler.
-- Handshake with up to `max_peers_per_download` providers.
+  with a dynamic scheduler. Done.
+- Handshake with up to `max_peers_per_download` providers. Done.
 - Track block state:
   - pending
   - in-flight
@@ -21,11 +24,11 @@ providers are available.
   - in-flight request count
   - failures
   - bytes received
-- Keep multiple block requests in flight per peer.
-- Reassign timed-out or failed blocks to another provider.
-- Verify each block hash before marking it complete.
-- Add config key `max_in_flight_blocks_per_peer`, default `4`.
-- Use round-robin or least-in-flight assignment first.
+- Keep multiple block requests in flight per peer. Done.
+- Reassign timed-out or failed blocks to another provider. Done.
+- Verify each block hash before marking it complete. Done.
+- Add config key `max_in_flight_blocks_per_peer`, default `4`. Done.
+- Use least-in-flight assignment first. Done.
 - Defer rarest-first scheduling until benchmarks show it is needed.
 
 ## Acceptance

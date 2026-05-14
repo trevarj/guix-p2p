@@ -52,6 +52,7 @@ struct ConfigFile {
     request_timeout_secs: Option<u64>,
     stall_timeout_secs: Option<u64>,
     max_peers_per_download: Option<usize>,
+    max_in_flight_blocks_per_peer: Option<usize>,
     min_providers: Option<usize>,
     max_total_peers: Option<usize>,
     connection_retries: Option<u32>,
@@ -79,6 +80,7 @@ pub struct Config {
     pub request_timeout_secs: u64,
     pub stall_timeout_secs: u64,
     pub max_peers_per_download: usize,
+    pub max_in_flight_blocks_per_peer: usize,
     pub substitute_urls: Vec<String>,
     pub substitute_policy: SubstitutePolicy,
     pub min_providers: usize,
@@ -141,6 +143,7 @@ impl Config {
             request_timeout_secs: file.request_timeout_secs.unwrap_or(30),
             stall_timeout_secs: file.stall_timeout_secs.unwrap_or(30),
             max_peers_per_download: file.max_peers_per_download.unwrap_or(8),
+            max_in_flight_blocks_per_peer: file.max_in_flight_blocks_per_peer.unwrap_or(4),
             substitute_urls: cli_substitute_urls
                 .map(|s| s.split(',').map(str::to_string).collect())
                 .or_else(|| {
@@ -228,6 +231,7 @@ mod tests {
         assert!(config.bootstrap_peers.is_empty());
         assert!(config.external_addresses.is_empty());
         assert_eq!(config.max_peers_per_download, 8);
+        assert_eq!(config.max_in_flight_blocks_per_peer, 4);
         assert_eq!(config.substitute_urls.len(), 2);
         assert_eq!(config.min_providers, 3);
         assert_eq!(config.stall_timeout_secs, 30);

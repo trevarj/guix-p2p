@@ -715,7 +715,14 @@ async fn try_p2p_download(
     let mut providers = providers;
     reputation.lock().unwrap().sort_by_score(&mut providers);
 
-    let handshakes = handshake_with_providers(cmd_tx, notify_rx, &providers, *nar_hash_bytes).await;
+    let handshakes = handshake_with_providers(
+        cmd_tx,
+        notify_rx,
+        &providers,
+        *nar_hash_bytes,
+        config.max_peers_per_download,
+    )
+    .await;
 
     if handshakes.is_empty() {
         return Err("no successful P2P handshakes".into());
@@ -855,11 +862,24 @@ async fn wait_for_providers_for_duration(
 /// Handshake results: for each peer, which blocks they have.
 struct PeerHandshake {
     peer: PeerId,
-    #[allow(dead_code)]
     blocks_available: Vec<u32>,
     block_hashes: Vec<[u8; 32]>,
-    #[allow(dead_code)]
     block_count: u32,
+}
+
+#[derive(Clone, Debug)]
+enum BlockFetchState {
+    Pending,
+    InFlight { peer: PeerId, requested_at: tokio::time::Instant },
+    Complete,
+}
+
+#[derive(Debug)]
+struct PeerFetchState {
+    available: HashSet<u32>,
+    in_flight: HashSet<u32>,
+    failures: u32,
+    bytes_received: u64,
 }
 
 /// Send Handshake requests and collect replies.
@@ -868,8 +888,9 @@ async fn handshake_with_providers(
     notify_rx: &mut NotifyRx,
     providers: &[PeerId],
     nar_hash_bytes: [u8; 32],
+    max_peers: usize,
 ) -> Vec<PeerHandshake> {
-    let max = providers.len().min(8);
+    let max = providers.len().min(max_peers);
     let mut results = Vec::new();
     let mut pending = HashMap::new();
 
@@ -954,27 +975,32 @@ async fn download_blocks_from_peers(
     }
 
     let total = block_info.block_count as usize;
-    let peer_count = handshakes.len();
-    let blocks_per_peer = total.div_ceil(peer_count);
-
-    for (i, hs) in handshakes.iter().enumerate() {
-        let start = i * blocks_per_peer;
-        let end = (start + blocks_per_peer).min(total);
-        let indices: Vec<u32> = (start as u32..end as u32).collect();
-
-        if !indices.is_empty() {
-            let n = indices.len();
-            let request = BlockRequest::GetBlocks { nar_hash: nar_hash_bytes(nar_hash), indices };
-            tracing::debug!("Requested {} blocks from {}", n, hs.peer);
-            let _ = cmd_tx.send(SwarmCommand::SendBlockRequest { peer: hs.peer, request });
-        }
-    }
+    let mut block_states = vec![BlockFetchState::Pending; total];
+    let mut peer_states: HashMap<PeerId, PeerFetchState> = handshakes
+        .iter()
+        .map(|hs| {
+            let available =
+                hs.blocks_available.iter().copied().filter(|idx| (*idx as usize) < total).collect();
+            (
+                hs.peer,
+                PeerFetchState {
+                    available,
+                    in_flight: HashSet::new(),
+                    failures: 0,
+                    bytes_received: 0,
+                },
+            )
+        })
+        .collect();
 
     let overall_deadline =
         tokio::time::Instant::now() + tokio::time::Duration::from_secs(config.request_timeout_secs);
     let mut stall_deadline =
         tokio::time::Instant::now() + tokio::time::Duration::from_secs(config.stall_timeout_secs);
-    let mut last_block_count = 0_usize;
+    let block_timeout = tokio::time::Duration::from_secs(config.stall_timeout_secs);
+    let max_in_flight = config.max_in_flight_blocks_per_peer.max(1);
+
+    dispatch_block_requests(cmd_tx, &mut peer_states, &mut block_states, nar_hash, max_in_flight);
 
     loop {
         let remaining = overall_deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -991,6 +1017,27 @@ async fn download_blocks_from_peers(
             break;
         }
 
+        let requeued = requeue_expired_blocks(&mut peer_states, &mut block_states, block_timeout);
+        if requeued > 0 {
+            tracing::debug!("Requeued {} stalled blocks", requeued);
+        }
+
+        dispatch_block_requests(
+            cmd_tx,
+            &mut peer_states,
+            &mut block_states,
+            nar_hash,
+            max_in_flight,
+        );
+
+        let in_flight = peer_states.values().map(|peer| peer.in_flight.len()).sum::<usize>();
+        if in_flight == 0
+            && !block_states.iter().all(|state| matches!(state, BlockFetchState::Complete))
+        {
+            tracing::warn!("Block download has pending blocks with no available providers");
+            break;
+        }
+
         match tokio::time::timeout(tokio::time::Duration::from_secs(1), notify_rx.recv()).await {
             Ok(Ok(SwarmNotification::BlockResponse {
                 peer,
@@ -998,15 +1045,43 @@ async fn download_blocks_from_peers(
             })) => {
                 let blocks: Vec<(u32, Vec<u8>)> =
                     data.into_iter().map(|bd: BlockData| (bd.index, bd.data)).collect();
-                download.record_blocks(peer, &blocks);
+                let accepted = download.record_blocks(peer, &blocks);
+                let newly_accepted = accepted.len();
+                let accepted_set: HashSet<u32> = accepted.iter().copied().collect();
 
-                let current_count: usize = download
-                    .receivers
-                    .values()
-                    .map(|r| r.blocks.iter().filter(|b| b.is_some()).count())
-                    .sum();
-                if current_count > last_block_count {
-                    last_block_count = current_count;
+                if let Some(peer_state) = peer_states.get_mut(&peer) {
+                    let bytes_received =
+                        blocks.iter().map(|(_, data)| data.len() as u64).sum::<u64>();
+                    peer_state.bytes_received += bytes_received;
+
+                    for (idx, _) in &blocks {
+                        peer_state.in_flight.remove(idx);
+                    }
+                }
+
+                for idx in accepted {
+                    if let Some(state) = block_states.get_mut(idx as usize)
+                        && !matches!(state, BlockFetchState::Complete)
+                    {
+                        *state = BlockFetchState::Complete;
+                    }
+                }
+
+                for (idx, _) in &blocks {
+                    if !accepted_set.contains(idx)
+                        && let Some(state) = block_states.get_mut(*idx as usize)
+                    {
+                        let should_retry = matches!(
+                            state,
+                            BlockFetchState::InFlight { peer: state_peer, .. } if *state_peer == peer
+                        );
+                        if should_retry {
+                            *state = BlockFetchState::Pending;
+                        }
+                    }
+                }
+
+                if newly_accepted > 0 {
                     stall_deadline = tokio::time::Instant::now()
                         + tokio::time::Duration::from_secs(config.stall_timeout_secs);
                 }
@@ -1031,6 +1106,82 @@ async fn download_blocks_from_peers(
     let hash_hex = format!("sha256:{:x}", hash);
 
     Ok((nar, hash_hex))
+}
+
+fn requeue_expired_blocks(
+    peer_states: &mut HashMap<PeerId, PeerFetchState>,
+    block_states: &mut [BlockFetchState],
+    block_timeout: tokio::time::Duration,
+) -> usize {
+    let now = tokio::time::Instant::now();
+    let mut requeued = 0;
+
+    for (idx, state) in block_states.iter_mut().enumerate() {
+        let expired_peer = match state {
+            BlockFetchState::InFlight { peer, requested_at }
+                if now.duration_since(*requested_at) >= block_timeout =>
+            {
+                Some(*peer)
+            },
+            _ => None,
+        };
+
+        if let Some(peer) = expired_peer {
+            if let Some(peer_state) = peer_states.get_mut(&peer) {
+                peer_state.in_flight.remove(&(idx as u32));
+                peer_state.failures += 1;
+            }
+            *state = BlockFetchState::Pending;
+            requeued += 1;
+        }
+    }
+
+    requeued
+}
+
+fn dispatch_block_requests(
+    cmd_tx: &UnboundedSender<SwarmCommand>,
+    peer_states: &mut HashMap<PeerId, PeerFetchState>,
+    block_states: &mut [BlockFetchState],
+    nar_hash: &str,
+    max_in_flight: usize,
+) -> usize {
+    let mut batches: HashMap<PeerId, Vec<u32>> = HashMap::new();
+    let now = tokio::time::Instant::now();
+
+    for (idx, state) in block_states.iter_mut().enumerate() {
+        if !matches!(state, BlockFetchState::Pending) {
+            continue;
+        }
+
+        let block_idx = idx as u32;
+        let peer = peer_states
+            .iter()
+            .filter(|(_, peer_state)| {
+                peer_state.in_flight.len() < max_in_flight
+                    && peer_state.available.contains(&block_idx)
+            })
+            .min_by_key(|(_, peer_state)| (peer_state.in_flight.len(), peer_state.failures))
+            .map(|(peer, _)| *peer);
+
+        if let Some(peer) = peer {
+            if let Some(peer_state) = peer_states.get_mut(&peer) {
+                peer_state.in_flight.insert(block_idx);
+            }
+            *state = BlockFetchState::InFlight { peer, requested_at: now };
+            batches.entry(peer).or_default().push(block_idx);
+        }
+    }
+
+    let dispatched = batches.values().map(Vec::len).sum();
+    for (peer, indices) in batches {
+        let n = indices.len();
+        let request = BlockRequest::GetBlocks { nar_hash: nar_hash_bytes(nar_hash), indices };
+        tracing::debug!("Requested {} blocks from {}", n, peer);
+        let _ = cmd_tx.send(SwarmCommand::SendBlockRequest { peer, request });
+    }
+
+    dispatched
 }
 
 fn nar_hash_bytes(nar_hash: &str) -> Vec<u8> {

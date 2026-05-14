@@ -452,6 +452,7 @@ request_timeout_secs = 30
 stall_timeout_secs = 30
 block_size = 262144
 max_peers_per_download = 8
+max_in_flight_blocks_per_peer = 4
 max_total_peers = 50
 acl_path = "/etc/guix/acl"
 seed_paths = ["/gnu/store/abc-foo", "/gnu/store/def-bar"]
