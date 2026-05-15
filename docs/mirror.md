@@ -71,6 +71,8 @@ The workflow is manual-only because Codeberg runs the normal push and pull
 request checks. GitHub runner time is reserved for benchmarks and Pages deploys.
 If Forgejo/act sees the GitHub workflow file anyway, the Guix install action is
 skipped and the shell fallback installs Guix before any `guix shell` step.
+The fallback runs the installer directly on root runners and uses `sudo` only
+when the runner is non-root.
 
 ## Codeberg CI
 
