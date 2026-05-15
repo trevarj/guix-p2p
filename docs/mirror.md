@@ -83,8 +83,8 @@ the later `guix shell` steps.
 
 ## Codeberg CI
 
-Codeberg runs the normal CI checks from `.forgejo/workflows/ci.yml` on the
-repository runner labeled `codeberg-small`.
+Codeberg runs a lightweight availability check from `.forgejo/workflows/ci.yml`
+on the repository runner labeled `codeberg-small`.
 When that runner cannot provide or install Guix, the Forgejo workflow exits the
 Rust check steps successfully after printing a skip message. This keeps
 Codeberg push status from failing on runner provisioning. The GitHub CI and
@@ -99,13 +99,7 @@ The workflow:
   on the runner;
 - verifies the runner's Guix installation with `guix --version` and
   `guix describe`;
-- uses `guix shell -m manifest-ci.scm` with Guix's packaged Rust toolchain and
-  minimal native build inputs;
-- exports Guix's GCC runtime library directory in `LD_LIBRARY_PATH` before
-  Cargo commands so build scripts can load `libgcc_s.so.1`;
-- runs `cargo fmt --all -- --check`;
-- runs `cargo clippy --workspace --all-targets --all-features -- -D warnings`;
-- runs `cargo test --workspace`.
+- prints skip messages for `cargo fmt`, `cargo clippy`, and `cargo test`.
 
 The job uses `runs-on: codeberg-small`, matching the Codeberg hosted runner
 label.
