@@ -18,20 +18,17 @@ pub fn read_command() -> io::Result<DaemonCommand> {
 }
 
 pub fn parse_command_line(line: &str) -> io::Result<DaemonCommand> {
-    match line {
-        line if let Some(rest) = line.strip_prefix("have ") => {
-            Ok(DaemonCommand::Have(rest.split_whitespace().map(str::to_string).collect()))
-        },
-        line if let Some(rest) = line.strip_prefix("info ") => {
-            Ok(DaemonCommand::Info(rest.split_whitespace().map(str::to_string).collect()))
-        },
-        line if let Some(rest) = line.strip_prefix("substitute ") => {
-            let mut parts = rest.splitn(2, ' ');
-            let path = parts.next().unwrap_or("").to_string();
-            let dest = parts.next().unwrap_or("").to_string();
-            Ok(DaemonCommand::Substitute { path, dest })
-        },
-        path => Ok(DaemonCommand::Have(vec![path.to_string()])),
+    if let Some(rest) = line.strip_prefix("have ") {
+        Ok(DaemonCommand::Have(rest.split_whitespace().map(str::to_string).collect()))
+    } else if let Some(rest) = line.strip_prefix("info ") {
+        Ok(DaemonCommand::Info(rest.split_whitespace().map(str::to_string).collect()))
+    } else if let Some(rest) = line.strip_prefix("substitute ") {
+        let mut parts = rest.splitn(2, ' ');
+        let path = parts.next().unwrap_or("").to_string();
+        let dest = parts.next().unwrap_or("").to_string();
+        Ok(DaemonCommand::Substitute { path, dest })
+    } else {
+        Ok(DaemonCommand::Have(vec![line.to_string()]))
     }
 }
 

@@ -32,10 +32,10 @@
   nss-certs
 
   ;; Rustup
-  ((module-ref (resolve-interface '(rustup build toolchain)) 'rustup)
-   "nightly-2026-03-14"
-   #:components
-   '("rust-analyzer" "rustfmt" "rust-src" "clippy"))
+  rust
+  (list rust "cargo")
+  (list rust "tools")
+  (list rust "rust-src")
 
   ;; Libraries for certain sys crates
   openssl

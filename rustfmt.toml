@@ -1,11 +1,8 @@
 # Prefer short imports over inline module paths.
 # Only use inline paths (e.g. std::collections::HashMap) when names conflict.
 reorder_imports = true
-group_imports = "StdExternalCrate"
-imports_granularity = "Crate"
 use_small_heuristics = "Max"
 max_width = 100
 edition = "2024"
-format_strings = true
 match_block_trailing_comma = true
 newline_style = "Unix"
