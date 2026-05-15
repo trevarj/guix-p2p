@@ -55,8 +55,6 @@ cargo build --release
 
 target/release/guix-p2p --daemon \
     --listen-addr /ip4/0.0.0.0/udp/6881/quic-v1 \
-    --cache-dir /var/cache/guix-p2p \
-    --socket /var/cache/guix-p2p/guix-p2p.sock \
     --dashboard
 ```
 
@@ -64,7 +62,7 @@ Use the wrapper flow when a `guix-daemon` should route substitute queries
 through the daemon:
 
 ```sh
-GUIX_P2P_SOCKET=/var/cache/guix-p2p/guix-p2p.sock \
+GUIX_P2P_SOCKET="${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock" \
 GUIX_P2P_BIN="$PWD/target/release/guix-p2p" \
 REAL_GUIX="$(command -v guix)" \
 scripts/guix-wrapper.sh build hello
@@ -79,13 +77,11 @@ guix shell -m manifest.scm
 cargo build --release
 ```
 
-Start a daemon with an explicit cache directory, relay socket, and dashboard:
+Start a daemon with the default cache directory, relay socket, and dashboard:
 
 ```sh
 target/release/guix-p2p --daemon \
     --listen-addr /ip4/0.0.0.0/udp/6881/quic-v1 \
-    --cache-dir /var/cache/guix-p2p \
-    --socket /var/cache/guix-p2p/guix-p2p.sock \
     --dashboard \
     --dashboard-bind 127.0.0.1 \
     --dashboard-port 3030
@@ -101,7 +97,7 @@ bootstrap_peers = "/ip4/203.0.113.10/udp/6881/quic-v1/p2p/12D3KooW..."
 Use the wrapper flow to route a local Guix build through the daemon:
 
 ```sh
-GUIX_P2P_SOCKET=/var/cache/guix-p2p/guix-p2p.sock \
+GUIX_P2P_SOCKET="${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock" \
 GUIX_P2P_BIN="$PWD/target/release/guix-p2p" \
 REAL_GUIX="$(command -v guix)" \
 scripts/guix-wrapper.sh build hello
