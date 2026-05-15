@@ -238,8 +238,9 @@ Before running `guix shell`, the workflow writes a systemd drop-in for
 `guix-daemon.service` so the runner daemon uses the benchmark mirror list for
 all store realizations.
 
-The workflow uses `guix shell -m manifest.scm` with Guix's packaged Rust
-toolchain; it does not run `guix pull` on benchmark runs.
+The workflow uses `guix shell -m manifest-ci.scm` with Guix's packaged Rust
+toolchain and a minimal native build environment; it does not run `guix pull`
+on benchmark runs.
 
 Cargo commands export Guix's GCC runtime library directory in
 `LD_LIBRARY_PATH` so Rust build scripts can load `libgcc_s.so.1` on hosted CI

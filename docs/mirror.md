@@ -58,7 +58,8 @@ The workflow:
 
 - runs on pushes to `master`, version tags, and manual dispatches;
 - installs Guix on the GitHub runner;
-- uses `guix shell -m manifest.scm` with Guix's packaged Rust toolchain;
+- uses `guix shell -m manifest-ci.scm` with Guix's packaged Rust toolchain and
+  minimal native build inputs;
 - exports Guix's GCC runtime library directory in `LD_LIBRARY_PATH` before
   Cargo commands so build scripts can load `libgcc_s.so.1`;
 - runs `cargo fmt --all -- --check`;
@@ -78,7 +79,8 @@ The workflow:
 - checks out the repository with the Forgejo checkout action;
 - verifies the runner's Guix installation with `guix --version` and
   `guix describe`;
-- uses `guix shell -m manifest.scm` with Guix's packaged Rust toolchain;
+- uses `guix shell -m manifest-ci.scm` with Guix's packaged Rust toolchain and
+  minimal native build inputs;
 - exports Guix's GCC runtime library directory in `LD_LIBRARY_PATH` before
   Cargo commands so build scripts can load `libgcc_s.so.1`;
 - runs `cargo fmt --all -- --check`;
@@ -109,8 +111,9 @@ systemd drop-in that sets the benchmark substitute URL list. This keeps Guix
 package realization on the GitHub runner from depending only on the default
 substitute servers.
 
-The workflow uses `guix shell -m manifest.scm` with Guix's packaged Rust
-toolchain; it does not run `guix pull` on benchmark runs.
+The workflow uses `guix shell -m manifest-ci.scm` with Guix's packaged Rust
+toolchain and a minimal native build environment; it does not run `guix pull`
+on benchmark runs.
 
 Cargo commands export Guix's GCC runtime library directory in
 `LD_LIBRARY_PATH` so Rust build scripts can load `libgcc_s.so.1` on hosted CI
