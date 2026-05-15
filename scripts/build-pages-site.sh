@@ -6,6 +6,8 @@ report_src="${BENCHMARK_RESULTS_MD:-docs/benchmark-results.md}"
 csv_src="${BENCHMARK_RESULTS_CSV:-target/guix-p2p-bench/results.csv}"
 
 mkdir -p "$site_dir"
+mkdir -p "$site_dir/assets"
+cp docs/assets/guix-p2p-wordmark.svg "$site_dir/assets/guix-p2p-wordmark.svg"
 
 if [ -r "$report_src" ]; then
   cp "$report_src" "$site_dir/benchmark-results.md"
@@ -30,26 +32,64 @@ cp docs/configuration.md "$site_dir/configuration.md"
 cat > "$site_dir/styles.css" <<'CSS'
 :root {
   color-scheme: light dark;
+  --bg: #fbfaf4;
+  --surface: #ffffff;
+  --surface-muted: #f4f1e7;
+  --text: #1b2522;
+  --muted: #65716c;
+  --border: #d8d1bd;
+  --accent: #f2b400;
+  --accent-strong: #9a6a00;
+  --green: #2f7d57;
+  --link: #1769aa;
+  --shadow: 0 18px 42px rgb(56 45 14 / 10%);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
-  background: Canvas;
-  color: CanvasText;
+  background: var(--bg);
+  color: var(--text);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101512;
+    --surface: #171d19;
+    --surface-muted: #20271f;
+    --text: #ece8d8;
+    --muted: #a9b2a9;
+    --border: #344035;
+    --accent: #f2b400;
+    --accent-strong: #ffd75c;
+    --green: #6fca98;
+    --link: #7db7f0;
+    --shadow: 0 18px 42px rgb(0 0 0 / 28%);
+  }
 }
 * {
   box-sizing: border-box;
 }
+html {
+  background:
+    radial-gradient(circle at 15% -10%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 32rem),
+    linear-gradient(180deg, color-mix(in srgb, var(--green) 10%, transparent), transparent 22rem),
+    var(--bg);
+}
 body {
+  background: transparent;
   margin: 0;
 }
 a {
-  color: #0969da;
+  color: var(--link);
 }
 .site-header {
-  border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  backdrop-filter: blur(18px);
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 .site-header-inner, main {
   margin: 0 auto;
-  max-width: 1120px;
+  max-width: 1180px;
   padding: 0 20px;
 }
 .site-header-inner {
@@ -60,9 +100,20 @@ a {
   min-height: 64px;
 }
 .brand {
+  align-items: center;
   color: inherit;
+  display: inline-flex;
   font-weight: 700;
+  gap: 10px;
   text-decoration: none;
+}
+.brand img {
+  background: #fbfaf4;
+  border-radius: 8px;
+  display: block;
+  height: 34px;
+  padding: 2px 6px;
+  width: 136px;
 }
 nav {
   display: flex;
@@ -70,11 +121,14 @@ nav {
   gap: 12px;
 }
 nav a {
+  border-radius: 999px;
   color: inherit;
   opacity: 0.78;
+  padding: 7px 11px;
   text-decoration: none;
 }
 nav a[aria-current="page"] {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
   opacity: 1;
   font-weight: 650;
 }
@@ -83,9 +137,19 @@ main {
   padding-top: 36px;
 }
 .hero {
-  border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-bottom: 1px solid var(--border);
   margin-bottom: 28px;
-  padding-bottom: 28px;
+  padding-bottom: 34px;
+}
+.hero-mark {
+  background: #fbfaf4;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: block;
+  height: auto;
+  margin-bottom: 18px;
+  max-width: min(360px, 82vw);
+  padding: 8px 16px;
 }
 h1, h2, h3 {
   line-height: 1.2;
@@ -102,7 +166,7 @@ h2 {
   max-width: 780px;
 }
 .muted {
-  opacity: 0.72;
+  color: var(--muted);
 }
 .actions, .doc-grid {
   display: flex;
@@ -110,13 +174,20 @@ h2 {
   gap: 12px;
 }
 .button, .doc-link {
-  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: inherit;
   display: inline-flex;
   font-weight: 650;
+  box-shadow: var(--shadow);
   padding: 10px 14px;
   text-decoration: none;
+}
+.button:first-child {
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--accent-strong) 42%, var(--accent));
+  color: #1d1600;
 }
 .doc-grid {
   display: grid;
@@ -128,14 +199,18 @@ h2 {
   min-height: 104px;
 }
 .doc-link span {
+  color: var(--muted);
   font-weight: 400;
   margin-top: 6px;
-  opacity: 0.72;
 }
 .markdown {
   overflow-wrap: anywhere;
 }
 .table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
   margin: 16px 0 24px;
   overflow-x: auto;
 }
@@ -145,25 +220,31 @@ table {
   width: max-content;
 }
 th, td {
-  border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
   text-align: left;
   vertical-align: top;
   white-space: nowrap;
 }
 th {
-  background: color-mix(in srgb, currentColor 6%, transparent);
+  background: var(--surface-muted);
   font-weight: 700;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--surface-muted) 52%, transparent);
 }
 code {
-  background: color-mix(in srgb, currentColor 8%, transparent);
+  background: var(--surface-muted);
   border-radius: 5px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.92em;
   padding: 0.12em 0.34em;
 }
 pre {
-  background: color-mix(in srgb, currentColor 8%, transparent);
+  background: var(--surface-muted);
   overflow: auto;
   padding: 16px;
 }
@@ -191,6 +272,16 @@ function renderInline(value) {
   return escapeHtml(value).replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
+function normalizeLine(line) {
+  return line.replace(/^- Date: (\d+) seconds since 1970-01-01 UTC$/, (_match, seconds) => {
+    const date = new Date(Number(seconds) * 1000);
+    if (Number.isNaN(date.getTime())) {
+      return line;
+    }
+    return `- Date: ${date.toISOString().replace("T", " ").replace(".000Z", " UTC")}`;
+  });
+}
+
 function splitTableRow(line) {
   return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
 }
@@ -200,7 +291,7 @@ function isSeparatorRow(line) {
 }
 
 function renderMarkdown(markdown) {
-  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n").map(normalizeLine);
   const html = [];
   let paragraph = [];
   let list = [];
@@ -298,7 +389,7 @@ cat > "$site_dir/index.html" <<'HTML'
 <body>
   <header class="site-header">
     <div class="site-header-inner">
-      <a class="brand" href="index.html">guix-p2p</a>
+      <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
       <nav aria-label="Site navigation">
         <a href="index.html" aria-current="page">Docs</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -308,6 +399,7 @@ cat > "$site_dir/index.html" <<'HTML'
   </header>
   <main>
     <section class="hero">
+      <img class="hero-mark" src="assets/guix-p2p-wordmark.svg" alt="guix-p2p">
       <h1>guix-p2p documentation</h1>
       <p class="lead muted">User-facing documentation and benchmark evidence for the GitHub mirror.</p>
       <p class="actions">
@@ -342,7 +434,7 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
 <body>
   <header class="site-header">
     <div class="site-header-inner">
-      <a class="brand" href="index.html">guix-p2p</a>
+      <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
       <nav aria-label="Site navigation">
         <a href="index.html">Docs</a>
         <a href="benchmarks.html" aria-current="page">Benchmarks</a>
@@ -352,6 +444,7 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
   </header>
   <main>
     <section class="hero">
+      <img class="hero-mark" src="assets/guix-p2p-wordmark.svg" alt="guix-p2p">
       <h1>Benchmarks</h1>
       <p class="lead muted">Latest generated report from the GitHub mirror benchmark workflow.</p>
       <p class="actions">

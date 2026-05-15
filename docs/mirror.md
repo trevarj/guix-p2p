@@ -141,6 +141,10 @@ benchmark report at `benchmarks.html`. The benchmark page renders the latest
 markdown report as HTML tables and links to the raw CSV, raw markdown report,
 and recent benchmark workflow runs. Older CSV and markdown reports remain
 attached to their corresponding GitHub Actions runs as artifacts.
+The site generator copies the `docs/assets/guix-p2p-wordmark.svg` wordmark into
+the Pages artifact and uses it in the header and hero. Benchmark dates are
+shown as UTC datetimes; older epoch-second reports are normalized in the
+browser renderer.
 
 ## References
 

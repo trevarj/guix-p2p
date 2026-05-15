@@ -242,6 +242,8 @@ and recent benchmark workflow runs. Older reports stay attached to their GitHub
 Actions runs as artifacts.
 Wide benchmark tables scroll horizontally so timing, package, and store path
 columns stay readable.
+Benchmark report dates are written as UTC datetimes, and the Pages renderer
+normalizes older epoch-second reports for display.
 
 Pages deployment runs only when the GitHub mirror supports Pages and the Pages
 site is configured for GitHub Actions. If the repository plan or visibility
