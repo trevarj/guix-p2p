@@ -116,6 +116,10 @@ The workflow uses `guix shell -m manifest-ci.scm` with Guix's packaged Rust
 toolchain and a minimal native build environment; it does not run `guix pull`
 on benchmark runs.
 
+GitHub runs the benchmark harness under `sudo` because the container benchmark
+uses nested `guix shell -CN` environments that need mount privileges for a
+writable `/gnu/store`.
+
 Cargo commands export Guix's GCC runtime library directory in
 `LD_LIBRARY_PATH` so Rust build scripts can load `libgcc_s.so.1` on hosted CI
 runners.
