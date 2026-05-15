@@ -237,6 +237,8 @@ Peer → Client: BLOCKS { data: [(u32, Vec<u8>); 1..8] }
 ### Block Selection
 - Track availability per peer via handshake replies.
 - Retry handshakes during the handshake window.
+- Filter provider candidates through peer reputation and connection backoff
+  before handshakes so stale DHT records are deprioritized after failures.
 - Require at least `min_providers` successful handshakes before downloading.
 - Assign pending blocks to the least-loaded peer that advertises the block.
 - Requeue stalled or invalid in-flight blocks for another provider.
@@ -254,7 +256,10 @@ availability. Before trusting a provider, validate:
 2. Verify SHA-256 for each received block
 3. If verification fails, blacklist peer for this nar hash
 
-Expired records are handled by libp2p-kad's TTL-based record management.
+Handshake timeouts and outbound request failures update peer reputation.
+Repeated failures put the peer under connection-manager backoff before later
+provider lists are tried. Expired records are still handled by libp2p-kad's
+TTL-based record management.
 
 ## HTTP Narinfo Client
 

@@ -157,9 +157,11 @@ of falling through to remote substitute servers for unrelated Guix queries. This
 keeps p2p-only query handling from blocking on substitute-server narinfo
 timeouts for the target. The latest
 two-seeder `hello` run completed successfully, found multiple providers, and
-imported the NAR through P2P. Remaining benchmark work should focus on stale
-provider handling, larger packages, repeated runs, and HTTP comparison modes
-before making performance claims.
+imported the NAR through P2P. Provider selection now filters candidates through
+peer reputation and connection backoff, so stale provider records should be
+penalized after handshake timeouts instead of being retried first on later
+downloads. Remaining benchmark work should focus on larger packages, repeated
+runs, and HTTP comparison modes before making performance claims.
 
 The older top-level `benchmark` command remains a fast container harness, but
 VM benchmarks are the publishable path because each node has its own writable

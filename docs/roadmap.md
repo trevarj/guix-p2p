@@ -42,8 +42,9 @@ over HTTP. Before making performance claims:
 - Record provider count, time to first provider, time to first block, restored
   bytes, elapsed time, and per-seeder block-serving evidence.
 - Continue VM p2p-only timing work. The latest two-seeder `hello` run completed
-  with local target narinfo metadata, but stale provider records can still add
-  dial failures and extra transfer latency.
+  with local target narinfo metadata. Stale provider records are now penalized
+  through handshake failure reputation and connection backoff, but larger
+  repeated benchmark runs still need to confirm the latency impact.
 - Compare real substitute-server conditions: normal, single-server,
   dead-primary, slow, and flaky. Record slow/flaky as skipped when OS traffic
   shaping is unavailable.

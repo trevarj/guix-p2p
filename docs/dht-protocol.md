@@ -129,8 +129,10 @@ attempts.
 
 Current approach (MVP):
 1. When downloading, attempt to connect to providers
-2. If connection fails or peer doesn't respond to block requests, mark peer as failed
-3. Failed peers are temporarily excluded from provider lists for that nar
+2. If connection fails or peer doesn't respond to handshake/block requests,
+   mark peer as failed
+3. Failed or connection-backoff peers are skipped when building later
+   handshake candidate lists
 
 Enhanced approach (Phase 5 hardening):
 1. After receiving providers list, challenge a random subset with proof-block requests

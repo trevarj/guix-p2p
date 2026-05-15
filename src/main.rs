@@ -284,6 +284,7 @@ async fn main() -> anyhow::Result<()> {
             &config,
             &query_tx,
             &reputation,
+            &conn_mgr,
             &http_client,
             &nar_store,
         )

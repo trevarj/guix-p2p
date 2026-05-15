@@ -341,6 +341,7 @@ pub async fn run_substitute_mode(
     config: &Config,
     _query_tx: &UnboundedSender<String>,
     reputation: &Arc<Mutex<ReputationTracker>>,
+    conn_mgr: &Arc<Mutex<ConnectionManager>>,
     client: &reqwest::Client,
     nar_store: &Arc<Mutex<NarStore>>,
 ) -> anyhow::Result<()> {
@@ -370,6 +371,7 @@ pub async fn run_substitute_mode(
                 &mut notify_rx,
                 narinfo_cache,
                 reputation,
+                conn_mgr,
                 &dummy_registry,
                 &dummy_tx,
                 client,
@@ -397,6 +399,7 @@ async fn try_swarm_substitute(
     notify_rx: &mut NotifyRx,
     narinfo_cache: &Arc<Mutex<NarinfoCache>>,
     reputation: &Arc<Mutex<ReputationTracker>>,
+    conn_mgr: &Arc<Mutex<ConnectionManager>>,
     build_registry: &BuildRegistry,
     event_tx: &dashboard::EventBus,
     client: &reqwest::Client,
@@ -508,6 +511,7 @@ async fn try_swarm_substitute(
                 nar_size,
                 &hash_part,
                 reputation,
+                conn_mgr,
                 event_tx,
                 client,
                 narinfo_cache,
@@ -531,6 +535,7 @@ async fn try_swarm_substitute(
                 nar_size,
                 &hash_part,
                 reputation,
+                conn_mgr,
                 event_tx,
                 client,
                 narinfo_cache,
@@ -579,6 +584,7 @@ async fn try_swarm_substitute(
                         nar_size,
                         &hash_part,
                         reputation,
+                        conn_mgr,
                         event_tx,
                         client,
                         narinfo_cache,
@@ -747,6 +753,7 @@ async fn try_p2p_download(
     nar_size: u64,
     _hash_part: &str,
     reputation: &Arc<Mutex<ReputationTracker>>,
+    conn_mgr: &Arc<Mutex<ConnectionManager>>,
     event_tx: &dashboard::EventBus,
     _client: &reqwest::Client,
     _narinfo_cache: &Arc<Mutex<NarinfoCache>>,
@@ -774,8 +781,16 @@ async fn try_p2p_download(
 
     tracing::info!("Found {} P2P providers for {}", providers.len(), nar_hash);
 
-    let mut providers = providers;
-    reputation.lock().unwrap().sort_by_score(&mut providers);
+    let providers =
+        select_provider_candidates(&providers, reputation, conn_mgr, config.max_peers_per_download);
+
+    if providers.len() < config.min_providers {
+        return Err(format!(
+            "not enough usable P2P providers after reputation/backoff filtering ({}/{})",
+            providers.len(),
+            config.min_providers
+        ));
+    }
 
     let handshakes = handshake_with_providers(
         cmd_tx,
@@ -783,6 +798,7 @@ async fn try_p2p_download(
         &providers,
         *nar_hash_bytes,
         config.max_peers_per_download,
+        reputation,
     )
     .await;
 
@@ -935,6 +951,47 @@ async fn wait_for_providers_for_duration(
     }
 }
 
+fn select_provider_candidates(
+    providers: &[PeerId],
+    reputation: &Arc<Mutex<ReputationTracker>>,
+    conn_mgr: &Arc<Mutex<ConnectionManager>>,
+    max_peers: usize,
+) -> Vec<PeerId> {
+    let ranked = {
+        let tracker = reputation.lock().unwrap();
+        tracker.best_peers(providers, providers.len())
+    };
+
+    let mut selected = Vec::new();
+    let mut skipped = 0;
+    {
+        let mut connections = conn_mgr.lock().unwrap();
+        for peer in ranked {
+            if selected.len() >= max_peers {
+                break;
+            }
+
+            if connections.can_connect(&peer) {
+                // Record the handshake attempt before sending protocol traffic so
+                // repeated stale provider records enter normal backoff.
+                connections.record_attempt(peer);
+                selected.push(peer);
+            } else {
+                skipped += 1;
+            }
+        }
+    }
+
+    if skipped > 0 {
+        tracing::debug!(
+            "Skipped {} provider candidates because connection backoff is active",
+            skipped
+        );
+    }
+
+    selected
+}
+
 /// Handshake results: for each peer, which blocks they have.
 struct PeerHandshake {
     peer: PeerId,
@@ -972,6 +1029,7 @@ async fn handshake_with_providers(
     providers: &[PeerId],
     nar_hash_bytes: [u8; 32],
     max_peers: usize,
+    reputation: &Arc<Mutex<ReputationTracker>>,
 ) -> Vec<PeerHandshake> {
     let max = providers.len().min(max_peers);
     let mut results = Vec::new();
@@ -1001,6 +1059,11 @@ async fn handshake_with_providers(
                         blocks_available, block_count, block_hashes, ..
                     },
             })) => {
+                if !pending.contains_key(&peer) {
+                    tracing::debug!("Ignoring unsolicited handshake reply from {}", peer);
+                    continue;
+                }
+
                 tracing::info!(
                     "Handshake with {}: {} blocks available",
                     peer,
@@ -1047,6 +1110,14 @@ async fn handshake_with_providers(
                 }
                 continue;
             },
+        }
+    }
+
+    if !pending.is_empty() {
+        let mut tracker = reputation.lock().unwrap();
+        for peer in pending.keys() {
+            tracing::warn!("Handshake with provider {} timed out", peer);
+            tracker.record_failure(*peer);
         }
     }
 
@@ -1408,7 +1479,7 @@ async fn start_socket_listener(
                 let narinfo_cache = narinfo_cache.clone();
                 let config = config.clone();
                 let reputation = reputation.clone();
-                let _conn_mgr = conn_mgr.clone();
+                let conn_mgr = conn_mgr.clone();
                 let build_registry = build_registry.clone();
                 let event_tx = event_tx.clone();
                 let client = client.clone();
@@ -1424,6 +1495,7 @@ async fn start_socket_listener(
                         &narinfo_cache,
                         &config,
                         &reputation,
+                        &conn_mgr,
                         &build_registry,
                         &event_tx,
                         &client,
@@ -1453,6 +1525,7 @@ async fn handle_socket_connection(
     narinfo_cache: &Arc<Mutex<NarinfoCache>>,
     config: &Config,
     reputation: &Arc<Mutex<ReputationTracker>>,
+    conn_mgr: &Arc<Mutex<ConnectionManager>>,
     build_registry: &BuildRegistry,
     event_tx: &dashboard::EventBus,
     client: &reqwest::Client,
@@ -1550,6 +1623,7 @@ async fn handle_socket_connection(
                         &mut notify_rx,
                         narinfo_cache,
                         reputation,
+                        conn_mgr,
                         build_registry,
                         event_tx,
                         client,
@@ -1713,5 +1787,40 @@ mod tests {
         .await;
 
         assert_eq!(providers, vec![stale, current]);
+    }
+
+    #[test]
+    fn select_provider_candidates_skips_banned_peers() {
+        let good = PeerId::random();
+        let banned = PeerId::random();
+        let mut tracker = ReputationTracker::new(2);
+        tracker.record_failure(banned);
+        tracker.record_failure(banned);
+        tracker.record_success(good, 1024);
+
+        let reputation = Arc::new(Mutex::new(tracker));
+        let conn_mgr = Arc::new(Mutex::new(ConnectionManager::new(Default::default())));
+
+        let selected = select_provider_candidates(&[banned, good], &reputation, &conn_mgr, 8);
+
+        assert_eq!(selected, vec![good]);
+    }
+
+    #[test]
+    fn select_provider_candidates_respects_connection_backoff() {
+        let stale = PeerId::random();
+        let current = PeerId::random();
+        let reputation = Arc::new(Mutex::new(ReputationTracker::new(5)));
+        let conn_mgr =
+            Arc::new(Mutex::new(ConnectionManager::new(crate::connection::ConnectionConfig {
+                max_retries: 1,
+                ..Default::default()
+            })));
+
+        conn_mgr.lock().unwrap().record_attempt(stale);
+
+        let selected = select_provider_candidates(&[stale, current], &reputation, &conn_mgr, 8);
+
+        assert_eq!(selected, vec![current]);
     }
 }
