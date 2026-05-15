@@ -10,7 +10,7 @@ on:
 jobs:
   rust:
     name: Rust checks
-    runs-on: small
+    runs-on: codeberg-small
 
     steps:
       - name: Check out repository

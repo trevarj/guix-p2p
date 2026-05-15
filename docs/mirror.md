@@ -68,7 +68,7 @@ The workflow deliberately does not auto-commit generated benchmark output.
 ## Codeberg CI
 
 Codeberg runs the normal CI checks from `.forgejo/workflows/ci.yml` on the
-repository runner labeled `small`.
+repository runner labeled `codeberg-small`.
 
 The workflow:
 
@@ -80,8 +80,8 @@ The workflow:
 - runs `cargo clippy --workspace --all-targets --all-features -- -D warnings`;
 - runs `cargo test --workspace`.
 
-The job uses `runs-on: small`, matching the Codeberg runner label shown as
-`small@actions-tiny.aburayama.m.codeberg.org`.
+The job uses `runs-on: codeberg-small`, matching the Codeberg hosted runner
+label.
 
 ## GitHub Benchmarks
 
