@@ -137,9 +137,11 @@ When Pages is unavailable, the benchmark workflow still succeeds and keeps the
 CSV/report as a run artifact, but the Pages upload and deploy steps are
 skipped.
 
-The Pages site shows the latest generated report and links to recent benchmark
-workflow runs. Older CSV and markdown reports remain attached to their
-corresponding GitHub Actions runs as artifacts.
+The Pages site publishes a user-facing docs home at `index.html` and a rendered
+benchmark report at `benchmarks.html`. The benchmark page renders the latest
+markdown report as HTML tables and links to the raw CSV, raw markdown report,
+and recent benchmark workflow runs. Older CSV and markdown reports remain
+attached to their corresponding GitHub Actions runs as artifacts.
 
 ## References
 

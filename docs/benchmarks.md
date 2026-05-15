@@ -231,9 +231,11 @@ The artifact contains:
 - `results.csv`
 - `benchmark-results.md`
 
-Successful benchmark runs also deploy a GitHub Pages site with the latest CSV,
-latest markdown report, and links to recent benchmark workflow runs. Older
-reports stay attached to their GitHub Actions runs as artifacts.
+Successful benchmark runs also deploy a GitHub Pages documentation site.
+`index.html` is the docs landing page and `benchmarks.html` renders the latest
+benchmark report as HTML tables with links to the raw CSV, raw markdown report,
+and recent benchmark workflow runs. Older reports stay attached to their GitHub
+Actions runs as artifacts.
 Pages deployment runs only when the GitHub mirror supports Pages and the Pages
 site is configured for GitHub Actions. If the repository plan or visibility
 does not support Pages, the benchmark still passes and uploads the CSV/report
