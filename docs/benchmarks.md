@@ -233,6 +233,8 @@ The artifact contains:
 Successful benchmark runs also deploy a GitHub Pages site with the latest CSV,
 latest markdown report, and links to recent benchmark workflow runs. Older
 reports stay attached to their GitHub Actions runs as artifacts.
+The Pages configuration step uses `enablement: true` so the workflow can create
+or repair the GitHub Actions Pages source before uploading the site artifact.
 Benchmark dispatches do not share a branch-wide concurrency lock, so a stale
 run cannot block a later fixed run from starting.
 
