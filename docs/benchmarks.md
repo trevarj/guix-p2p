@@ -289,7 +289,8 @@ columns stay readable.
 Benchmark report dates are written as UTC datetimes, and the Pages renderer
 normalizes older epoch-second reports for display.
 The benchmark page also renders dependency-free SVG charts from `results.csv`
-when it is available, with a markdown table fallback for docs-only deploys.
+when it is available, with larger labels and a markdown table fallback for
+docs-only deploys.
 
 Pages deployment runs only when the GitHub mirror supports Pages and the Pages
 site is configured for GitHub Actions. If the repository plan or visibility

@@ -269,11 +269,12 @@ pre {
 }
 .chart-label {
   fill: var(--text);
-  font-size: 12px;
+  font-size: 16px;
+  font-weight: 600;
 }
 .chart-muted {
   fill: var(--muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 .chart-axis {
   stroke: var(--border);
@@ -620,23 +621,23 @@ function summarizeRows(rows) {
 function renderElapsedChart(rows) {
   const data = summarizeRows(rows).sort((a, b) => a.elapsed_ms - b.elapsed_ms);
   if (data.length === 0) return "<p class=\"muted\">No successful benchmark timings are available yet.</p>";
-  const width = 860;
-  const rowHeight = 34;
-  const labelWidth = 255;
-  const chartWidth = width - labelWidth - 120;
-  const height = 42 + data.length * rowHeight;
+  const width = 1160;
+  const rowHeight = 46;
+  const labelWidth = 390;
+  const chartWidth = width - labelWidth - 150;
+  const height = 52 + data.length * rowHeight;
   const max = Math.max(...data.map((row) => row.elapsed_ms));
   const bars = data.map((row, index) => {
-    const y = 30 + index * rowHeight;
+    const y = 36 + index * rowHeight;
     const barWidth = Math.max(2, (row.elapsed_ms / max) * chartWidth);
     return `<g>
-      <text class="chart-label" x="0" y="${y + 14}">${escapeHtml(displayCase(row))}</text>
-      <rect class="${modeClass(row.mode)}" x="${labelWidth}" y="${y}" width="${barWidth}" height="18" rx="4"></rect>
-      <text class="chart-label" x="${labelWidth + barWidth + 8}" y="${y + 14}">${formatDuration(row.elapsed_ms)}</text>
+      <text class="chart-label" x="0" y="${y + 18}">${escapeHtml(displayCase(row))}</text>
+      <rect class="${modeClass(row.mode)}" x="${labelWidth}" y="${y}" width="${barWidth}" height="24" rx="5"></rect>
+      <text class="chart-label" x="${labelWidth + barWidth + 12}" y="${y + 18}">${formatDuration(row.elapsed_ms)}</text>
     </g>`;
   }).join("");
   return `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Median elapsed benchmark time by case">
-    <line class="chart-axis" x1="${labelWidth}" y1="20" x2="${labelWidth}" y2="${height - 8}"></line>
+    <line class="chart-axis" x1="${labelWidth}" y1="24" x2="${labelWidth}" y2="${height - 10}"></line>
     ${bars}
   </svg>
   <div class="chart-legend">
@@ -659,31 +660,31 @@ function renderPhaseChart(rows) {
     .filter((row) => phases.some(([field]) => row[field] !== null))
     .sort((a, b) => a.elapsed_ms - b.elapsed_ms);
   if (data.length === 0) return "<p class=\"muted\">No phase timing data is available yet.</p>";
-  const width = 860;
-  const rowHeight = 38;
-  const labelWidth = 255;
-  const chartWidth = width - labelWidth - 80;
-  const height = 42 + data.length * rowHeight;
+  const width = 1160;
+  const rowHeight = 50;
+  const labelWidth = 390;
+  const chartWidth = width - labelWidth - 120;
+  const height = 52 + data.length * rowHeight;
   const max = Math.max(...data.map((row) => phases.reduce((sum, [field]) => sum + (row[field] || 0), 0)));
   const bars = data.map((row, index) => {
     let x = labelWidth;
-    const y = 30 + index * rowHeight;
+    const y = 36 + index * rowHeight;
     const segments = phases.map(([field, label, cssClass]) => {
       const value = row[field] || 0;
       if (value <= 0) return "";
       const width = Math.max(2, (value / max) * chartWidth);
-      const segment = `<rect class="${cssClass}" x="${x}" y="${y}" width="${width}" height="18" rx="3"><title>${label}: ${formatDuration(value)}</title></rect>`;
+      const segment = `<rect class="${cssClass}" x="${x}" y="${y}" width="${width}" height="24" rx="4"><title>${label}: ${formatDuration(value)}</title></rect>`;
       x += width;
       return segment;
     }).join("");
     return `<g>
-      <text class="chart-label" x="0" y="${y + 14}">${escapeHtml(displayCase(row))}</text>
+      <text class="chart-label" x="0" y="${y + 18}">${escapeHtml(displayCase(row))}</text>
       ${segments}
-      <text class="chart-label" x="${x + 8}" y="${y + 14}">${formatDuration(row.elapsed_ms)}</text>
+      <text class="chart-label" x="${x + 12}" y="${y + 18}">${formatDuration(row.elapsed_ms)}</text>
     </g>`;
   }).join("");
   return `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Benchmark phase timing breakdown">
-    <line class="chart-axis" x1="${labelWidth}" y1="20" x2="${labelWidth}" y2="${height - 8}"></line>
+    <line class="chart-axis" x1="${labelWidth}" y1="24" x2="${labelWidth}" y2="${height - 10}"></line>
     ${bars}
   </svg>
   <div class="chart-legend">
