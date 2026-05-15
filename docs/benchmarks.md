@@ -238,9 +238,10 @@ Before running `guix shell`, the workflow writes a systemd drop-in for
 `guix-daemon.service` so the runner daemon uses the benchmark mirror list for
 all store realizations.
 
-The workflow runs `guix pull` with `.guix/channels.scm` before evaluating
-`manifest.scm`; this provides the `rustup` Guix channel used for the pinned
-nightly Rust toolchain.
+The workflow shallow-clones the `guix-rustup` channel and passes
+`.cache/guix-rustup/guix` with `guix shell -L`; this provides the `rustup`
+module used for the pinned nightly Rust toolchain without running `guix pull`
+on every benchmark run.
 
 Cargo commands export Guix's GCC runtime library directory in
 `LD_LIBRARY_PATH` so Rust build scripts can load `libgcc_s.so.1` on hosted CI

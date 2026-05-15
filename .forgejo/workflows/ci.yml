@@ -21,18 +21,13 @@ jobs:
           guix --version
           guix describe
 
-      - name: Install Guix channels
+      - name: Fetch guix-rustup channel
         run: |
-          mkdir -p "$HOME/.config/guix"
-          cp .guix/channels.scm "$HOME/.config/guix/channels.scm"
-          guix pull --channels="$HOME/.config/guix/channels.scm"
-          if [ -n "${GITHUB_PATH:-}" ]; then
-            echo "$HOME/.config/guix/current/bin" >> "$GITHUB_PATH"
-          fi
+          git clone --depth 1 https://codeberg.org/declantsien/guix-rustup .cache/guix-rustup
 
       - name: Check formatting
         run: |
-          guix shell -m manifest.scm -- sh -c '
+          guix shell -L .cache/guix-rustup/guix -m manifest.scm -- sh -c '
             libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
             export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             exec cargo fmt --all -- --check
@@ -40,7 +35,7 @@ jobs:
 
       - name: Run clippy
         run: |
-          guix shell -m manifest.scm -- sh -c '
+          guix shell -L .cache/guix-rustup/guix -m manifest.scm -- sh -c '
             libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
             export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             exec cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -48,7 +43,7 @@ jobs:
 
       - name: Run tests
         run: |
-          guix shell -m manifest.scm -- sh -c '
+          guix shell -L .cache/guix-rustup/guix -m manifest.scm -- sh -c '
             libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
             export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             exec cargo test --workspace
