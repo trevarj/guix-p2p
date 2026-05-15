@@ -67,21 +67,33 @@ jobs:
 
       - name: Configure Guix daemon substitutes
         run: |
+          guix_daemon="$(command -v guix-daemon)"
+          test -x "$guix_daemon"
           sudo mkdir -p /etc/systemd/system/guix-daemon.service.d
           {
             echo "[Service]"
             echo "ExecStart="
-            printf 'ExecStart=/var/guix/profiles/per-user/root/current-guix/bin/guix-daemon --build-users-group=guixbuild "--substitute-urls=%s"\n' "$BENCHMARK_GUIX_SUBSTITUTE_URLS"
+            printf 'ExecStart=%s --build-users-group=guixbuild "--substitute-urls=%s"\n' "$guix_daemon" "$BENCHMARK_GUIX_SUBSTITUTE_URLS"
           } | sudo tee /etc/systemd/system/guix-daemon.service.d/override.conf
           sudo systemctl daemon-reload
           sudo systemctl restart guix-daemon.service
           systemctl --no-pager --full status guix-daemon.service
 
+      - name: Check benchmark environment
+        run: |
+          guix shell -m manifest.scm -- sh -c '
+            cargo --version
+            rustc --version
+            test -r "$SSL_CERT_FILE"
+            printf "SSL_CERT_FILE=%s\n" "$SSL_CERT_FILE"
+            cargo fetch --locked
+          '
+
       - name: Run benchmark
         run: >
-          guix shell -m manifest.scm -- cargo run -p guix-p2p-e2e --
-          benchmark --suite "${{ inputs.suite }}" --iterations "${{
-          inputs.iterations }}" --transport "${{ inputs.transport }}"
+          guix shell -m manifest.scm -- cargo run --locked -p guix-p2p-e2e --
+          benchmark --suite "${{ inputs.suite }}" --iterations "${{ inputs.iterations }}"
+          --transport "${{ inputs.transport }}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
