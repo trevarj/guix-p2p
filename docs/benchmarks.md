@@ -186,14 +186,25 @@ Modes:
 
 HTTP conditions:
 
-- `normal`: Bordeaux first, CI second.
-- `single-primary`: Bordeaux only.
-- `single-secondary`: CI only.
-- `dead-primary`: an unreachable local URL first, then Bordeaux and CI.
+- `normal`: preferred substitute mirrors first, then the broader fallback list.
+- `single-primary`: `https://ci.guix.trop.in` only.
+- `single-secondary`: `https://cache-cdn.guix.moe` only.
+- `dead-primary`: an unreachable local URL first, then the `normal` mirror list.
 - `slow`: reserved for real-network traffic shaping; skipped when shaping is
   unavailable.
 - `flaky`: reserved for real-network traffic shaping; skipped when shaping is
   unavailable.
+
+The preferred mirror order for benchmark defaults is:
+
+- `https://ci.guix.trop.in`
+- `https://cache-cdn.guix.moe`
+- `https://cache-fi.guix.moe`
+- `https://guix.bordeaux.inria.fr`
+- `https://nonguix-proxy.ditigal.xyz`
+
+The fallback list keeps the standard Guix servers and additional mirrors after
+the preferred set.
 
 Outputs:
 

@@ -358,17 +358,23 @@ enum HttpCondition {
     Flaky,
 }
 
+// Preferred mirrors come first so CI benchmarks are less sensitive to outages
+// or rate limits on the default Guix substitute servers.
+const BENCHMARK_PRIMARY_SUBSTITUTE_URL: &str = "https://ci.guix.trop.in";
+const BENCHMARK_SECONDARY_SUBSTITUTE_URL: &str = "https://cache-cdn.guix.moe";
+const BENCHMARK_SUBSTITUTE_URLS_COMMA: &str = "https://ci.guix.trop.in,https://cache-cdn.guix.moe,https://cache-fi.guix.moe,https://guix.bordeaux.inria.fr,https://nonguix-proxy.ditigal.xyz,https://ci.guix.gnu.org,https://bordeaux.guix.gnu.org,https://cache-sg.guix.moe,https://bordeaux-singapore-mirror.cbaines.net,https://mirror.yandex.ru/mirrors/guix,https://substitutes.nonguix.org";
+const BENCHMARK_SUBSTITUTE_URLS_SPACE: &str = "https://ci.guix.trop.in https://cache-cdn.guix.moe https://cache-fi.guix.moe https://guix.bordeaux.inria.fr https://nonguix-proxy.ditigal.xyz https://ci.guix.gnu.org https://bordeaux.guix.gnu.org https://cache-sg.guix.moe https://bordeaux-singapore-mirror.cbaines.net https://mirror.yandex.ru/mirrors/guix https://substitutes.nonguix.org";
+const BENCHMARK_DEAD_PRIMARY_SUBSTITUTE_URLS_COMMA: &str = "http://127.0.0.1:9,https://ci.guix.trop.in,https://cache-cdn.guix.moe,https://cache-fi.guix.moe,https://guix.bordeaux.inria.fr,https://nonguix-proxy.ditigal.xyz,https://ci.guix.gnu.org,https://bordeaux.guix.gnu.org,https://cache-sg.guix.moe,https://bordeaux-singapore-mirror.cbaines.net,https://mirror.yandex.ru/mirrors/guix,https://substitutes.nonguix.org";
+
 impl HttpCondition {
     fn substitute_urls(self) -> &'static str {
         match self {
             HttpCondition::Normal | HttpCondition::Slow | HttpCondition::Flaky => {
-                "https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org"
+                BENCHMARK_SUBSTITUTE_URLS_COMMA
             },
-            HttpCondition::SinglePrimary => "https://bordeaux.guix.gnu.org",
-            HttpCondition::SingleSecondary => "https://ci.guix.gnu.org",
-            HttpCondition::DeadPrimary => {
-                "http://127.0.0.1:9,https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org"
-            },
+            HttpCondition::SinglePrimary => BENCHMARK_PRIMARY_SUBSTITUTE_URL,
+            HttpCondition::SingleSecondary => BENCHMARK_SECONDARY_SUBSTITUTE_URL,
+            HttpCondition::DeadPrimary => BENCHMARK_DEAD_PRIMARY_SUBSTITUTE_URLS_COMMA,
         }
     }
 
@@ -921,9 +927,7 @@ impl VmConfig {
                 .substitute_urls
                 .clone()
                 .or_else(|| std::env::var("GUIX_P2P_E2E_SUBSTITUTE_URLS").ok())
-                .unwrap_or_else(|| {
-                    "https://ci.guix.gnu.org https://bordeaux.guix.gnu.org".to_string()
-                }),
+                .unwrap_or_else(|| BENCHMARK_SUBSTITUTE_URLS_SPACE.to_string()),
             node_system: root.join("guix/e2e-node.scm"),
             guix_p2p_binary: opts
                 .guix_p2p_binary
@@ -1486,6 +1490,7 @@ echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn vm_start_fetch_p2p(
     config: &VmConfig,
     name: &str,
@@ -1628,6 +1633,7 @@ fn vm_fetch_timed(
     vm_fetch_timed_with_options(config, name, store_path, package, policy, &[], None, None, None)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn vm_fetch_timed_with_options(
     config: &VmConfig,
     name: &str,
@@ -4538,6 +4544,7 @@ exit 1
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fetch_node_command(
     target: &VmFetch,
     bootstrap: &str,
@@ -4695,6 +4702,22 @@ mod tests {
         assert_eq!(parse_key_line(output, "store_path").as_deref(), Some("/gnu/store/new"));
         assert_eq!(parse_key_line(output, "peer_id").as_deref(), Some("one"));
         assert_eq!(parse_key_line(output, "missing"), None);
+    }
+
+    #[test]
+    fn benchmark_http_conditions_prefer_reliable_substitute_urls() {
+        assert!(
+            HttpCondition::Normal
+                .substitute_urls()
+                .starts_with("https://ci.guix.trop.in,https://cache-cdn.guix.moe")
+        );
+        assert_eq!(HttpCondition::SinglePrimary.substitute_urls(), "https://ci.guix.trop.in");
+        assert_eq!(HttpCondition::SingleSecondary.substitute_urls(), "https://cache-cdn.guix.moe");
+        assert!(
+            HttpCondition::DeadPrimary
+                .substitute_urls()
+                .starts_with("http://127.0.0.1:9,https://ci.guix.trop.in")
+        );
     }
 
     #[test]
