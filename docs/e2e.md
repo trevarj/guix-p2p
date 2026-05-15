@@ -40,8 +40,8 @@ cargo run -p guix-p2p-e2e -- vm proof
 ```
 
 `vm proof` runs the documented Bootstrap/Alice/Charles/Bob sequence: wait for
-SSH, push the release binary, start the bootstrap node, seed Alice and Charles,
-remove the target from Bob, and fetch through Bob's p2p-only daemon. The proof
+SSH, push the release binaries, start the bootstrap node, seed Alice and
+Charles, remove the target from Bob, and fetch through Bob's p2p-only daemon. The proof
 sets Bob's `max_in_flight_blocks_per_peer` to `1` so the small `hello` NAR must
 download blocks from both seeders, then checks each seeder log for block-serving
 evidence. Use this after large feature changes before trusting benchmark
@@ -95,8 +95,10 @@ the new system generation.
 VM commands use the `guix-p2p` binary embedded in the image by default. Use
 `vm push-binary --all` plus `GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p` only when you
 need to test a replacement binary without rebuilding the image.
-The VM wrapper launches Rust binaries through the VM profile's dynamic loader
-so host-built Guix interpreter paths do not have to exist inside the guest.
+`vm push-binary` also installs `guix-p2p-wrapper` so the Guix daemon uses the
+same Rust wrapper path as normal user setups. The VM wrapper launches Rust
+binaries through the VM profile's dynamic loader so host-built Guix interpreter
+paths do not have to exist inside the guest.
 Daemon readiness checks wait long enough for slow software-emulated runners and
 print daemon log tails when a VM daemon exits or never reports its peer ID.
 

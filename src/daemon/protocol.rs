@@ -192,3 +192,50 @@ pub fn format_trace_progress(store_path: &str, url: &str, total: u64, transferre
 pub fn format_trace_succeeded(store_path: &str, url: &str, size: u64) -> String {
     format!("@ download-succeeded {store_path} {url} {size}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn socket_writer_prefixes_fd4_and_stdout_channels() {
+        let mut reply = ReplyWriter::socket();
+
+        reply.write_line("have-response").unwrap();
+        reply.write_trace("@ download-progress /gnu/store/abc 10 5").unwrap();
+        reply.write_end().unwrap();
+
+        let ReplyWriter::Socket { buf } = reply else {
+            panic!("expected socket reply writer");
+        };
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "fd4:have-response\nout:@ download-progress /gnu/store/abc 10 5\nfd4:\n"
+        );
+    }
+
+    #[test]
+    fn socket_writer_frames_nar_data() {
+        let mut reply = ReplyWriter::socket();
+
+        reply.write_nar_data(b"nar-bytes").unwrap();
+
+        let ReplyWriter::Socket { buf } = reply else {
+            panic!("expected socket reply writer");
+        };
+        assert_eq!(String::from_utf8(buf).unwrap(), "nar:bmFyLWJ5dGVz\nnar-end\n");
+    }
+
+    #[test]
+    fn buffer_writer_matches_plain_fd4_line_shape() {
+        let mut reply = ReplyWriter::buffer();
+
+        reply.write_line("/gnu/store/abc-foo").unwrap();
+        reply.write_end().unwrap();
+
+        assert_eq!(
+            String::from_utf8(reply.into_buffer().unwrap()).unwrap(),
+            "/gnu/store/abc-foo\n\n"
+        );
+    }
+}

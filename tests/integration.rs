@@ -90,6 +90,46 @@ mod daemon_protocol {
     }
 }
 
+mod cli_contract {
+    use std::process::Command;
+
+    fn binary() -> &'static str {
+        env!("CARGO_BIN_EXE_guix-p2p")
+    }
+
+    #[test]
+    fn help_exits_successfully() {
+        let output = Command::new(binary()).arg("--help").output().unwrap();
+
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Usage:"));
+    }
+
+    #[test]
+    fn version_exits_successfully() {
+        let output = Command::new(binary()).arg("--version").output().unwrap();
+
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("guix-p2p"));
+    }
+
+    #[test]
+    fn substitute_modes_are_mutually_exclusive() {
+        let output = Command::new(binary()).args(["--query", "--substitute"]).output().unwrap();
+
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("cannot be used"));
+    }
+
+    #[test]
+    fn daemon_conflicts_with_query_mode() {
+        let output = Command::new(binary()).args(["--query", "--daemon"]).output().unwrap();
+
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("cannot be used"));
+    }
+}
+
 // ======================================================================
 // Reputation Behaviour Tests
 // ======================================================================

@@ -643,6 +643,7 @@ struct HarnessTools {
     real_guix: PathBuf,
     real_guix_closure: Vec<String>,
     guix_p2p: PathBuf,
+    guix_p2p_wrapper: PathBuf,
     guix_p2p_library_path: String,
     shell: PathBuf,
 }
@@ -1373,6 +1374,7 @@ fn vm_wait_ssh(config: &VmConfig, nodes: &[String]) -> anyhow::Result<()> {
 
 fn vm_push_binary(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<()> {
     ensure_guix_p2p_binary(config)?;
+    ensure_guix_p2p_wrapper_binary()?;
     let registry = VmRegistry::load(config)?;
     let targets: Vec<&VmNode> = match (all, node) {
         (true, _) | (_, None) => registry.nodes.iter().collect(),
@@ -1381,6 +1383,7 @@ fn vm_push_binary(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::R
     let libgcrypt_runtime = guix_build_last_path("libgcrypt")?;
     for target in targets {
         push_binary_to_node(config, target, &libgcrypt_runtime)?;
+        push_wrapper_to_node(config, target)?;
         println!("pushed binary to {}:/tmp/guix-p2p", target.name);
     }
     Ok(())
@@ -1489,31 +1492,16 @@ test ! -e {store_path} && echo TARGET_ABSENT_AFTER_DELETE
 fn vm_start_daemon(config: &VmConfig, name: &str) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
+    push_wrapper_to_node(config, &node)?;
     let remote = r#"
 set -eu
 cat > /tmp/e2e-guix-wrapper <<'EOF'
 #!/bin/sh
 set -eu
-SOCKET=/tmp/guix-p2p-b/guix-p2p.sock
-GUIX_P2P="${GUIX_P2P_E2E_P2P_BIN:-guix-p2p}"
-REAL_GUIX=/run/current-system/profile/bin/guix
-
-case "${1-}" in
-  substitute)
-    shift
-    case "${1-}" in
-      --query|--substitute)
-        exec "$GUIX_P2P" "$@" --socket "$SOCKET"
-        ;;
-      *)
-        exec "$REAL_GUIX" substitute "$@"
-        ;;
-    esac
-    ;;
-  *)
-    exec "$REAL_GUIX" "$@"
-    ;;
-esac
+export GUIX_P2P_SOCKET=/tmp/guix-p2p-b/guix-p2p.sock
+export GUIX_P2P_BIN="${GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}"
+export REAL_GUIX=/run/current-system/profile/bin/guix
+exec /tmp/guix-p2p-wrapper "$@"
 EOF
 chmod +x /tmp/e2e-guix-wrapper
 printf "e2e\n" | sudo -S sh -c '
@@ -2747,6 +2735,14 @@ fn prepare_harness_tools(guix_p2p_bin: Option<&std::path::Path>) -> anyhow::Resu
     if !guix_p2p.is_file() {
         anyhow::bail!("guix-p2p binary not found at {}", guix_p2p.display());
     }
+    let guix_p2p_wrapper = project_root().join("target/release/guix-p2p-wrapper");
+    if !guix_p2p_wrapper.is_file() {
+        let cargo = find_on_path("cargo").context("missing required command: cargo")?;
+        build_release_binary(&cargo)?;
+    }
+    if !guix_p2p_wrapper.is_file() {
+        anyhow::bail!("guix-p2p-wrapper binary not found at {}", guix_p2p_wrapper.display());
+    }
     let guix_p2p_library_path = runtime_library_path(&guix_p2p)?;
     Ok(HarnessTools {
         guix,
@@ -2755,6 +2751,7 @@ fn prepare_harness_tools(guix_p2p_bin: Option<&std::path::Path>) -> anyhow::Resu
         real_guix,
         real_guix_closure,
         guix_p2p,
+        guix_p2p_wrapper,
         guix_p2p_library_path,
         shell,
     })
@@ -2955,6 +2952,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         &wrapper_path,
         &node_b_socket,
         &spec.tools.guix_p2p,
+        &spec.tools.guix_p2p_wrapper,
         &spec.tools.guix_p2p_library_path,
         &spec.tools.real_guix,
         &spec.tools.shell,
@@ -3368,41 +3366,25 @@ fn write_wrapper(
     wrapper: &std::path::Path,
     socket: &std::path::Path,
     guix_p2p: &std::path::Path,
+    guix_p2p_wrapper: &std::path::Path,
     guix_p2p_library_path: &str,
-    _real_guix: &std::path::Path,
+    real_guix: &std::path::Path,
     _shell: &std::path::Path,
 ) -> anyhow::Result<()> {
     let content = format!(
         r#"#!/bin/sh
-SOCKET={}
-GUIX_P2P={}
 GUIX_P2P_LIBRARY_PATH={}
-REAL_GUIX="${{GUIX_P2P_E2E_REAL_GUIX:-guix}}"
 export LD_LIBRARY_PATH="${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}$GUIX_P2P_LIBRARY_PATH${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
-
-case "${{1-}}" in
-    substitute)
-        shift
-        case "${{1-}}" in
-            --query|--substitute)
-                if [ -S "$SOCKET" ]; then
-                    exec "$GUIX_P2P" "$@" --socket "$SOCKET"
-                fi
-                exec "$REAL_GUIX" substitute "$@"
-                ;;
-            *)
-                exec "$REAL_GUIX" substitute "$@"
-                ;;
-        esac
-        ;;
-    *)
-        exec "$REAL_GUIX" "$@"
-        ;;
-esac
+export GUIX_P2P_SOCKET={}
+export GUIX_P2P_BIN={}
+export REAL_GUIX="${{GUIX_P2P_E2E_REAL_GUIX:-{}}}"
+exec {} "$@"
 "#,
+        shell_quote(guix_p2p_library_path),
         shell_quote(&socket.display().to_string()),
         shell_quote(&guix_p2p.display().to_string()),
-        shell_quote(guix_p2p_library_path)
+        shell_quote(&real_guix.display().to_string()),
+        shell_quote(&guix_p2p_wrapper.display().to_string())
     );
     std::fs::write(wrapper, content)?;
     #[cfg(unix)]
@@ -4389,6 +4371,18 @@ fn ensure_guix_p2p_binary(config: &VmConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn ensure_guix_p2p_wrapper_binary() -> anyhow::Result<PathBuf> {
+    let wrapper = project_root().join("target/release/guix-p2p-wrapper");
+    if !wrapper.is_file() {
+        anyhow::bail!(
+            "guix-p2p-wrapper binary is missing or not executable; build it first with: guix \
+             shell -m manifest.scm -- cargo build --release\nexpected binary: {}",
+            wrapper.display()
+        );
+    }
+    Ok(wrapper)
+}
+
 fn ensure_ssh_host_key(config: &VmConfig) -> anyhow::Result<()> {
     if config.ssh_host_key.is_file() && config.ssh_host_key_pub.is_file() {
         return Ok(());
@@ -4621,6 +4615,47 @@ chmod 755 /tmp/guix-p2p /tmp/guix-p2p-real
         libgcrypt_runtime
     );
     ssh_run(config, node, &install)?;
+    Ok(())
+}
+
+fn push_wrapper_to_node(config: &VmConfig, node: &VmNode) -> anyhow::Result<()> {
+    let wrapper = ensure_guix_p2p_wrapper_binary()?;
+    ensure_ssh_client_key(config)?;
+    let status = std::process::Command::new("scp")
+        .arg("-i")
+        .arg(&config.ssh_client_key)
+        .arg("-o")
+        .arg(format!("UserKnownHostsFile={}", config.ssh_dir.join("known_hosts").display()))
+        .arg("-o")
+        .arg("StrictHostKeyChecking=accept-new")
+        .arg("-o")
+        .arg("BatchMode=yes")
+        .arg("-o")
+        .arg("ConnectTimeout=10")
+        .arg("-P")
+        .arg(node.ssh_port.to_string())
+        .arg(&wrapper)
+        .arg("e2e@127.0.0.1:/tmp/guix-p2p-wrapper-real.next")
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("scp wrapper to {} failed with {status}", node.name);
+    }
+    let install = r#"set -eu
+mv /tmp/guix-p2p-wrapper-real.next /tmp/guix-p2p-wrapper-real
+cat > /tmp/guix-p2p-wrapper <<'EOF'
+#!/bin/sh
+set -eu
+LOADER="/run/current-system/profile/lib/ld-linux-x86-64.so.2"
+LIBRARY_PATH="/run/current-system/profile/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+if [ -x "$LOADER" ]; then
+  exec "$LOADER" --library-path "$LIBRARY_PATH" /tmp/guix-p2p-wrapper-real "$@"
+fi
+export LD_LIBRARY_PATH="$LIBRARY_PATH"
+exec /tmp/guix-p2p-wrapper-real "$@"
+EOF
+chmod 755 /tmp/guix-p2p-wrapper /tmp/guix-p2p-wrapper-real
+"#;
+    ssh_run(config, node, install)?;
     Ok(())
 }
 
