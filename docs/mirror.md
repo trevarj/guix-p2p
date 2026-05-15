@@ -100,10 +100,10 @@ To run it:
 - Open the GitHub mirror.
 - Go to `Actions > Benchmarks`.
 - Click `Run workflow`.
-- Choose `suite`, `iterations`, and `transport`.
+- Choose `suite` and `iterations`.
 - Download the `guix-p2p-benchmark-*` artifact from the completed run.
 
-The workflow runs the container benchmark harness and uploads
+The workflow runs the VM benchmark harness and uploads
 `target/guix-p2p-bench/results.csv` plus `docs/benchmark-results.md`. It does
 not commit generated benchmark output back to the repository.
 
@@ -113,23 +113,14 @@ package realization on the GitHub runner from depending only on the default
 substitute servers.
 
 The workflow uses `guix shell -m manifest-ci.scm` with Guix's packaged Rust
-toolchain and a minimal native build environment; it does not run `guix pull`
-on benchmark runs.
-The CI manifest also includes the Guix CLI so the benchmark harness can spawn
-nested Guix container environments without relying on the runner's ambient
-PATH.
+toolchain, QEMU, OpenSSH, and a minimal native build environment; it does not
+run `guix pull` on benchmark runs.
 
-GitHub runs the benchmark harness under `sudo` because the container benchmark
-uses nested `guix shell -CN` environments that need mount privileges for a
-writable `/gnu/store`.
-Hosted GitHub runners cannot reliably share the checked-out repository into
-nested Guix containers, so the workflow sets `GUIX_P2P_E2E_NO_GUIX_SHELL=1`
-and lets the disposable runner provide the isolation boundary.
-If hosted runners expose `/gnu/store` read-only, the workflow sets
-`GUIX_P2P_E2E_ALLOW_READ_ONLY_STORE=1` so the harness publishes an explicit
-skipped report and still updates artifacts/Pages. Full benchmark evidence still
-requires local containers with writable store isolation or the VM benchmark
-path.
+GitHub runs the VM benchmark harness under `sudo`, builds a base Guix System
+qcow2 image, boots Bootstrap, Alice, and Bob with QEMU, and runs the benchmark
+inside those private-store nodes. This avoids the hosted runner's read-only
+`/gnu/store` and keeps skipped container reports from being published as
+successful benchmark evidence.
 
 Cargo commands export Guix's GCC runtime library directory in
 `LD_LIBRARY_PATH` so Rust build scripts can load `libgcc_s.so.1` on hosted CI

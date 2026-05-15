@@ -7,7 +7,9 @@
              (gnu packages nss)
              (gnu packages package-management)
              (gnu packages rust)
+             (gnu packages ssh)
              (gnu packages tls)
+             (gnu packages virtualization)
              (gnu packages perl)
              (gnu packages pkg-config))
 
@@ -18,6 +20,8 @@
   pkg-config
   nss-certs
   guix
+  openssh
+  qemu
 
   ;; Rust toolchain used by hosted CI and benchmark workflows.
   rust

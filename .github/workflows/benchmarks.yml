@@ -16,15 +16,6 @@ on:
         required: true
         default: "1"
         type: string
-      transport:
-        description: libp2p transport
-        required: true
-        default: tcp
-        type: choice
-        options:
-          - tcp
-          - quic
-
 permissions:
   contents: read
   id-token: write
@@ -35,10 +26,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  container-benchmark:
-    name: Container benchmark
+  vm-benchmark:
+    name: VM benchmark
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
     environment:
       name: github-pages
       url: ${{ steps.deploy-pages.outputs.page_url }}
@@ -89,12 +80,18 @@ jobs:
             test -r "$SSL_CERT_FILE"
             printf "SSL_CERT_FILE=%s\n" "$SSL_CERT_FILE"
             printf "LD_LIBRARY_PATH=%s\n" "$LD_LIBRARY_PATH"
+            qemu-system-x86_64 --version
+            ssh -V
             cargo fetch --locked
           '
 
-      - name: Run benchmark
+      - name: Run VM benchmark
         run: |
           cleanup() {
+            guix_cmd="$(command -v guix)"
+            sudo "$guix_cmd" shell -m manifest-ci.scm -- \
+              cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e stop --all \
+              2>/dev/null || true
             sudo chown -R "$USER:$USER" target docs/benchmark-results.md 2>/dev/null || true
           }
           trap cleanup EXIT
@@ -102,13 +99,29 @@ jobs:
           sudo "$guix_cmd" shell -m manifest-ci.scm -- sh -c '
             libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
             export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            export GUIX_P2P_E2E_NO_GUIX_SHELL=1
-            export GUIX_P2P_E2E_ALLOW_READ_ONLY_STORE=1
-            exec cargo run --locked -p guix-p2p-e2e -- benchmark \
+            export GUIX_P2P_E2E_SUBSTITUTE_URLS="$3"
+            export GUIX_P2P_E2E_ENABLE_KVM=auto
+            export GUIX_P2P_E2E_VM_MEMORY=1536
+            export GUIX_P2P_E2E_VM_CPUS=2
+
+            cargo build --locked --release
+            cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e image
+            cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e run Bootstrap
+            cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e run Alice
+            cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e run Bob
+            cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e wait-ssh Bootstrap Alice Bob
+            cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e push-binary --all
+            cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e bootstrap Bootstrap
+            exec cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e benchmark \
               --suite "$1" \
+              --modes http,p2p-only,p2p-first \
+              --http-conditions normal \
+              --seed-nodes Alice \
+              --fetch-node Bob \
+              --http-node Bob \
               --iterations "$2" \
-              --transport "$3"
-          ' sh "${{ inputs.suite }}" "${{ inputs.iterations }}" "${{ inputs.transport }}"
+              --output target/guix-p2p-bench
+          ' sh "${{ inputs.suite }}" "${{ inputs.iterations }}" "$BENCHMARK_GUIX_SUBSTITUTE_URLS"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
