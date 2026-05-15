@@ -238,6 +238,10 @@ Before running `guix shell`, the workflow writes a systemd drop-in for
 `guix-daemon.service` so the runner daemon uses the benchmark mirror list for
 all store realizations.
 
+The workflow runs `guix pull` with `.guix/channels.scm` before evaluating
+`manifest.scm`; this provides the `rustup` Guix channel used for the pinned
+nightly Rust toolchain.
+
 The workflow includes `nss-certs` so `guix shell` exposes a CA bundle for Cargo
 to verify crates.io TLS certificates.
 

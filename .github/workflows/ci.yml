@@ -29,6 +29,15 @@ jobs:
         with:
           pullAfterInstall: false
 
+      - name: Install Guix channels
+        run: |
+          mkdir -p "$HOME/.config/guix"
+          cp .guix/channels.scm "$HOME/.config/guix/channels.scm"
+          guix pull --channels="$HOME/.config/guix/channels.scm"
+          if [ -n "${GITHUB_PATH:-}" ]; then
+            echo "$HOME/.config/guix/current/bin" >> "$GITHUB_PATH"
+          fi
+
       - name: Check formatting
         run: guix shell -m manifest.scm -- cargo fmt --all -- --check
 

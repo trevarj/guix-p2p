@@ -58,6 +58,8 @@ The workflow:
 
 - runs on pushes to `master`, version tags, and manual dispatches;
 - installs Guix on the GitHub runner;
+- runs `guix pull` with `.guix/channels.scm` so the `rustup` channel module
+  used by `manifest.scm` is available;
 - uses `guix shell -m manifest.scm`, including the pinned nightly Rust toolchain;
 - runs `cargo fmt --all -- --check`;
 - runs `cargo clippy --workspace --all-targets --all-features -- -D warnings`;
@@ -76,6 +78,8 @@ The workflow:
 - checks out the repository with the Forgejo checkout action;
 - verifies the runner's Guix installation with `guix --version` and
   `guix describe`;
+- runs `guix pull` with `.guix/channels.scm` so the `rustup` channel module
+  used by `manifest.scm` is available;
 - runs `cargo fmt --all -- --check`;
 - runs `cargo clippy --workspace --all-targets --all-features -- -D warnings`;
 - runs `cargo test --workspace`.
@@ -103,6 +107,10 @@ Before running `guix shell`, the workflow restarts `guix-daemon.service` with a
 systemd drop-in that sets the benchmark substitute URL list. This keeps Guix
 package realization on the GitHub runner from depending only on the default
 substitute servers.
+
+The workflow runs `guix pull` with `.guix/channels.scm` before evaluating
+`manifest.scm`; this provides the `rustup` Guix channel used for the pinned
+nightly Rust toolchain.
 
 The workflow includes `nss-certs` so `guix shell` exposes a CA bundle for Cargo
 to verify crates.io TLS certificates.
