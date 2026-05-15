@@ -128,9 +128,11 @@ The CSV keeps the original result columns and appends phase timings:
 The VM benchmark now writes local narinfo metadata for the VM-observed target
 into the fetch node before p2p modes. The substitute daemon only advertises
 paths with usable narinfo, so p2p-first and http-first runs do not claim
-unavailable dependency paths during standard benchmarks. This keeps p2p-only
-query handling from blocking on substitute-server narinfo timeouts for the
-target. The latest
+unavailable dependency paths during standard benchmarks. When VM p2p modes
+provide local narinfo metadata, info and substitute lookups stay local instead
+of falling through to remote substitute servers for unrelated Guix queries. This
+keeps p2p-only query handling from blocking on substitute-server narinfo
+timeouts for the target. The latest
 two-seeder `hello` run completed successfully, found multiple providers, and
 imported the NAR through P2P. Remaining benchmark work should focus on stale
 provider handling, larger packages, repeated runs, and HTTP comparison modes

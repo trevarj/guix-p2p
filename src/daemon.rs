@@ -131,9 +131,23 @@ async fn handle_have(
             SubstitutePolicy::HttpFirst | SubstitutePolicy::P2pFirst => {
                 // Fallback policies can use P2P or HTTP, but we still need
                 // usable narinfo before advertising a path to Guix.
-                match crate::http_client::fetch_narinfo(config, &hash_part, narinfo_cache, client)
-                    .await
-                {
+                let cached_info = narinfo_cache.lock().unwrap().get(&hash_part);
+                let info_result = match (cached_info, config.local_narinfo_path.is_some()) {
+                    (Some(info), _) => Ok(info),
+                    (None, true) => {
+                        tracing::info!(
+                            "have: skipping {} (policy={:?}, not in local narinfo metadata)",
+                            path,
+                            config.substitute_policy
+                        );
+                        continue;
+                    },
+                    (None, false) => {
+                        crate::http_client::fetch_narinfo(config, &hash_part, narinfo_cache, client)
+                            .await
+                    },
+                };
+                match info_result {
                     Ok(info) => {
                         tracing::info!(
                             "have: claiming {} (policy={:?}, narinfo available)",
@@ -267,6 +281,10 @@ async fn handle_info(
                 continue;
             },
             (_, Some(info)) => Ok(info),
+            (_, None) if config.local_narinfo_path.is_some() => {
+                tracing::debug!("No local narinfo for {}", hash_part);
+                continue;
+            },
             (_, None) => crate::http_client::fetch_narinfo(config, &hash_part, cache, client).await,
         };
 
@@ -393,15 +411,26 @@ async fn try_swarm_substitute(
         },
     };
 
-    let narinfo =
-        match crate::http_client::fetch_narinfo(config, &hash_part, narinfo_cache, client).await {
-            Ok(info) => info,
-            Err(e) => {
-                tracing::warn!("Cannot fetch narinfo for {}: {}", hash_part, e);
-                let _ = reply.write_line("not-found");
-                return;
-            },
-        };
+    let cached_info = narinfo_cache.lock().unwrap().get(&hash_part);
+    let narinfo = match (cached_info, config.local_narinfo_path.is_some()) {
+        (Some(info), _) => info,
+        (None, true) => {
+            tracing::warn!("No local narinfo for {}", hash_part);
+            let _ = reply.write_line("not-found");
+            return;
+        },
+        (None, false) => {
+            match crate::http_client::fetch_narinfo(config, &hash_part, narinfo_cache, client).await
+            {
+                Ok(info) => info,
+                Err(e) => {
+                    tracing::warn!("Cannot fetch narinfo for {}: {}", hash_part, e);
+                    let _ = reply.write_line("not-found");
+                    return;
+                },
+            }
+        },
+    };
 
     let store_path = narinfo.store_path.clone();
     let nar_size = narinfo.nar_size;

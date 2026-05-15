@@ -157,15 +157,16 @@ matching guix-daemon's permission model.
   enforced by `have` and the final `substitute` request.
 
 `--local-narinfo PATH` or `local_narinfo_path = "PATH"` loads a JSON metadata
-file into the narinfo cache at daemon startup. The file has a top-level
-`narinfos` array with `store_path`, `nar_hash`, `nar_size`, `references`,
-optional `deriver`, and optional `download_size` fields. This is intended for
-offline/local benchmark harnesses that pre-seed store paths and already know the
-corresponding NAR hashes. VM benchmarks copy target metadata into the fetch
-node before p2p modes so the target lookup does not depend on live substitute
-server narinfo latency. If local metadata has `nar_size = 0`, p2p downloads
-derive the block count from the provider handshake and still verify the final
-NAR hash.
+file into the narinfo cache at daemon startup. When this is set, substitute
+metadata lookups are limited to that local cache instead of falling through to
+remote substitute servers. The file has a top-level `narinfos` array with
+`store_path`, `nar_hash`, `nar_size`, `references`, optional `deriver`, and
+optional `download_size` fields. This is intended for offline/local benchmark
+harnesses that pre-seed store paths and already know the corresponding NAR
+hashes. VM benchmarks copy target metadata into the fetch node before p2p modes
+so the target lookup does not depend on live substitute server narinfo latency.
+If local metadata has `nar_size = 0`, p2p downloads derive the block count from
+the provider handshake and still verify the final NAR hash.
 
 ### Substitute protocol
 
