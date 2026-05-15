@@ -32,7 +32,7 @@
   nss-certs
 
   ;; Rustup
-  ((@ (rustup build toolchain) rustup)
+  ((module-ref (resolve-interface '(rustup build toolchain)) 'rustup)
    "nightly-2026-03-14"
    #:components
    '("rust-analyzer" "rustfmt" "rust-src" "clippy"))
