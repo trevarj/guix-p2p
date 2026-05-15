@@ -2588,7 +2588,7 @@ fn wait_for_vm_seed_metadata(
     dashboard_port: u16,
     store_path: &str,
 ) -> anyhow::Result<(Option<String>, Option<u64>)> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     let mut last_error = None;
     loop {
         match dashboard_json(dashboard_port, "/api/seeds") {
@@ -4591,12 +4591,22 @@ PID="$!"
 printf '%s\n' "$PID" > /tmp/guix-p2p-a.pid
 PEER_ID=''
 i=0
-while [ "$i" -lt 30 ]; do
+while [ "$i" -lt 120 ]; do
   PEER_ID="$(sed -n 's/.*Peer ID: //p' "$LOG" 2>/dev/null | tail -n 1)"
   [ -n "$PEER_ID" ] && break
+  if ! kill -0 "$PID" 2>/dev/null; then
+    echo "guix-p2p seed daemon exited before reporting a peer id" >&2
+    tail -n 80 "$LOG" >&2 || true
+    exit 1
+  fi
   i=$((i + 1))
   sleep 1
 done
+if [ -z "$PEER_ID" ]; then
+  echo "guix-p2p seed daemon did not report a peer id" >&2
+  tail -n 80 "$LOG" >&2 || true
+  exit 1
+fi
 [ -n "$PEER_ID" ] && printf '%s\n' "$PEER_ID" > /tmp/guix-p2p-a-peer-id
 printf 'store_path=%s\n' "$STORE_PATH"
 printf 'narinfo_url=%s\n' "$NARINFO_URL"
@@ -4769,12 +4779,22 @@ PID="$!"
 printf '%s\n' "$PID" > /tmp/guix-p2p-bootstrap.pid
 PEER_ID=''
 i=0
-while [ "$i" -lt 30 ]; do
+while [ "$i" -lt 120 ]; do
   PEER_ID="$(sed -n 's/.*Peer ID: //p' "$LOG" 2>/dev/null | tail -n 1)"
   [ -n "$PEER_ID" ] && break
+  if ! kill -0 "$PID" 2>/dev/null; then
+    echo "guix-p2p bootstrap daemon exited before reporting a peer id" >&2
+    tail -n 80 "$LOG" >&2 || true
+    exit 1
+  fi
   i=$((i + 1))
   sleep 1
 done
+if [ -z "$PEER_ID" ]; then
+  echo "guix-p2p bootstrap daemon did not report a peer id" >&2
+  tail -n 80 "$LOG" >&2 || true
+  exit 1
+fi
 [ -n "$PEER_ID" ] && printf '%s\n' "$PEER_ID" > /tmp/guix-p2p-bootstrap-peer-id
 printf 'peer_id=%s\n' "$PEER_ID"
 printf 'pid=%s\nlog=%s\nsocket=%s\ndashboard=http://127.0.0.1:%s\n' "$PID" "$LOG" "$SOCKET" "$DASHBOARD_PORT"

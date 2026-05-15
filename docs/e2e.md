@@ -84,6 +84,8 @@ and a bootstrap node has been saved with `vm bootstrap`. It seeds the requested
 package on each `--seed-nodes` node, removes the target from the fetcher before
 each fetch, runs HTTP-only fetches with the regular Guix daemon, and runs P2P
 fetches through the same wrapper path as `vm fetch`.
+Daemon readiness checks wait long enough for slow software-emulated runners and
+print daemon log tails when a VM daemon exits or never reports its peer ID.
 
 The VM harness passes each node's host-forwarded P2P port as an
 `--external-addresses` value. This is required for QEMU user-mode networking:
