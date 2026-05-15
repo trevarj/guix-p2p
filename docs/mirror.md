@@ -141,9 +141,10 @@ to verify crates.io TLS certificates.
 Successful benchmark runs also deploy a GitHub Pages site. Before the first
 deploy, set the GitHub mirror's Pages source to `GitHub Actions` under
 `Settings > Pages`.
-The workflow passes `enablement: true` to `actions/configure-pages` so the
-mirror can create or repair that Pages Actions source configuration during
-deploy when the token has `pages: write`.
+Pages must also be supported by the repository's GitHub plan and visibility.
+When Pages is unavailable, the benchmark workflow still succeeds and keeps the
+CSV/report as a run artifact, but the Pages upload and deploy steps are
+skipped.
 
 The Pages site shows the latest generated report and links to recent benchmark
 workflow runs. Older CSV and markdown reports remain attached to their

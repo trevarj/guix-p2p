@@ -246,15 +246,17 @@ jobs:
           HTML
 
       - name: Configure Pages
+        id: configure-pages
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
+        continue-on-error: true
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
+        if: steps.configure-pages.outcome == 'success'
         with:
           path: site
 
       - name: Deploy Pages
         id: deploy-pages
         uses: actions/deploy-pages@v4
+        if: steps.configure-pages.outcome == 'success'
