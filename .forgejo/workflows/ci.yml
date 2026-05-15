@@ -27,6 +27,45 @@ jobs:
             echo "curl is required to download the Guix installer" >&2
             exit 1
           fi
+          if ! command -v wget >/dev/null 2>&1; then
+            mkdir -p /tmp/guix-p2p-ci-bin
+            cat > /tmp/guix-p2p-ci-bin/wget <<'SH'
+          #!/bin/sh
+          output=
+          url=
+          while [ "$#" -gt 0 ]; do
+            case "$1" in
+              -O|--output-document)
+                output="$2"
+                shift 2
+                ;;
+              --output-document=*)
+                output="${1#--output-document=}"
+                shift
+                ;;
+              -q|--quiet|--continue|--show-progress|--progress=*)
+                shift
+                ;;
+              -*)
+                shift
+                ;;
+              *)
+                url="$1"
+                shift
+                ;;
+            esac
+          done
+          if [ -z "$url" ]; then
+            exit 1
+          fi
+          if [ -n "$output" ]; then
+            exec curl -fL "$url" -o "$output"
+          fi
+          exec curl -fL "$url"
+          SH
+            chmod +x /tmp/guix-p2p-ci-bin/wget
+            export PATH="/tmp/guix-p2p-ci-bin:$PATH"
+          fi
           if [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
             echo "sudo is required to install Guix on a non-root runner" >&2
             exit 1

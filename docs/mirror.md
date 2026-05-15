@@ -73,6 +73,8 @@ If Forgejo/act sees the GitHub workflow file anyway, the Guix install action is
 skipped and the shell fallback installs Guix before any `guix shell` step.
 The fallback runs the installer directly on root runners and uses `sudo` only
 when the runner is non-root.
+If the runner has `curl` but not `wget`, the fallback provides a temporary
+`wget` shim for the Guix installer.
 
 ## Codeberg CI
 
