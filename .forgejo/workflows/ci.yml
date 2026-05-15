@@ -88,13 +88,17 @@ jobs:
           curl -fsSL https://git.savannah.gnu.org/cgit/guix.git/plain/etc/guix-install.sh \
             -o /tmp/guix-install.sh
           chmod +x /tmp/guix-install.sh
+          set +e
           if [ "$(id -u)" -eq 0 ]; then
             yes | /tmp/guix-install.sh
           else
             yes | sudo /tmp/guix-install.sh
           fi
+          install_status="$?"
+          set -e
 
           for profile in \
+            /run/current-system/profile \
             /var/guix/profiles/per-user/root/current-guix \
             /root/.config/guix/current \
             "$HOME/.config/guix/current"
@@ -109,6 +113,13 @@ jobs:
 
           command -v guix
           guix --version
+          if command -v guix-daemon >/dev/null 2>&1 && ! pgrep -x guix-daemon >/dev/null 2>&1; then
+            guix-daemon --build-users-group=guixbuild --disable-chroot \
+              >/tmp/guix-daemon.log 2>&1 &
+          fi
+          if [ "$install_status" -ne 0 ]; then
+            echo "Guix installer exited with status $install_status after installing guix; continuing with manual daemon startup"
+          fi
 
       - name: Check Guix
         run: |

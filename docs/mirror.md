@@ -77,6 +77,9 @@ The fallback runs the installer directly on root runners and uses `sudo` only
 when the runner is non-root.
 If the runner has `curl` but not `wget`, the fallback provides a temporary
 `wget` shim for the Guix installer.
+The fallback treats a nonzero installer exit as recoverable when the `guix`
+binary was installed, then starts `guix-daemon --disable-chroot` manually for
+the later `guix shell` steps.
 
 ## Codeberg CI
 
