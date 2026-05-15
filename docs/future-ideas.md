@@ -12,16 +12,13 @@ proactively re-fetch at-risk nars from the HTTP substitute servers and
 re-seed them via `NarStore::save()`. This would improve availability for
 the next requester without any manual intervention.
 
-## Parallel HTTP + P2P Fetching
+## P2P-First Latency Tuning
 
-Start downloading a nar from both the P2P swarm and the HTTP substitute
-server simultaneously. Take whichever finishes first and cancel the other.
-This reduces latency for the common case (HTTP is fast) while still
-benefiting from P2P when HTTP is slow or unavailable.
-
-Implementation: in `try_swarm_substitute`, start the HTTP nar download as a
-concurrent tokio task. If the swarm download succeeds first, cancel the
-HTTP task. If HTTP succeeds first, save to nar store and reply success.
+Avoid racing HTTP and P2P for the same nar because duplicate downloads waste
+bandwidth. Latency work should instead improve the existing P2P-first path:
+provider health scoring, faster stale-provider pruning, startup re-seeding,
+and benchmark-driven scheduler tuning. HTTP fallback should remain a fallback,
+not a parallel duplicate transfer.
 
 ## HTTP and Multi-Peer Benchmark Suite
 

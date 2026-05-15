@@ -79,6 +79,6 @@ Deferred work remains in [future-ideas.md](future-ideas.md). The highest-value
 items are:
 
 - Background health monitoring for provider counts.
-- Parallel HTTP plus P2P fetching.
+- P2P-first latency tuning without duplicate HTTP downloads.
 - Corporate/LAN proxy mode.
 - Re-fetching missing narinfo cache entries for proactive seeding.
