@@ -90,18 +90,27 @@ jobs:
       - name: Check benchmark environment
         run: |
           guix shell -m manifest.scm -- sh -c '
+            libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
+            test -r "$libgcc_dir/libgcc_s.so.1"
+            export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             cargo --version
             rustc --version
             test -r "$SSL_CERT_FILE"
             printf "SSL_CERT_FILE=%s\n" "$SSL_CERT_FILE"
+            printf "LD_LIBRARY_PATH=%s\n" "$LD_LIBRARY_PATH"
             cargo fetch --locked
           '
 
       - name: Run benchmark
-        run: >
-          guix shell -m manifest.scm -- cargo run --locked -p guix-p2p-e2e --
-          benchmark --suite "${{ inputs.suite }}" --iterations "${{ inputs.iterations }}"
-          --transport "${{ inputs.transport }}"
+        run: |
+          guix shell -m manifest.scm -- sh -c '
+            libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
+            export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            exec cargo run --locked -p guix-p2p-e2e -- benchmark \
+              --suite "$1" \
+              --iterations "$2" \
+              --transport "$3"
+          ' sh "${{ inputs.suite }}" "${{ inputs.iterations }}" "${{ inputs.transport }}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4

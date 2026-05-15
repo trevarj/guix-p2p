@@ -31,12 +31,25 @@ jobs:
           fi
 
       - name: Check formatting
-        run: guix shell -m manifest.scm -- cargo fmt --all -- --check
+        run: |
+          guix shell -m manifest.scm -- sh -c '
+            libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
+            export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            exec cargo fmt --all -- --check
+          '
 
       - name: Run clippy
-        run: >
-          guix shell -m manifest.scm -- cargo clippy --workspace
-          --all-targets --all-features -- -D warnings
+        run: |
+          guix shell -m manifest.scm -- sh -c '
+            libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
+            export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            exec cargo clippy --workspace --all-targets --all-features -- -D warnings
+          '
 
       - name: Run tests
-        run: guix shell -m manifest.scm -- cargo test --workspace
+        run: |
+          guix shell -m manifest.scm -- sh -c '
+            libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
+            export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            exec cargo test --workspace
+          '

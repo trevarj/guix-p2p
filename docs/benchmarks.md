@@ -242,6 +242,10 @@ The workflow runs `guix pull` with `.guix/channels.scm` before evaluating
 `manifest.scm`; this provides the `rustup` Guix channel used for the pinned
 nightly Rust toolchain.
 
+Cargo commands export Guix's GCC runtime library directory in
+`LD_LIBRARY_PATH` so Rust build scripts can load `libgcc_s.so.1` on hosted CI
+runners.
+
 The workflow includes `nss-certs` so `guix shell` exposes a CA bundle for Cargo
 to verify crates.io TLS certificates.
 
