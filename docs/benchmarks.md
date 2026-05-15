@@ -240,8 +240,8 @@ all store realizations.
 
 The workflow shallow-clones the `guix-rustup` channel and passes
 `.cache/guix-rustup/guix` with `guix shell -L`; this provides the `rustup`
-module used for the pinned nightly Rust toolchain without running `guix pull`
-on every benchmark run.
+module explicitly referenced by `manifest.scm` for the pinned nightly Rust
+toolchain without running `guix pull` on every benchmark run.
 
 Cargo commands export Guix's GCC runtime library directory in
 `LD_LIBRARY_PATH` so Rust build scripts can load `libgcc_s.so.1` on hosted CI

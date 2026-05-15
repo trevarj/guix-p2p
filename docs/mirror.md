@@ -59,7 +59,7 @@ The workflow:
 - runs on pushes to `master`, version tags, and manual dispatches;
 - installs Guix on the GitHub runner;
 - shallow-clones the `guix-rustup` channel and passes it with `guix shell -L`
-  so the `rustup` module used by `manifest.scm` is available;
+  so the explicit `rustup` module reference in `manifest.scm` is available;
 - uses `guix shell -m manifest.scm`, including the pinned nightly Rust toolchain;
 - exports Guix's GCC runtime library directory in `LD_LIBRARY_PATH` before
   Cargo commands so build scripts can load `libgcc_s.so.1`;
@@ -81,7 +81,7 @@ The workflow:
 - verifies the runner's Guix installation with `guix --version` and
   `guix describe`;
 - shallow-clones the `guix-rustup` channel and passes it with `guix shell -L`
-  so the `rustup` module used by `manifest.scm` is available;
+  so the explicit `rustup` module reference in `manifest.scm` is available;
 - exports Guix's GCC runtime library directory in `LD_LIBRARY_PATH` before
   Cargo commands so build scripts can load `libgcc_s.so.1`;
 - runs `cargo fmt --all -- --check`;
@@ -114,8 +114,8 @@ substitute servers.
 
 The workflow shallow-clones the `guix-rustup` channel and passes
 `.cache/guix-rustup/guix` with `guix shell -L`; this provides the `rustup`
-module used for the pinned nightly Rust toolchain without running `guix pull`
-on every benchmark run.
+module explicitly referenced by `manifest.scm` for the pinned nightly Rust
+toolchain without running `guix pull` on every benchmark run.
 
 Cargo commands export Guix's GCC runtime library directory in
 `LD_LIBRARY_PATH` so Rust build scripts can load `libgcc_s.so.1` on hosted CI

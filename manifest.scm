@@ -18,8 +18,7 @@
              (gnu packages python-build)
              (gnu packages python-xyz)
              (gnu packages sqlite)
-             (gnu packages xorg)
-             (rustup build toolchain))
+             (gnu packages xorg))
 
 (packages->manifest
  (list
@@ -33,9 +32,10 @@
   nss-certs
 
   ;; Rustup
-  (rustup "nightly-2026-03-14"
-          #:components
-          '("rust-analyzer" "rustfmt" "rust-src" "clippy"))
+  ((@ (rustup build toolchain) rustup)
+   "nightly-2026-03-14"
+   #:components
+   '("rust-analyzer" "rustfmt" "rust-src" "clippy"))
 
   ;; Libraries for certain sys crates
   openssl
