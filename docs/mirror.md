@@ -56,7 +56,7 @@ GitHub Actions runs from mirrored workflow files. The active workflow is
 
 The workflow:
 
-- runs on pushes to `master`, version tags, and manual dispatches;
+- runs only when manually dispatched;
 - installs Guix on the GitHub runner;
 - uses `guix shell -m manifest-ci.scm` with Guix's packaged Rust toolchain and
   minimal native build inputs;
@@ -66,7 +66,8 @@ The workflow:
 - runs `cargo clippy --workspace --all-targets --all-features -- -D warnings`;
 - runs `cargo test --workspace`.
 
-The workflow deliberately does not auto-commit generated benchmark output.
+The workflow is manual-only because Codeberg runs the normal push and pull
+request checks. GitHub runner time is reserved for benchmarks and Pages deploys.
 
 ## Codeberg CI
 
