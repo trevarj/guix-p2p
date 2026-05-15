@@ -240,6 +240,8 @@ deploy Pages without waiting for the VM benchmark job.
 benchmark report as HTML tables with links to the raw CSV, raw markdown report,
 and recent benchmark workflow runs. Older reports stay attached to their GitHub
 Actions runs as artifacts.
+Wide benchmark tables scroll horizontally so timing, package, and store path
+columns stay readable.
 
 Pages deployment runs only when the GitHub mirror supports Pages and the Pages
 site is configured for GitHub Actions. If the repository plan or visibility

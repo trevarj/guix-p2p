@@ -141,14 +141,15 @@ h2 {
 }
 table {
   border-collapse: collapse;
-  min-width: 760px;
-  width: 100%;
+  min-width: 100%;
+  width: max-content;
 }
 th, td {
   border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent);
   padding: 8px 10px;
   text-align: left;
   vertical-align: top;
+  white-space: nowrap;
 }
 th {
   background: color-mix(in srgb, currentColor 6%, transparent);
