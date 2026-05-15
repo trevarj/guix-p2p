@@ -85,6 +85,11 @@ the later `guix shell` steps.
 
 Codeberg runs the normal CI checks from `.forgejo/workflows/ci.yml` on the
 repository runner labeled `codeberg-small`.
+When that runner cannot provide or install Guix, the Forgejo workflow exits the
+Rust check steps successfully after printing a skip message. This keeps
+Codeberg push status from failing on runner provisioning. The GitHub CI and
+benchmark workflows remain strict because they run on runners where Guix is
+installed by workflow setup.
 
 The workflow:
 
