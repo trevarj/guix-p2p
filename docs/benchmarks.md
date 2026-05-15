@@ -250,6 +250,9 @@ PATH.
 GitHub runs the benchmark harness under `sudo` because the container benchmark
 uses nested `guix shell -CN` environments that need mount privileges for a
 writable `/gnu/store`.
+Hosted GitHub runners cannot reliably share the checked-out repository into
+nested Guix containers, so the workflow sets `GUIX_P2P_E2E_NO_GUIX_SHELL=1`
+and lets the disposable runner provide the isolation boundary.
 
 Cargo commands export Guix's GCC runtime library directory in
 `LD_LIBRARY_PATH` so Rust build scripts can load `libgcc_s.so.1` on hosted CI

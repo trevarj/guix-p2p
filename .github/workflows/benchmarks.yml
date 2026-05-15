@@ -102,6 +102,7 @@ jobs:
           sudo "$guix_cmd" shell -m manifest-ci.scm -- sh -c '
             libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
             export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            export GUIX_P2P_E2E_NO_GUIX_SHELL=1
             exec cargo run --locked -p guix-p2p-e2e -- benchmark \
               --suite "$1" \
               --iterations "$2" \
