@@ -58,9 +58,10 @@ The workflow:
 
 - runs on pushes to `master`, version tags, and manual dispatches;
 - installs Guix on the GitHub runner;
+- uses `guix shell -m manifest.scm`, including the pinned nightly Rust toolchain;
 - runs `cargo fmt --all -- --check`;
-- runs `cargo clippy --all-targets --all-features -- -D warnings`;
-- runs `cargo test`.
+- runs `cargo clippy --workspace --all-targets --all-features -- -D warnings`;
+- runs `cargo test --workspace`.
 
 The workflow deliberately does not auto-commit generated benchmark output.
 

@@ -30,15 +30,12 @@ jobs:
           pullAfterInstall: false
 
       - name: Check formatting
-        run: guix shell rust nss-certs -- cargo fmt --all -- --check
+        run: guix shell -m manifest.scm -- cargo fmt --all -- --check
 
       - name: Run clippy
         run: >
-          guix shell rust gcc-toolchain pkg-config nss-certs openssl libgcrypt eudev
-          libsecp256k1 -- cargo clippy --all-targets --all-features --
-          -D warnings
+          guix shell -m manifest.scm -- cargo clippy --workspace
+          --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: >
-          guix shell rust gcc-toolchain pkg-config nss-certs openssl libgcrypt eudev
-          libsecp256k1 perl sqlite -- cargo test
+        run: guix shell -m manifest.scm -- cargo test --workspace
