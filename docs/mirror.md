@@ -57,7 +57,8 @@ GitHub Actions runs from mirrored workflow files. The active workflow is
 The workflow:
 
 - runs only when manually dispatched;
-- installs Guix on the GitHub runner;
+- installs Guix with the GitHub Guix action on GitHub runners, or with the
+  upstream Guix installer fallback when the workflow is executed by Forgejo/act;
 - uses `guix shell -m manifest-ci.scm` with Guix's packaged Rust toolchain and
   minimal native build inputs;
 - exports Guix's GCC runtime library directory in `LD_LIBRARY_PATH` before
@@ -68,9 +69,8 @@ The workflow:
 
 The workflow is manual-only because Codeberg runs the normal push and pull
 request checks. GitHub runner time is reserved for benchmarks and Pages deploys.
-The GitHub CI job is guarded with `github.server_url == 'https://github.com'`
-so Forgejo does not try to execute the GitHub-only Guix install action from the
-canonical Codeberg repository.
+If Forgejo/act sees the GitHub workflow file anyway, the Guix install action is
+skipped and the shell fallback installs Guix before any `guix shell` step.
 
 ## Codeberg CI
 
