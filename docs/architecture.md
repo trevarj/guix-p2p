@@ -151,10 +151,10 @@ matching guix-daemon's permission model.
 - **info**: daemon writes `info <path1> ...\n`. Reply per path: store_path,
   deriver, ref_count, refs, download_size, nar_size, then blank line.
   Narinfo derivers and references are returned as full `/gnu/store/...` paths.
-  In `p2p-only`, `info` replies are served from the narinfo cache only. This
-  avoids turning unrelated Guix metadata queries into remote substitute-server
-  timeouts; availability is enforced by `have` and the final `substitute`
-  request.
+  `have` only advertises paths with usable narinfo. In `p2p-only`, `info`
+  replies are served from the narinfo cache only. This avoids turning unrelated
+  Guix metadata queries into remote substitute-server timeouts; availability is
+  enforced by `have` and the final `substitute` request.
 
 `--local-narinfo PATH` or `local_narinfo_path = "PATH"` loads a JSON metadata
 file into the narinfo cache at daemon startup. The file has a top-level

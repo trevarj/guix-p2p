@@ -129,11 +129,42 @@ async fn handle_have(
 
         match config.substitute_policy {
             SubstitutePolicy::HttpFirst | SubstitutePolicy::P2pFirst => {
-                // Always claim we have it; we can serve via HTTP fallback if
-                // no P2P providers exist.
-                tracing::info!("have: claiming {} (policy={:?})", path, config.substitute_policy);
-                if let Err(e) = reply.write_line(path) {
-                    tracing::error!("have reply for {}: {}", path, e);
+                // Fallback policies can use P2P or HTTP, but we still need
+                // usable narinfo before advertising a path to Guix.
+                match crate::http_client::fetch_narinfo(config, &hash_part, narinfo_cache, client)
+                    .await
+                {
+                    Ok(info) => {
+                        tracing::info!(
+                            "have: claiming {} (policy={:?}, narinfo available)",
+                            path,
+                            config.substitute_policy
+                        );
+                        if let Err(e) = reply.write_line(path) {
+                            tracing::error!("have reply for {}: {}", path, e);
+                        }
+                        if let Some(tx) = event_tx {
+                            let nar_hash = extract_nar_hash_bytes(&info.nar_hash).map(hex::encode);
+                            let provider_key = nar_hash.as_deref().unwrap_or(&hash_part);
+                            let p2p_available =
+                                crate::dht::has_providers(cache, provider_key).await;
+                            let _ = tx.send(DashboardEvent::CatalogEntry {
+                                hash_part: hash_part.clone(),
+                                store_path: Some(info.store_path),
+                                nar_size: Some(info.nar_size),
+                                nar_hash,
+                                p2p_available,
+                            });
+                        }
+                    },
+                    Err(e) => {
+                        tracing::info!(
+                            "have: skipping {} (policy={:?}, narinfo unavailable: {})",
+                            path,
+                            config.substitute_policy,
+                            e
+                        );
+                    },
                 }
             },
             SubstitutePolicy::P2pOnly => {
@@ -200,19 +231,6 @@ async fn handle_have(
                     });
                 }
             },
-        }
-
-        if let Some(tx) = event_tx
-            && config.substitute_policy != SubstitutePolicy::P2pOnly
-        {
-            let p2p_available = crate::dht::has_providers(cache, &hash_part).await;
-            let _ = tx.send(DashboardEvent::CatalogEntry {
-                hash_part: hash_part.clone(),
-                store_path: Some(path.clone()),
-                nar_size: None,
-                nar_hash: None,
-                p2p_available,
-            });
         }
     }
 

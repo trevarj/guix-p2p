@@ -126,8 +126,11 @@ The CSV keeps the original result columns and appends phase timings:
 - `total_ms`: total measured mode time.
 
 The VM benchmark now writes local narinfo metadata for the VM-observed target
-into the fetch node before p2p modes. This keeps p2p-only query handling from
-blocking on substitute-server narinfo timeouts for the target. The latest
+into the fetch node before p2p modes. The substitute daemon only advertises
+paths with usable narinfo, so p2p-first and http-first runs do not claim
+unavailable dependency paths during standard benchmarks. This keeps p2p-only
+query handling from blocking on substitute-server narinfo timeouts for the
+target. The latest
 two-seeder `hello` run completed successfully, found multiple providers, and
 imported the NAR through P2P. Remaining benchmark work should focus on stale
 provider handling, larger packages, repeated runs, and HTTP comparison modes
