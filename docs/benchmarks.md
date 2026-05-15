@@ -250,6 +250,9 @@ toolchain, QEMU, OpenSSH, and a minimal native build environment; it does not
 run `guix pull` on benchmark runs.
 The VM path avoids the hosted runner's read-only `/gnu/store` by importing
 packages inside each node's qcow2 disk.
+The workflow embeds the freshly built release binary in the qcow2 image and
+uses that image binary inside each VM; it does not push a host-built replacement
+binary into the running guests.
 
 Cargo commands export Guix's GCC runtime library directory in
 `LD_LIBRARY_PATH` so Rust build scripts can load `libgcc_s.so.1` on hosted CI

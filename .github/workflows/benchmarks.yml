@@ -110,7 +110,6 @@ jobs:
             cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e run Alice
             cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e run Bob
             cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e wait-ssh Bootstrap Alice Bob
-            cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e push-binary --all
             cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e bootstrap Bootstrap
             exec cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e benchmark \
               --suite "$1" \

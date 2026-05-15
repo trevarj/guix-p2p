@@ -79,11 +79,14 @@ provider record through the DHT. Re-running `seed` updates the latest target
 used by later `fetch` and `remove` commands.
 
 `benchmark` assumes the same VM state is already configured: the base image
-exists, the named VMs are running, SSH is ready, the binary has been pushed,
-and a bootstrap node has been saved with `vm bootstrap`. It seeds the requested
+exists, the named VMs are running, SSH is ready, and a bootstrap node has been
+saved with `vm bootstrap`. It seeds the requested
 package on each `--seed-nodes` node, removes the target from the fetcher before
 each fetch, runs HTTP-only fetches with the regular Guix daemon, and runs P2P
 fetches through the same wrapper path as `vm fetch`.
+VM commands use the `guix-p2p` binary embedded in the image by default. Use
+`vm push-binary --all` plus `GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p` only when you
+need to test a replacement binary without rebuilding the image.
 Daemon readiness checks wait long enough for slow software-emulated runners and
 print daemon log tails when a VM daemon exits or never reports its peer ID.
 
