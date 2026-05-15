@@ -1,0 +1,87 @@
+name: Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/pages.yml"
+      - "docs/**"
+      - "scripts/build-pages-site.sh"
+  workflow_run:
+    workflows:
+      - Benchmarks
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+  pages: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy Pages
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy-pages.outputs.page_url }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download benchmark artifact
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+          pattern: guix-p2p-benchmark-*
+          path: latest-benchmark
+          merge-multiple: true
+
+      - name: Select benchmark artifact files
+        if: github.event_name == 'workflow_run'
+        run: |
+          mkdir -p latest-benchmark-selected
+          if [ -r latest-benchmark/docs/benchmark-results.md ]; then
+            cp latest-benchmark/docs/benchmark-results.md latest-benchmark-selected/benchmark-results.md
+          elif [ -r latest-benchmark/benchmark-results.md ]; then
+            cp latest-benchmark/benchmark-results.md latest-benchmark-selected/benchmark-results.md
+          fi
+          if [ -r latest-benchmark/target/guix-p2p-bench/results.csv ]; then
+            cp latest-benchmark/target/guix-p2p-bench/results.csv latest-benchmark-selected/results.csv
+          elif [ -r latest-benchmark/results.csv ]; then
+            cp latest-benchmark/results.csv latest-benchmark-selected/results.csv
+          fi
+
+      - name: Build Pages site from benchmark artifact
+        if: github.event_name == 'workflow_run'
+        env:
+          BENCHMARK_RESULTS_MD: latest-benchmark-selected/benchmark-results.md
+          BENCHMARK_RESULTS_CSV: latest-benchmark-selected/results.csv
+        run: scripts/build-pages-site.sh
+
+      - name: Build Pages site from repository docs
+        if: github.event_name != 'workflow_run'
+        run: scripts/build-pages-site.sh
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Deploy Pages
+        id: deploy-pages
+        uses: actions/deploy-pages@v4

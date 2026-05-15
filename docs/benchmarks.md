@@ -231,14 +231,19 @@ The artifact contains:
 - `results.csv`
 - `benchmark-results.md`
 
-Successful benchmark runs also deploy a GitHub Pages documentation site.
+Successful benchmark runs upload a `guix-p2p-benchmark-*` artifact. A separate
+Pages workflow listens for successful benchmark runs, downloads that artifact,
+and deploys the documentation site with the new report. Normal docs changes can
+deploy Pages without waiting for the VM benchmark job.
+
 `index.html` is the docs landing page and `benchmarks.html` renders the latest
 benchmark report as HTML tables with links to the raw CSV, raw markdown report,
 and recent benchmark workflow runs. Older reports stay attached to their GitHub
 Actions runs as artifacts.
+
 Pages deployment runs only when the GitHub mirror supports Pages and the Pages
 site is configured for GitHub Actions. If the repository plan or visibility
-does not support Pages, the benchmark still passes and uploads the CSV/report
+does not support Pages, benchmark runs still pass and upload the CSV/report
 artifact.
 Benchmark dispatches do not share a branch-wide concurrency lock, so a stale
 run cannot block a later fixed run from starting.

@@ -129,13 +129,12 @@ runners.
 The workflow includes `nss-certs` so `guix shell` exposes a CA bundle for Cargo
 to verify crates.io TLS certificates.
 
-Successful benchmark runs also deploy a GitHub Pages site. Before the first
-deploy, set the GitHub mirror's Pages source to `GitHub Actions` under
-`Settings > Pages`.
+The separate GitHub Pages workflow deploys the documentation site on docs
+pushes and after successful benchmark runs. Before the first deploy, set the
+GitHub mirror's Pages source to `GitHub Actions` under `Settings > Pages`.
 Pages must also be supported by the repository's GitHub plan and visibility.
 When Pages is unavailable, the benchmark workflow still succeeds and keeps the
-CSV/report as a run artifact, but the Pages upload and deploy steps are
-skipped.
+CSV/report as a run artifact.
 
 The Pages site publishes a user-facing docs home at `index.html` and a rendered
 benchmark report at `benchmarks.html`. The benchmark page renders the latest
