@@ -4415,7 +4415,12 @@ cat > /tmp/guix-p2p <<'EOF'
 #!/bin/sh
 set -eu
 LIBGCRYPT="${{GUIX_P2P_E2E_LIBGCRYPT:-{}}}"
-export LD_LIBRARY_PATH="$LIBGCRYPT/lib:/run/current-system/profile/lib${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
+LOADER="/run/current-system/profile/lib/ld-linux-x86-64.so.2"
+LIBRARY_PATH="$LIBGCRYPT/lib:/run/current-system/profile/lib${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
+if [ -x "$LOADER" ]; then
+  exec "$LOADER" --library-path "$LIBRARY_PATH" /tmp/guix-p2p-real "$@"
+fi
+export LD_LIBRARY_PATH="$LIBRARY_PATH"
 exec /tmp/guix-p2p-real "$@"
 EOF
 chmod 755 /tmp/guix-p2p /tmp/guix-p2p-real

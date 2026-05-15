@@ -61,10 +61,15 @@
                 (display
                  (string-append
                   "#!" #$(file-append bash "/bin/sh") "\n"
-                  "export LD_LIBRARY_PATH=\""
+                  "LOADER=\"/run/current-system/profile/lib/ld-linux-x86-64.so.2\"\n"
+                  "LIBRARY_PATH=\""
                   #$openssl "/lib:" #$libgcrypt "/lib:" #$gcc-toolchain "/lib"
-                  "${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n"
-                 "exec \"" real "\" \"$@\"\n")
+                  ":/run/current-system/profile/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n"
+                  "if [ -x \"$LOADER\" ]; then\n"
+                  "  exec \"$LOADER\" --library-path \"$LIBRARY_PATH\" \"" real "\" \"$@\"\n"
+                  "fi\n"
+                  "export LD_LIBRARY_PATH=\"$LIBRARY_PATH\"\n"
+                  "exec \"" real "\" \"$@\"\n")
                  port)))
             (chmod wrapper #o555)
             (call-with-output-file node-a

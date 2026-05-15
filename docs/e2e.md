@@ -87,6 +87,8 @@ fetches through the same wrapper path as `vm fetch`.
 VM commands use the `guix-p2p` binary embedded in the image by default. Use
 `vm push-binary --all` plus `GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p` only when you
 need to test a replacement binary without rebuilding the image.
+The VM wrapper launches Rust binaries through the VM profile's dynamic loader
+so host-built Guix interpreter paths do not have to exist inside the guest.
 Daemon readiness checks wait long enough for slow software-emulated runners and
 print daemon log tails when a VM daemon exits or never reports its peer ID.
 
