@@ -27,6 +27,20 @@ jobs:
 
       - name: Install Guix fallback
         run: |
+          for profile in \
+            /run/current-system/profile \
+            /var/guix/profiles/per-user/root/current-guix \
+            /root/.config/guix/current \
+            "$HOME/.config/guix/current"
+          do
+            if [ -x "$profile/bin/guix" ]; then
+              export PATH="$profile/bin:$PATH"
+              if [ -n "${GITHUB_PATH:-}" ]; then
+                printf '%s\n' "$profile/bin" >> "$GITHUB_PATH"
+              fi
+            fi
+          done
+
           if command -v guix >/dev/null 2>&1; then
             guix --version
             exit 0
