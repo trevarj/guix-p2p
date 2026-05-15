@@ -84,6 +84,10 @@ saved with `vm bootstrap`. It seeds the requested
 package on each `--seed-nodes` node, removes the target from the fetcher before
 each fetch, runs HTTP-only fetches with the regular Guix daemon, and runs P2P
 fetches through the same wrapper path as `vm fetch`.
+Use `--suite system-profile` to benchmark the explicit package set installed
+in the E2E Guix System profile (`bash`, `curl`, `gcc-toolchain`, `guix`,
+`openssh-sans-x`, and `openssl`) across the same HTTP-only, p2p-only, and
+p2p-first modes.
 VM commands use the `guix-p2p` binary embedded in the image by default. Use
 `vm push-binary --all` plus `GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p` only when you
 need to test a replacement binary without rebuilding the image.

@@ -11,6 +11,7 @@ on:
         options:
           - smoke
           - standard
+          - system-profile
       iterations:
         description: Iterations per benchmark case
         required: true

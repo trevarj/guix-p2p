@@ -96,6 +96,19 @@ cargo run -p guix-p2p-e2e -- vm benchmark \
   --iterations 1
 ```
 
+The available suites are:
+
+- `smoke`: quick `hello` check.
+- `standard`: `hello`, `git`, and `linux-libre`.
+- `system-profile`: package set from the E2E Guix System profile: `bash`,
+  `curl`, `gcc-toolchain`, `guix`, `openssh-sans-x`, and `openssl`.
+
+`system-profile` is a reconfigure-like workload: it compares the same
+HTTP-only, p2p-only, and p2p-first substitute paths against the packages that
+make up the QEMU node's system profile. It does not run `guix system
+reconfigure` itself yet; that would require a separate driver for building and
+activating a full operating-system generation inside the fetch VM.
+
 For multiple seeders, start and push additional VM nodes, then pass them as a
 comma-separated list:
 
@@ -153,6 +166,8 @@ Defaults:
 
 - suite: `standard`
 - standard tiers: small `hello`, medium `git`, large `linux-libre`
+- system-profile packages: `bash`, `curl`, `gcc-toolchain`, `guix`,
+  `openssh-sans-x`, `openssl`
 - modes: `http,p2p-only,p2p-first`
 - HTTP conditions: `normal`
 - seed counts: `1`
@@ -179,6 +194,20 @@ guix shell -m manifest.scm -- \
   --iterations 3 \
   --transport tcp \
   --keep-temp
+```
+
+Use the system-profile suite for a profile-sized workload based on the E2E VM
+system package set:
+
+```sh
+guix shell -m manifest.scm -- \
+  cargo run -p guix-p2p-e2e -- benchmark \
+  --suite system-profile \
+  --modes http,p2p-only,p2p-first \
+  --http-conditions normal \
+  --seed-counts 1 \
+  --iterations 1 \
+  --transport tcp
 ```
 
 Modes:

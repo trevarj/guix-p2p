@@ -334,6 +334,8 @@ enum BenchmarkSuite {
     Smoke,
     Standard,
     Large,
+    #[value(name = "system-profile")]
+    SystemProfile,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -761,6 +763,20 @@ fn benchmark_package_selections(
             tier: BenchmarkTier::Large,
             name: "linux-libre".to_string(),
         }],
+        BenchmarkSuite::SystemProfile => vec![
+            BenchmarkPackageSelection { tier: BenchmarkTier::Medium, name: "bash".to_string() },
+            BenchmarkPackageSelection { tier: BenchmarkTier::Medium, name: "curl".to_string() },
+            BenchmarkPackageSelection {
+                tier: BenchmarkTier::Large,
+                name: "gcc-toolchain".to_string(),
+            },
+            BenchmarkPackageSelection { tier: BenchmarkTier::Large, name: "guix".to_string() },
+            BenchmarkPackageSelection {
+                tier: BenchmarkTier::Medium,
+                name: "openssh-sans-x".to_string(),
+            },
+            BenchmarkPackageSelection { tier: BenchmarkTier::Medium, name: "openssl".to_string() },
+        ],
     }
 }
 
@@ -5095,6 +5111,13 @@ mod tests {
         let names: Vec<&str> = standard.iter().map(|package| package.name.as_str()).collect();
         assert_eq!(tiers, vec![BenchmarkTier::Small, BenchmarkTier::Medium, BenchmarkTier::Large]);
         assert_eq!(names, vec!["hello", "git", "linux-libre"]);
+
+        let system_profile = benchmark_package_selections(BenchmarkSuite::SystemProfile, None);
+        let names: Vec<&str> = system_profile.iter().map(|package| package.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["bash", "curl", "gcc-toolchain", "guix", "openssh-sans-x", "openssl"]
+        );
     }
 
     #[test]
