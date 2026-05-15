@@ -65,6 +65,22 @@ jobs:
           sudo systemctl daemon-reload
           sudo systemctl restart guix-daemon.service
           systemctl --no-pager --full status guix-daemon.service
+
+      - name: Free hosted runner disk space
+        run: |
+          df -h
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/julia* \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/local/share/chromium \
+            /usr/share/dotnet \
+            /usr/share/swift
+          df -h
+
       - name: Check benchmark environment
         run: |
           guix_cmd="$(command -v guix)"
@@ -94,6 +110,7 @@ jobs:
           trap cleanup EXIT
           guix_cmd="$(command -v guix)"
           sudo "$guix_cmd" shell -m manifest-ci.scm -- sh -c '
+            set -eu
             libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
             export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             export GUIX_P2P_E2E_SUBSTITUTE_URLS="$3"
@@ -101,6 +118,7 @@ jobs:
             export GUIX_P2P_E2E_VM_MEMORY=1536
             export GUIX_P2P_E2E_VM_CPUS=2
 
+            df -h
             cargo build --locked --release
             cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e image
             cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e run Bootstrap
@@ -127,4 +145,5 @@ jobs:
           if-no-files-found: ignore
           path: |
             target/guix-p2p-bench/results.csv
+            target/guix-p2p-e2e/logs/*.log
             docs/benchmark-results.md

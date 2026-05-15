@@ -261,6 +261,9 @@ GitHub benchmarks are manual-only and run the VM benchmark harness from the
 mirrored repository. The job builds a base Guix System qcow2 image, boots
 Bootstrap, Alice, and Bob, then runs the same private-store VM benchmark used
 locally.
+The job frees unused hosted-runner toolchains before building the VM image and
+stops immediately if image creation fails, so later VM setup errors do not hide
+the original Guix image failure.
 
 To run one:
 
@@ -274,6 +277,7 @@ The artifact contains:
 
 - `results.csv`
 - `benchmark-results.md`
+- VM logs such as `base-image-build.log` when image creation fails
 
 Successful benchmark runs upload a `guix-p2p-benchmark-*` artifact. A separate
 Pages workflow listens for successful benchmark runs, downloads that artifact,
