@@ -113,7 +113,7 @@ To run it:
 - Open the GitHub mirror.
 - Go to `Actions > Benchmarks`.
 - Click `Run workflow`.
-- Choose `suite` and `iterations`.
+- Choose `suite`, `iterations`, and `modes`.
 - Download the `guix-p2p-benchmark-*` artifact from the completed run.
 
 The workflow runs the VM benchmark harness and uploads

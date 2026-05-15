@@ -70,8 +70,15 @@ imported store path is a restored directory.
 
 ## Benchmark
 
-The authoritative benchmark path is the VM workflow. First complete the setup
-from `docs/e2e.md`:
+The authoritative benchmark path is the GitHub Actions VM workflow. Do not run
+long VM benchmark suites on a developer workstation unless explicitly debugging
+the harness. Dispatch CI instead:
+
+- GitHub Actions: <https://github.com/trevarj/guix-p2p/actions/workflows/benchmarks.yml>
+- Choose `suite`, `iterations`, and `modes`.
+- Download the `guix-p2p-benchmark-*` artifact after the run completes.
+
+For local harness debugging only, first complete the setup from `docs/e2e.md`:
 
 ```sh
 cargo run -p guix-p2p-e2e -- vm image
@@ -272,7 +279,7 @@ To run one:
 - Open the GitHub mirror.
 - Go to `Actions > Benchmarks`.
 - Click `Run workflow`.
-- Choose `suite` and `iterations`.
+- Choose `suite`, `iterations`, and `modes`.
 - Download the `guix-p2p-benchmark-*` artifact after the run completes.
 
 The artifact contains:

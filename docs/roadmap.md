@@ -32,7 +32,9 @@ local dashboard access. Remaining work is mostly operational:
 ## Benchmark Work
 
 The current benchmark evidence proves local P2P correctness, not superiority
-over HTTP. Before making performance claims:
+over HTTP. Long VM benchmark suites should run through the GitHub Actions
+benchmark workflow, not on developer workstations. Before making performance
+claims:
 
 - Compare `http`, `p2p-only`, `p2p-first`, and `http-first` for the same
   package tiers.
@@ -56,6 +58,10 @@ The detailed benchmark method lives in [benchmarks.md](benchmarks.md).
 
 Before a broader release:
 
+- Replace `scripts/guix-wrapper.sh` with a Rust wrapper binary suitable for
+  normal user installs.
+- Audit `scripts/`, remove obsolete helpers, and migrate remaining runtime
+  setup scripts to Rust where practical.
 - Add a Guix channel package definition.
 - Document Guix channel installation once packaging exists.
 - Decide whether release binaries are supported or source builds remain the

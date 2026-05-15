@@ -18,6 +18,11 @@ on:
         required: true
         default: "1"
         type: string
+      modes:
+        description: Comma-separated benchmark modes
+        required: true
+        default: http,p2p-only,p2p-first,http-first
+        type: string
 permissions:
   contents: read
 
@@ -113,7 +118,7 @@ jobs:
             set -eu
             libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
             export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            export GUIX_P2P_E2E_SUBSTITUTE_URLS="$3"
+            export GUIX_P2P_E2E_SUBSTITUTE_URLS="$4"
             export GUIX_P2P_E2E_ENABLE_KVM=auto
             export GUIX_P2P_E2E_VM_MEMORY=1536
             export GUIX_P2P_E2E_VM_CPUS=2
@@ -128,14 +133,14 @@ jobs:
             cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e bootstrap Bootstrap
             exec cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e benchmark \
               --suite "$1" \
-              --modes http,p2p-only,p2p-first \
+              --modes "$3" \
               --http-conditions normal \
               --seed-nodes Alice \
               --fetch-node Bob \
               --http-node Bob \
               --iterations "$2" \
               --output target/guix-p2p-bench
-          ' sh "${{ inputs.suite }}" "${{ inputs.iterations }}" "$BENCHMARK_GUIX_SUBSTITUTE_URLS"
+          ' sh "${{ inputs.suite }}" "${{ inputs.iterations }}" "${{ inputs.modes }}" "$BENCHMARK_GUIX_SUBSTITUTE_URLS"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
