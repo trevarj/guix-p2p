@@ -32,7 +32,7 @@ guix-daemon
       |
       | spawns: guix substitute --query / --substitute
       v
-wrapper or patched guix substitute
+guix-p2p-wrapper installed as guix in PATH
       |
       | forwards stdin/fd 4 over Unix socket
       v
@@ -49,32 +49,15 @@ reply to guix-daemon as a normal substitute
 
 ## Quick Start
 
-```sh
-guix shell -m manifest.scm
-cargo build --release
-
-target/release/guix-p2p --daemon \
-    --listen-addr /ip4/0.0.0.0/udp/6881/quic-v1 \
-    --dashboard
-```
-
-Use the wrapper flow when a `guix-daemon` should route substitute queries
-through the daemon:
-
-```sh
-target/release/guix-p2p-wrapper build hello
-```
-
-## Setup For Known Testers
-
-Build from a development shell:
+Build the release binaries from a development shell:
 
 ```sh
 guix shell -m manifest.scm
 cargo build --release
 ```
 
-Start a daemon with the default cache directory, relay socket, and dashboard:
+Start a daemon with the default cache directory, relay socket, and local
+dashboard:
 
 ```sh
 target/release/guix-p2p --daemon \
@@ -84,6 +67,36 @@ target/release/guix-p2p --daemon \
     --dashboard-port 3030
 ```
 
+Install `guix-p2p-wrapper` as the `guix` command earlier in the `guix-daemon`
+service `PATH` than the real Guix binary. The wrapper passes ordinary Guix
+commands through unchanged, but intercepts the substitute protocol calls that
+`guix-daemon` makes during a build or reconfigure:
+
+```sh
+mkdir -p "$HOME/.local/libexec/guix-p2p/bin"
+ln -sf "$PWD/target/release/guix-p2p-wrapper" "$HOME/.local/libexec/guix-p2p/bin/guix"
+ln -sf "$PWD/target/release/guix-p2p" "$HOME/.local/libexec/guix-p2p/bin/guix-p2p"
+```
+
+Configure the daemon to start with that directory first in `PATH`, then keep
+using normal Guix commands:
+
+```sh
+guix build hello
+sudo guix system reconfigure /etc/config.scm
+```
+
+The wrapper defaults to:
+
+- relay socket: `${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock`
+- `guix-p2p` binary: `guix-p2p` from `PATH`
+- real Guix binary: `/run/current-system/profile/bin/guix`
+
+See [docs/deployment.md](docs/deployment.md) for persistent service and wrapper
+installation options.
+
+## Bootstrap Peers
+
 If another tester is acting as a bootstrap node, ask them for their full
 multiaddr and pass it as `bootstrap_peers` in `~/.config/guix-p2p/config.toml`:
 
@@ -91,48 +104,27 @@ multiaddr and pass it as `bootstrap_peers` in `~/.config/guix-p2p/config.toml`:
 bootstrap_peers = "/ip4/203.0.113.10/udp/6881/quic-v1/p2p/12D3KooW..."
 ```
 
-Use the wrapper flow to route a local Guix build through the daemon:
+## Validation
+
+Run the Rust test suite:
 
 ```sh
-target/release/guix-p2p-wrapper build hello
+cargo test
+cargo test -p guix-p2p-e2e
 ```
-
-The maintained strict validation flow is documented in
-[docs/e2e.md](docs/e2e.md). It uses disposable Guix System VMs with separate
-stores and proves the substitute import path end to end.
-
-Known public-network gaps:
-
-- Stable bootstrap infrastructure is not provided yet.
-- Guix packaging and channel distribution are not finished.
-- Remote dashboard mutation is not authenticated.
-- Operational support expectations are still for known testers, not a public
-  network.
-
-## Validation
 
 The strict end-to-end proof uses disposable Guix System VMs with separate
 writable stores. Follow [docs/e2e.md](docs/e2e.md) for the maintained command
-sequence.
-
-For a faster smoke test that exercises the Guix substituter path without the
-full VM proof:
+sequence. A faster container smoke test is also available:
 
 ```sh
 guix shell -m manifest.scm -- \
   cargo run -p guix-p2p-e2e -- container-smoke --package hello --transport tcp
 ```
 
-Run local controlled benchmarks:
-
-```sh
-guix shell -m manifest.scm -- \
-  cargo run -p guix-p2p-e2e -- benchmark --suite smoke --iterations 1 --transport tcp
-```
-
-Benchmark CSV output is written under `target/guix-p2p-bench/`; the markdown
-report is written to `docs/benchmark-results.md`. Use `--suite standard` for
-small, medium, and large package tiers.
+Benchmarks run in CI. Use the
+[GitHub Actions benchmark workflow](https://github.com/trevarj/guix-p2p/actions/workflows/benchmarks.yml)
+and [docs/benchmarks.md](docs/benchmarks.md) for benchmark runs and artifacts.
 
 ## Documentation
 
