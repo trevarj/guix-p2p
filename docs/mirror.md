@@ -115,6 +115,9 @@ substitute servers.
 The workflow uses `guix shell -m manifest-ci.scm` with Guix's packaged Rust
 toolchain and a minimal native build environment; it does not run `guix pull`
 on benchmark runs.
+The CI manifest also includes the Guix CLI so the benchmark harness can spawn
+nested Guix container environments without relying on the runner's ambient
+PATH.
 
 GitHub runs the benchmark harness under `sudo` because the container benchmark
 uses nested `guix shell -CN` environments that need mount privileges for a

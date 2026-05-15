@@ -5,6 +5,7 @@
              (gnu packages crypto)
              (gnu packages gnupg)
              (gnu packages nss)
+             (gnu packages package-management)
              (gnu packages rust)
              (gnu packages tls)
              (gnu packages perl)
@@ -16,6 +17,7 @@
   binutils
   pkg-config
   nss-certs
+  guix
 
   ;; Rust toolchain used by hosted CI and benchmark workflows.
   rust
