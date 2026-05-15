@@ -95,9 +95,9 @@ a {
 .site-header-inner {
   align-items: center;
   display: flex;
-  gap: 24px;
+  gap: 18px;
   justify-content: space-between;
-  min-height: 64px;
+  min-height: 52px;
 }
 .brand {
   align-items: center;
@@ -109,11 +109,11 @@ a {
 }
 .brand img {
   background: #fbfaf4;
-  border-radius: 8px;
+  border-radius: 6px;
   display: block;
-  height: 34px;
-  padding: 2px 6px;
-  width: 136px;
+  height: 24px;
+  padding: 1px 4px;
+  width: 96px;
 }
 nav {
   display: flex;
@@ -123,8 +123,9 @@ nav {
 nav a {
   border-radius: 999px;
   color: inherit;
+  font-size: 0.95rem;
   opacity: 0.78;
-  padding: 7px 11px;
+  padding: 5px 9px;
   text-decoration: none;
 }
 nav a[aria-current="page"] {
@@ -140,16 +141,6 @@ main {
   border-bottom: 1px solid var(--border);
   margin-bottom: 28px;
   padding-bottom: 34px;
-}
-.hero-mark {
-  background: #fbfaf4;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  display: block;
-  height: auto;
-  margin-bottom: 18px;
-  max-width: min(360px, 82vw);
-  padding: 8px 16px;
 }
 h1, h2, h3 {
   line-height: 1.2;
@@ -399,7 +390,6 @@ cat > "$site_dir/index.html" <<'HTML'
   </header>
   <main>
     <section class="hero">
-      <img class="hero-mark" src="assets/guix-p2p-wordmark.svg" alt="guix-p2p">
       <h1>guix-p2p documentation</h1>
       <p class="lead muted">User-facing documentation and benchmark evidence for the GitHub mirror.</p>
       <p class="actions">
@@ -444,7 +434,6 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
   </header>
   <main>
     <section class="hero">
-      <img class="hero-mark" src="assets/guix-p2p-wordmark.svg" alt="guix-p2p">
       <h1>Benchmarks</h1>
       <p class="lead muted">Latest generated report from the GitHub mirror benchmark workflow.</p>
       <p class="actions">
