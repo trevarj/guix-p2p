@@ -103,6 +103,9 @@ systemd drop-in that sets the benchmark substitute URL list. This keeps Guix
 package realization on the GitHub runner from depending only on the default
 substitute servers.
 
+The workflow includes `nss-certs` so `guix shell` exposes a CA bundle for Cargo
+to verify crates.io TLS certificates.
+
 Successful benchmark runs also deploy a GitHub Pages site. Before the first
 deploy, set the GitHub mirror's Pages source to `GitHub Actions` under
 `Settings > Pages`.

@@ -238,6 +238,9 @@ Before running `guix shell`, the workflow writes a systemd drop-in for
 `guix-daemon.service` so the runner daemon uses the benchmark mirror list for
 all store realizations.
 
+The workflow includes `nss-certs` so `guix shell` exposes a CA bundle for Cargo
+to verify crates.io TLS certificates.
+
 Before the first Pages deploy, configure the GitHub mirror's Pages source to
 `GitHub Actions` under `Settings > Pages`.
 

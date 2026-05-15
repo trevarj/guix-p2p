@@ -79,7 +79,7 @@ jobs:
 
       - name: Run benchmark
         run: >
-          guix shell rust gcc-toolchain pkg-config openssl libgcrypt eudev
+          guix shell rust gcc-toolchain pkg-config nss-certs openssl libgcrypt eudev
           libsecp256k1 perl sqlite -- cargo run -p guix-p2p-e2e --
           benchmark --suite "${{ inputs.suite }}" --iterations
           "${{ inputs.iterations }}" --transport "${{ inputs.transport }}"

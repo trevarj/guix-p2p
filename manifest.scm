@@ -9,6 +9,7 @@
              (gnu packages libunwind)
              (gnu packages musl)
              (gnu packages node)
+             (gnu packages nss)
              (gnu packages rust)
              (gnu packages tls)
              (gnu packages perl)
@@ -29,6 +30,7 @@
   libunwind
   musl
   pkg-config
+  nss-certs
 
   ;; Rustup
   (rustup "nightly-2026-03-14"
