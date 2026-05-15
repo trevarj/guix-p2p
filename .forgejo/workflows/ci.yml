@@ -16,6 +16,43 @@ jobs:
       - name: Check out repository
         uses: https://data.forgejo.org/actions/checkout@v4
 
+      - name: Install Guix fallback
+        run: |
+          if command -v guix >/dev/null 2>&1; then
+            guix --version
+            exit 0
+          fi
+
+          if ! command -v sudo >/dev/null 2>&1; then
+            echo "sudo is required to install Guix on this runner" >&2
+            exit 1
+          fi
+          if ! command -v curl >/dev/null 2>&1; then
+            echo "curl is required to download the Guix installer" >&2
+            exit 1
+          fi
+
+          curl -fsSL https://git.savannah.gnu.org/cgit/guix.git/plain/etc/guix-install.sh \
+            -o /tmp/guix-install.sh
+          chmod +x /tmp/guix-install.sh
+          yes | sudo /tmp/guix-install.sh
+
+          for profile in \
+            /var/guix/profiles/per-user/root/current-guix \
+            /root/.config/guix/current \
+            "$HOME/.config/guix/current"
+          do
+            if [ -x "$profile/bin/guix" ]; then
+              export PATH="$profile/bin:$PATH"
+              if [ -n "${GITHUB_PATH:-}" ]; then
+                printf '%s\n' "$profile/bin" >> "$GITHUB_PATH"
+              fi
+            fi
+          done
+
+          command -v guix
+          guix --version
+
       - name: Check Guix
         run: |
           guix --version

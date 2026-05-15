@@ -81,6 +81,8 @@ The workflow:
 
 - runs on pushes to `master`, pull requests, and manual dispatches;
 - checks out the repository with the Forgejo checkout action;
+- installs Guix with the upstream installer when `guix` is not already present
+  on the runner;
 - verifies the runner's Guix installation with `guix --version` and
   `guix describe`;
 - uses `guix shell -m manifest-ci.scm` with Guix's packaged Rust toolchain and
