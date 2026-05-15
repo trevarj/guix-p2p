@@ -5,12 +5,10 @@ is stable and deployed.
 
 ## Background Health Monitoring
 
-Currently, if DHT provider count drops below `min_providers`, the download
-bails out and guix-daemon falls through to HTTP. A background task could
-periodically scan seeded nars, check their DHT provider counts, and
-proactively re-fetch at-risk nars from the HTTP substitute servers and
-re-seed them via `NarStore::save()`. This would improve availability for
-the next requester without any manual intervention.
+The daemon now periodically checks provider counts for local seeds and
+re-announces them when known providers fall below `min_providers`. A future
+availability task could make this more proactive by re-fetching missing
+at-risk nars from HTTP and saving them through `NarStore::save()`.
 
 ## P2P-First Latency Tuning
 

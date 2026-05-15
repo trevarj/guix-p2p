@@ -781,15 +781,36 @@ async fn try_p2p_download(
 
     tracing::info!("Found {} P2P providers for {}", providers.len(), nar_hash);
 
-    let providers =
+    let mut providers =
         select_provider_candidates(&providers, reputation, conn_mgr, config.max_peers_per_download);
 
     if providers.len() < config.min_providers {
-        return Err(format!(
-            "not enough usable P2P providers after reputation/backoff filtering ({}/{})",
+        tracing::debug!(
+            "Only {} usable cached P2P providers for {}; waiting for fresh DHT results",
             providers.len(),
-            config.min_providers
-        ));
+            nar_hash
+        );
+        let refreshed = wait_for_providers_for_duration(
+            notify_rx,
+            &dht_key,
+            tokio::time::Duration::from_secs(config.request_timeout_secs),
+        )
+        .await;
+        let merged = merge_provider_lists(&providers, &refreshed);
+        providers = select_provider_candidates(
+            &merged,
+            reputation,
+            conn_mgr,
+            config.max_peers_per_download,
+        );
+
+        if providers.len() < config.min_providers {
+            return Err(format!(
+                "not enough usable P2P providers after reputation/backoff filtering ({}/{})",
+                providers.len(),
+                config.min_providers
+            ));
+        }
     }
 
     let handshakes = handshake_with_providers(
@@ -799,6 +820,7 @@ async fn try_p2p_download(
         *nar_hash_bytes,
         config.max_peers_per_download,
         reputation,
+        conn_mgr,
     )
     .await;
 
@@ -951,6 +973,11 @@ async fn wait_for_providers_for_duration(
     }
 }
 
+fn merge_provider_lists(left: &[PeerId], right: &[PeerId]) -> Vec<PeerId> {
+    let mut seen = HashSet::new();
+    left.iter().chain(right.iter()).copied().filter(|peer| seen.insert(*peer)).collect()
+}
+
 fn select_provider_candidates(
     providers: &[PeerId],
     reputation: &Arc<Mutex<ReputationTracker>>,
@@ -965,16 +992,13 @@ fn select_provider_candidates(
     let mut selected = Vec::new();
     let mut skipped = 0;
     {
-        let mut connections = conn_mgr.lock().unwrap();
+        let connections = conn_mgr.lock().unwrap();
         for peer in ranked {
             if selected.len() >= max_peers {
                 break;
             }
 
             if connections.can_connect(&peer) {
-                // Record the handshake attempt before sending protocol traffic so
-                // repeated stale provider records enter normal backoff.
-                connections.record_attempt(peer);
                 selected.push(peer);
             } else {
                 skipped += 1;
@@ -1030,6 +1054,7 @@ async fn handshake_with_providers(
     nar_hash_bytes: [u8; 32],
     max_peers: usize,
     reputation: &Arc<Mutex<ReputationTracker>>,
+    conn_mgr: &Arc<Mutex<ConnectionManager>>,
 ) -> Vec<PeerHandshake> {
     let max = providers.len().min(max_peers);
     let mut results = Vec::new();
@@ -1037,6 +1062,7 @@ async fn handshake_with_providers(
 
     // Send handshakes
     for peer in providers.iter().take(max) {
+        conn_mgr.lock().unwrap().record_attempt(*peer);
         let request = BlockRequest::Handshake { nar_hash: nar_hash_bytes.to_vec() };
         let _ = cmd_tx.send(SwarmCommand::SendBlockRequest { peer: *peer, request });
         pending.insert(*peer, (1_usize, tokio::time::Instant::now()));
@@ -1422,6 +1448,14 @@ pub async fn run_daemon_mode(
         tracing::info!("Dashboard enabled on http://{}:{}", bind, port);
     }
 
+    start_provider_health_monitor(
+        cache.clone(),
+        cmd_tx.clone(),
+        config.clone(),
+        event_tx.clone(),
+        nar_store.clone(),
+    );
+
     // Start Unix socket listener for relay connections
     let socket_path = config.socket_path.clone();
     start_socket_listener(
@@ -1442,6 +1476,52 @@ pub async fn run_daemon_mode(
     .await?;
 
     Ok(())
+}
+
+fn start_provider_health_monitor(
+    cache: ProviderCache,
+    cmd_tx: UnboundedSender<SwarmCommand>,
+    config: Config,
+    event_tx: dashboard::EventBus,
+    nar_store: Arc<Mutex<NarStore>>,
+) {
+    tokio::spawn(async move {
+        let interval_secs = config.health_check_interval_secs.max(30);
+        let mut tick = tokio::time::interval(tokio::time::Duration::from_secs(interval_secs));
+
+        loop {
+            tick.tick().await;
+            let hashes = nar_store.lock().unwrap().seeded_hashes();
+            if hashes.is_empty() {
+                continue;
+            }
+
+            for hash in &hashes {
+                let _ = cmd_tx.send(SwarmCommand::GetProviders { hash: hash.clone() });
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+            let snapshot = cache.lock().await.clone();
+            for hash in hashes {
+                let provider_count = snapshot.get(&hash).map_or(0, Vec::len);
+                let _ = event_tx.send(DashboardEvent::ProvidersFound {
+                    nar_hash: hash.clone(),
+                    provider_count,
+                });
+
+                if provider_count < config.min_providers {
+                    tracing::warn!(
+                        "Seeded nar {}.. has only {}/{} known providers; re-announcing local seed",
+                        &hash[..16.min(hash.len())],
+                        provider_count,
+                        config.min_providers
+                    );
+                    let _ = cmd_tx.send(SwarmCommand::StartProviding { hash });
+                }
+            }
+        }
+    });
 }
 
 /// Start the Unix domain socket listener that accepts relay connections.
@@ -1822,5 +1902,16 @@ mod tests {
         let selected = select_provider_candidates(&[stale, current], &reputation, &conn_mgr, 8);
 
         assert_eq!(selected, vec![current]);
+    }
+
+    #[test]
+    fn merge_provider_lists_deduplicates_in_order() {
+        let first = PeerId::random();
+        let second = PeerId::random();
+        let third = PeerId::random();
+
+        let merged = merge_provider_lists(&[first, second], &[second, third]);
+
+        assert_eq!(merged, vec![first, second, third]);
     }
 }

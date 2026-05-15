@@ -239,6 +239,8 @@ Peer → Client: BLOCKS { data: [(u32, Vec<u8>); 1..8] }
 - Retry handshakes during the handshake window.
 - Filter provider candidates through peer reputation and connection backoff
   before handshakes so stale DHT records are deprioritized after failures.
+- If cached providers are filtered below `min_providers`, wait for fresh DHT
+  provider notifications before failing the P2P attempt.
 - Require at least `min_providers` successful handshakes before downloading.
 - Assign pending blocks to the least-loaded peer that advertises the block.
 - Requeue stalled or invalid in-flight blocks for another provider.
@@ -533,6 +535,9 @@ and serving.
   - The daemon socket listener (same as substitute mode, for relay connections)
 - After saving a nar, a `SwarmCommand::StartProviding { hash }` is sent to the
   swarm task to announce the new nar in the DHT.
+- In daemon mode, a background health monitor periodically queries provider
+  counts for local seeds, emits provider-count dashboard events, and
+  re-announces local seeds when known providers fall below `min_providers`.
 
 ### `--seed` CLI flag
 
