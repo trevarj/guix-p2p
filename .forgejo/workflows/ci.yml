@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  rust:
+    name: Rust checks
+    runs-on: self-hosted
+
+    steps:
+      - name: Check out repository
+        uses: https://data.forgejo.org/actions/checkout@v4
+
+      - name: Check Guix
+        run: |
+          guix --version
+          guix describe
+
+      - name: Check formatting
+        run: guix shell -m manifest.scm -- cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: >
+          guix shell -m manifest.scm -- cargo clippy --workspace
+          --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: guix shell -m manifest.scm -- cargo test --workspace

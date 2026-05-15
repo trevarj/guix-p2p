@@ -64,6 +64,24 @@ The workflow:
 
 The workflow deliberately does not auto-commit generated benchmark output.
 
+## Codeberg CI
+
+Codeberg runs the normal CI checks from `.forgejo/workflows/ci.yml` on the
+repository self-hosted runner.
+
+The workflow:
+
+- runs on pushes to `master`, pull requests, and manual dispatches;
+- checks out the repository with the Forgejo checkout action;
+- verifies the runner's Guix installation with `guix --version` and
+  `guix describe`;
+- runs `cargo fmt --all -- --check`;
+- runs `cargo clippy --workspace --all-targets --all-features -- -D warnings`;
+- runs `cargo test --workspace`.
+
+The job uses `runs-on: self-hosted`. If more self-hosted runners are added,
+give the intended runner a unique label and add that label to the workflow.
+
 ## GitHub Benchmarks
 
 The manual benchmark workflow is `.github/workflows/benchmarks.yml`.
