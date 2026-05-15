@@ -234,6 +234,10 @@ Successful benchmark runs also deploy a GitHub Pages site with the latest CSV,
 latest markdown report, and links to recent benchmark workflow runs. Older
 reports stay attached to their GitHub Actions runs as artifacts.
 
+Before running `guix shell`, the workflow writes a systemd drop-in for
+`guix-daemon.service` so the runner daemon uses the benchmark mirror list for
+all store realizations.
+
 Before the first Pages deploy, configure the GitHub mirror's Pages source to
 `GitHub Actions` under `Settings > Pages`.
 

@@ -42,6 +42,19 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deploy-pages.outputs.page_url }}
+    env:
+      BENCHMARK_GUIX_SUBSTITUTE_URLS: >-
+        https://ci.guix.trop.in
+        https://cache-cdn.guix.moe
+        https://cache-fi.guix.moe
+        https://guix.bordeaux.inria.fr
+        https://nonguix-proxy.ditigal.xyz
+        https://ci.guix.gnu.org
+        https://bordeaux.guix.gnu.org
+        https://cache-sg.guix.moe
+        https://bordeaux-singapore-mirror.cbaines.net
+        https://mirror.yandex.ru/mirrors/guix
+        https://substitutes.nonguix.org
 
     steps:
       - name: Check out repository
@@ -51,6 +64,18 @@ jobs:
         uses: PromyLOPh/guix-install-action@v1
         with:
           pullAfterInstall: false
+
+      - name: Configure Guix daemon substitutes
+        run: |
+          sudo mkdir -p /etc/systemd/system/guix-daemon.service.d
+          {
+            echo "[Service]"
+            echo "ExecStart="
+            printf 'ExecStart=/var/guix/profiles/per-user/root/current-guix/bin/guix-daemon --build-users-group=guixbuild "--substitute-urls=%s"\n' "$BENCHMARK_GUIX_SUBSTITUTE_URLS"
+          } | sudo tee /etc/systemd/system/guix-daemon.service.d/override.conf
+          sudo systemctl daemon-reload
+          sudo systemctl restart guix-daemon.service
+          systemctl --no-pager --full status guix-daemon.service
 
       - name: Run benchmark
         run: >

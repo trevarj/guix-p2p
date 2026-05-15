@@ -80,6 +80,11 @@ The workflow runs the container benchmark harness and uploads
 `target/guix-p2p-bench/results.csv` plus `docs/benchmark-results.md`. It does
 not commit generated benchmark output back to the repository.
 
+Before running `guix shell`, the workflow restarts `guix-daemon.service` with a
+systemd drop-in that sets the benchmark substitute URL list. This keeps Guix
+package realization on the GitHub runner from depending only on the default
+substitute servers.
+
 Successful benchmark runs also deploy a GitHub Pages site. Before the first
 deploy, set the GitHub mirror's Pages source to `GitHub Actions` under
 `Settings > Pages`.
