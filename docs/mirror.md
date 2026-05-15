@@ -145,6 +145,9 @@ The site generator copies the `docs/assets/guix-p2p-wordmark.svg` wordmark into
 the Pages artifact and uses it in the header and hero. Benchmark dates are
 shown as UTC datetimes; older epoch-second reports are normalized in the
 browser renderer.
+The benchmark page renders SVG charts in the browser from `results.csv`, and
+falls back to the markdown report tables when a docs-only Pages deploy does not
+include a fresh CSV artifact.
 
 ## References
 

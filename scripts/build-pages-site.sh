@@ -239,6 +239,101 @@ pre {
   overflow: auto;
   padding: 16px;
 }
+.chart-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  margin: 16px 0 24px;
+}
+.chart-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  min-width: 0;
+  padding: 16px;
+}
+.chart-card h3 {
+  font-size: 1rem;
+  margin: 0 0 4px;
+}
+.chart-card p {
+  margin: 0 0 14px;
+}
+.chart-svg {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  overflow: visible;
+  width: 100%;
+}
+.chart-label {
+  fill: var(--text);
+  font-size: 12px;
+}
+.chart-muted {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.chart-axis {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.chart-bar-http {
+  background: var(--link);
+  fill: var(--link);
+}
+.chart-bar-p2p-only {
+  background: var(--green);
+  fill: var(--green);
+}
+.chart-bar-p2p-first {
+  background: var(--accent);
+  fill: var(--accent);
+}
+.chart-phase-seed {
+  background: #6f8fc7;
+  fill: #6f8fc7;
+}
+.chart-phase-prepare {
+  background: #c77d50;
+  fill: #c77d50;
+}
+.chart-phase-p2p {
+  background: var(--green);
+  fill: var(--green);
+}
+.chart-phase-provider {
+  background: #8b75c9;
+  fill: #8b75c9;
+}
+.chart-phase-daemon {
+  background: #d4a51c;
+  fill: #d4a51c;
+}
+.chart-phase-import {
+  background: #5aa6a6;
+  fill: #5aa6a6;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 10px;
+}
+.chart-legend span {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 0.9rem;
+  gap: 6px;
+}
+.chart-swatch {
+  border-radius: 999px;
+  display: inline-block;
+  height: 10px;
+  width: 10px;
+}
 @media (max-width: 640px) {
   .site-header-inner {
     align-items: flex-start;
@@ -368,6 +463,251 @@ function renderMarkdown(markdown) {
 }
 JS
 
+cat > "$site_dir/charts.js" <<'JS'
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+    if (quoted) {
+      if (char === '"' && next === '"') {
+        value += '"';
+        i += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        value += char;
+      }
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      row.push(value);
+      value = "";
+    } else if (char === "\n") {
+      row.push(value);
+      rows.push(row);
+      row = [];
+      value = "";
+    } else if (char !== "\r") {
+      value += char;
+    }
+  }
+  if (value.length > 0 || row.length > 0) {
+    row.push(value);
+    rows.push(row);
+  }
+
+  const headers = rows.shift() || [];
+  return rows
+    .filter((cells) => cells.some((cell) => cell !== ""))
+    .map((cells) => Object.fromEntries(headers.map((header, index) => [header, cells[index] || ""])));
+}
+
+function parseDurationMs(value) {
+  const trimmed = String(value || "").trim();
+  if (trimmed === "" || trimmed === "n/a") return null;
+  if (/^\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
+  const match = /^(\d+(?:\.\d+)?)(ms|s)$/.exec(trimmed);
+  if (!match) return null;
+  return match[2] === "s" ? Number(match[1]) * 1000 : Number(match[1]);
+}
+
+function formatDuration(ms) {
+  if (ms === null || !Number.isFinite(ms)) return "n/a";
+  if (ms >= 1000) return `${(ms / 1000).toFixed(ms >= 10_000 ? 1 : 2)}s`;
+  return `${Math.round(ms)}ms`;
+}
+
+function modeClass(mode) {
+  return `chart-bar-${String(mode || "unknown").replaceAll("_", "-")}`;
+}
+
+function displayCase(row) {
+  const pieces = [row.package, row.http_condition || row["HTTP condition"], row.mode || row.Mode].filter(Boolean);
+  return pieces.join(" / ");
+}
+
+function rowsFromCsv(csvText) {
+  return parseCsv(csvText)
+    .map((row) => ({
+      package: row.package,
+      mode: row.mode,
+      http_condition: row.http_condition,
+      seed_count: row.seed_count,
+      success: row.success === "true",
+      elapsed_ms: parseDurationMs(row.elapsed_ms),
+      seed_ms: parseDurationMs(row.seed_ms),
+      prepare_ms: parseDurationMs(row.prepare_ms),
+      p2p_start_ms: parseDurationMs(row.p2p_start_ms),
+      provider_wait_ms: parseDurationMs(row.provider_wait_ms),
+      daemon_start_ms: parseDurationMs(row.daemon_start_ms),
+      import_ms: parseDurationMs(row.import_ms),
+      total_ms: parseDurationMs(row.total_ms || row.elapsed_ms),
+    }))
+    .filter((row) => row.package && row.mode && row.elapsed_ms !== null);
+}
+
+function markdownTable(markdown, heading) {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const headingIndex = lines.findIndex((line) => line.trim() === `## ${heading}`);
+  if (headingIndex < 0) return [];
+  const tableStart = lines.findIndex((line, index) => index > headingIndex && line.trim().startsWith("|"));
+  if (tableStart < 0) return [];
+  const tableLines = [];
+  for (let i = tableStart; i < lines.length && lines[i].trim().startsWith("|"); i += 1) {
+    tableLines.push(lines[i]);
+  }
+  if (tableLines.length < 3) return [];
+  const headers = splitTableRow(tableLines[0]);
+  return tableLines.slice(2).map((line) => {
+    const cells = splitTableRow(line);
+    return Object.fromEntries(headers.map((header, index) => [header, cells[index] || ""]));
+  });
+}
+
+function rowsFromMarkdown(markdown) {
+  return markdownTable(markdown, "Runs")
+    .map((row) => ({
+      package: row.Package,
+      mode: row.Mode,
+      http_condition: row["HTTP condition"],
+      seed_count: row.Seeds,
+      success: row.Status === "ok",
+      elapsed_ms: parseDurationMs(row.Elapsed),
+      seed_ms: parseDurationMs(row.Seed),
+      prepare_ms: parseDurationMs(row.Prepare),
+      p2p_start_ms: parseDurationMs(row["P2P start"]),
+      provider_wait_ms: parseDurationMs(row["Provider wait"]),
+      daemon_start_ms: parseDurationMs(row["Daemon start"]),
+      import_ms: parseDurationMs(row.Import),
+      total_ms: parseDurationMs(row.Elapsed),
+    }))
+    .filter((row) => row.package && row.mode && row.elapsed_ms !== null);
+}
+
+function median(values) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  return sorted[Math.floor((sorted.length - 1) / 2)];
+}
+
+function summarizeRows(rows) {
+  const groups = new Map();
+  for (const row of rows.filter((item) => item.success)) {
+    const key = [row.package, row.http_condition, row.mode, row.seed_count].join("\u001f");
+    const current = groups.get(key) || { ...row, samples: [] };
+    current.samples.push(row);
+    groups.set(key, current);
+  }
+  return [...groups.values()].map((group) => ({
+    ...group,
+    elapsed_ms: median(group.samples.map((row) => row.elapsed_ms)),
+    seed_ms: median(group.samples.map((row) => row.seed_ms)),
+    prepare_ms: median(group.samples.map((row) => row.prepare_ms)),
+    p2p_start_ms: median(group.samples.map((row) => row.p2p_start_ms)),
+    provider_wait_ms: median(group.samples.map((row) => row.provider_wait_ms)),
+    daemon_start_ms: median(group.samples.map((row) => row.daemon_start_ms)),
+    import_ms: median(group.samples.map((row) => row.import_ms)),
+  })).filter((row) => row.elapsed_ms !== null);
+}
+
+function renderElapsedChart(rows) {
+  const data = summarizeRows(rows).sort((a, b) => a.elapsed_ms - b.elapsed_ms);
+  if (data.length === 0) return "<p class=\"muted\">No successful benchmark timings are available yet.</p>";
+  const width = 860;
+  const rowHeight = 34;
+  const labelWidth = 255;
+  const chartWidth = width - labelWidth - 120;
+  const height = 42 + data.length * rowHeight;
+  const max = Math.max(...data.map((row) => row.elapsed_ms));
+  const bars = data.map((row, index) => {
+    const y = 30 + index * rowHeight;
+    const barWidth = Math.max(2, (row.elapsed_ms / max) * chartWidth);
+    return `<g>
+      <text class="chart-label" x="0" y="${y + 14}">${escapeHtml(displayCase(row))}</text>
+      <rect class="${modeClass(row.mode)}" x="${labelWidth}" y="${y}" width="${barWidth}" height="18" rx="4"></rect>
+      <text class="chart-label" x="${labelWidth + barWidth + 8}" y="${y + 14}">${formatDuration(row.elapsed_ms)}</text>
+    </g>`;
+  }).join("");
+  return `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Median elapsed benchmark time by case">
+    <line class="chart-axis" x1="${labelWidth}" y1="20" x2="${labelWidth}" y2="${height - 8}"></line>
+    ${bars}
+  </svg>
+  <div class="chart-legend">
+    <span><i class="chart-swatch chart-bar-http"></i>HTTP</span>
+    <span><i class="chart-swatch chart-bar-p2p-only"></i>P2P only</span>
+    <span><i class="chart-swatch chart-bar-p2p-first"></i>P2P first</span>
+  </div>`;
+}
+
+function renderPhaseChart(rows) {
+  const phases = [
+    ["seed_ms", "Seed", "chart-phase-seed"],
+    ["prepare_ms", "Prepare", "chart-phase-prepare"],
+    ["p2p_start_ms", "P2P start", "chart-phase-p2p"],
+    ["provider_wait_ms", "Provider wait", "chart-phase-provider"],
+    ["daemon_start_ms", "Daemon", "chart-phase-daemon"],
+    ["import_ms", "Import", "chart-phase-import"],
+  ];
+  const data = summarizeRows(rows)
+    .filter((row) => phases.some(([field]) => row[field] !== null))
+    .sort((a, b) => a.elapsed_ms - b.elapsed_ms);
+  if (data.length === 0) return "<p class=\"muted\">No phase timing data is available yet.</p>";
+  const width = 860;
+  const rowHeight = 38;
+  const labelWidth = 255;
+  const chartWidth = width - labelWidth - 80;
+  const height = 42 + data.length * rowHeight;
+  const max = Math.max(...data.map((row) => phases.reduce((sum, [field]) => sum + (row[field] || 0), 0)));
+  const bars = data.map((row, index) => {
+    let x = labelWidth;
+    const y = 30 + index * rowHeight;
+    const segments = phases.map(([field, label, cssClass]) => {
+      const value = row[field] || 0;
+      if (value <= 0) return "";
+      const width = Math.max(2, (value / max) * chartWidth);
+      const segment = `<rect class="${cssClass}" x="${x}" y="${y}" width="${width}" height="18" rx="3"><title>${label}: ${formatDuration(value)}</title></rect>`;
+      x += width;
+      return segment;
+    }).join("");
+    return `<g>
+      <text class="chart-label" x="0" y="${y + 14}">${escapeHtml(displayCase(row))}</text>
+      ${segments}
+      <text class="chart-label" x="${x + 8}" y="${y + 14}">${formatDuration(row.elapsed_ms)}</text>
+    </g>`;
+  }).join("");
+  return `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Benchmark phase timing breakdown">
+    <line class="chart-axis" x1="${labelWidth}" y1="20" x2="${labelWidth}" y2="${height - 8}"></line>
+    ${bars}
+  </svg>
+  <div class="chart-legend">
+    ${phases.map(([_field, label, cssClass]) => `<span><i class="chart-swatch ${cssClass}"></i>${label}</span>`).join("")}
+  </div>`;
+}
+
+async function loadBenchmarkCharts() {
+  const elapsed = document.getElementById("elapsed-chart");
+  const phases = document.getElementById("phase-chart");
+  if (!elapsed || !phases) return;
+  const [csvResponse, markdownResponse] = await Promise.all([
+    fetch("results.csv", { cache: "no-store" }),
+    fetch("benchmark-results.md", { cache: "no-store" }),
+  ]);
+  const csvText = csvResponse.ok ? await csvResponse.text() : "";
+  const markdown = markdownResponse.ok ? await markdownResponse.text() : "";
+  const csvRows = rowsFromCsv(csvText);
+  const rows = csvRows.length > 0 ? csvRows : rowsFromMarkdown(markdown);
+  elapsed.innerHTML = renderElapsedChart(rows);
+  phases.innerHTML = renderPhaseChart(rows);
+}
+JS
+
 cat > "$site_dir/index.html" <<'HTML'
 <!doctype html>
 <html lang="en">
@@ -444,6 +784,22 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
     </section>
 
     <section>
+      <h2>Charts</h2>
+      <div class="chart-grid">
+        <article class="chart-card">
+          <h3>Median Elapsed Time</h3>
+          <p class="muted">Successful runs grouped by package, HTTP condition, mode, and seed count.</p>
+          <div id="elapsed-chart" class="muted">Loading benchmark chart...</div>
+        </article>
+        <article class="chart-card">
+          <h3>Phase Breakdown</h3>
+          <p class="muted">Timing phases reported by the VM benchmark harness.</p>
+          <div id="phase-chart" class="muted">Loading phase chart...</div>
+        </article>
+      </div>
+    </section>
+
+    <section>
       <h2>Latest Report</h2>
       <div id="report" class="markdown muted">Loading benchmark-results.md...</div>
     </section>
@@ -470,6 +826,7 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
   </main>
 
   <script src="markdown.js"></script>
+  <script src="charts.js"></script>
   <script>
     async function loadReport() {
       const report = document.getElementById("report");
@@ -506,6 +863,7 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
     }
 
     loadReport();
+    loadBenchmarkCharts();
     loadRuns();
   </script>
 </body>
