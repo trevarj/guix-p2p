@@ -15,6 +15,11 @@
 }
 .theme-green{--fg:#59d35f;--acc:#30a943;--dim:#1c5a28;--ok:#69e079;--muted:#67a86f}
 .theme-amber{--fg:#ffb000;--acc:#d68f00;--dim:#69450e;--ok:#ffcf54;--muted:#c08e31}
+.theme-tokyo{
+  --bg:#11121d;--fg:#c0caf5;--acc:#7aa2f7;--dim:#565f89;
+  --bg2:#16161e;--bg3:#1f2335;--line:#30364f;--err:#f7768e;--ok:#9ece6a;--warn:#e0af68;
+  --muted:#9aa5ce;--panel:#181a27;--panel2:#202437;--soft:#bb9af7
+}
 html,body{height:100%}
 body{
   background:var(--bg);color:var(--fg);font-family:var(--font);font-size:13px;
@@ -46,12 +51,15 @@ header .id{font-size:11px;opacity:.6}
 header .stats{display:grid;grid-template-columns:repeat(7,auto);gap:8px;font-size:11px}
 header .stats div{border:1px solid var(--line);background:var(--panel);padding:4px 7px;min-width:74px}
 header .stats span{display:block;color:var(--acc);font-weight:bold;font-size:14px;line-height:1.1}
-header button{
+header button,.theme-select{
   background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
   padding:5px 10px;font-family:var(--font);font-size:11px;cursor:pointer;border-radius:4px
 }
-header button:hover{border-color:var(--acc)}
-button:focus-visible,input:focus-visible{outline:1px solid var(--acc);outline-offset:2px}
+header button:hover,.theme-select:hover{border-color:var(--acc)}
+button:focus-visible,input:focus-visible,.theme-select:focus-visible{outline:1px solid var(--acc);outline-offset:2px}
+.theme-control{display:grid;gap:4px;justify-items:end}
+.theme-label{color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:1px}
+.theme-select{min-width:136px}
 .status-pill{
   margin-top:6px;display:inline-flex;align-items:center;gap:6px;color:var(--muted);
   font-size:10px;text-transform:uppercase;letter-spacing:.8px
@@ -334,8 +342,14 @@ main{
     <div data-tip="NARs currently cached locally and available for block serving.">SEEDS <span id="seed-count">0</span></div>
     <div data-tip="Daemon dashboard uptime since this process started.">UPTIME <span id="uptime">00:00:00</span></div>
   </div>
-  <div>
-    <button onclick="cycleTheme()" data-tip="Cycle dashboard color theme.">theme</button>
+  <div class="theme-control">
+    <label class="theme-label" for="theme-select">theme</label>
+    <select class="theme-select" id="theme-select" data-tip="Select dashboard color theme.">
+      <option value="theme-yellow">Terminal Yellow</option>
+      <option value="theme-green">Terminal Green</option>
+      <option value="theme-amber">Terminal Amber</option>
+      <option value="theme-tokyo">Tokyo Night</option>
+    </select>
     <div class="status-pill offline" id="api-status" data-tip="Dashboard API and WebSocket connection state.">connecting</div>
   </div>
 </header>
@@ -394,8 +408,14 @@ main{
   <p id="help-body"></p>
 </div>
 <script>
-var THEMES=['theme-yellow','theme-green','theme-amber'];
-var THEME_IDX=THEMES.indexOf('theme-yellow');
+var THEMES=[
+  {id:'theme-yellow',name:'Terminal Yellow'},
+  {id:'theme-green',name:'Terminal Green'},
+  {id:'theme-amber',name:'Terminal Amber'},
+  {id:'theme-tokyo',name:'Tokyo Night'}
+];
+var THEME_IDS=THEMES.map(function(t){return t.id});
+var CURRENT_THEME='theme-yellow';
 var STARTED=Date.now();
 var EVENT_IDX=0;
 var EVENTS=[];
@@ -420,7 +440,7 @@ var HELP_TEXT={
   'catalog-count':['Catalog Entries','Store paths observed during substitute lookups. Catalog entries show what the daemon has learned about possible packages and whether P2P providers were found.'],
   'seed-count':['Active Seeds','NARs in the local cache that this node can serve to requesting peers. A seed may come from manual seeding or from a successful P2P download that was cached locally.'],
   uptime:['Uptime','How long this dashboard-enabled daemon process has been running. Event history is in memory and resets when the daemon restarts.'],
-  theme:['Theme','Cycles between the built-in dashboard color themes. This only affects the current browser and is saved in local storage.'],
+  theme:['Theme','Selects the dashboard color theme. This only affects the current browser and is saved in local storage.'],
   packages:['Packages','Installed package rows let you seed local store paths into the P2P cache.\n\nSearch filters the current installed-package snapshot by name, version, or /gnu/store path. The profile label shows whether an item came from the system, kernel, or Guix Home profile. The seed action serializes the selected store path, caches its NAR, and announces it to peers.'],
   'package-search':['Package Search','Filters the installed package snapshot by package name, version, and full /gnu/store path. It does not query Guix again; the package list refreshes periodically.'],
   seeds:['Active Seeds','Shows cached NARs this node can serve to other peers.\n\nEach row shows the package/store item when known, the full path as secondary text, size and block metadata, and a stop action. Open a row for hash, size, block count, and seeding status. Stop removes the cached NAR and persisted seed path when metadata is available.'],
@@ -530,11 +550,14 @@ function setStatus(text,state){
   if(DEMO_MODE)el.classList.add('demo')
 }
 
-function cycleTheme(){
-  THEME_IDX=(THEME_IDX+1)%THEMES.length;
-  THEMES.forEach(function(t){document.body.classList.remove(t)});
-  document.body.classList.add(THEMES[THEME_IDX]);
-  localStorage.setItem('guix-p2p-theme',THEMES[THEME_IDX]);
+function applyTheme(themeId){
+  if(THEME_IDS.indexOf(themeId)<0)themeId='theme-yellow';
+  THEME_IDS.forEach(function(t){document.body.classList.remove(t)});
+  document.body.classList.add(themeId);
+  CURRENT_THEME=themeId;
+  var select=document.getElementById('theme-select');
+  if(select)select.value=themeId;
+  localStorage.setItem('guix-p2p-theme',themeId);
 }
 
 function eventCategory(cls){
@@ -1319,9 +1342,7 @@ document.addEventListener('keydown',function(ev){
 
 (function(){
   var saved=localStorage.getItem('guix-p2p-theme');
-  if(saved&&THEMES.indexOf(saved)>=0){THEME_IDX=THEMES.indexOf(saved)}
-  THEMES.forEach(function(t){document.body.classList.remove(t)});
-  document.body.classList.add(THEMES[THEME_IDX]);
+  applyTheme(saved||CURRENT_THEME);
 
   function tickUptime(){
     if(!SERVER_STARTED)return;
@@ -1433,6 +1454,9 @@ document.addEventListener('keydown',function(ev){
   initTooltips();
   decorateHelpButtons(document);
   document.getElementById('package-search').addEventListener('input',renderPackages);
+  document.getElementById('theme-select').addEventListener('change',function(ev){
+    applyTheme(ev.target.value)
+  });
 })();
 </script>
 </body>
