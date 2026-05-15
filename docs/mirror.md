@@ -58,8 +58,9 @@ The workflow:
 
 - runs on pushes to `master`, version tags, and manual dispatches;
 - installs Guix on the GitHub runner;
-- shallow-clones the `guix-rustup` channel and passes it with `guix shell -L`
-  so the `rustup` module resolved by `manifest.scm` is available;
+- shallow-clones the Nonguix and `guix-rustup` channels and passes them with
+  `guix shell -L` so the `rustup` module resolved by `manifest.scm` is
+  available;
 - uses `guix shell -m manifest.scm`, including the pinned nightly Rust toolchain;
 - exports Guix's GCC runtime library directory in `LD_LIBRARY_PATH` before
   Cargo commands so build scripts can load `libgcc_s.so.1`;
@@ -80,8 +81,9 @@ The workflow:
 - checks out the repository with the Forgejo checkout action;
 - verifies the runner's Guix installation with `guix --version` and
   `guix describe`;
-- shallow-clones the `guix-rustup` channel and passes it with `guix shell -L`
-  so the `rustup` module resolved by `manifest.scm` is available;
+- shallow-clones the Nonguix and `guix-rustup` channels and passes them with
+  `guix shell -L` so the `rustup` module resolved by `manifest.scm` is
+  available;
 - exports Guix's GCC runtime library directory in `LD_LIBRARY_PATH` before
   Cargo commands so build scripts can load `libgcc_s.so.1`;
 - runs `cargo fmt --all -- --check`;
@@ -112,10 +114,10 @@ systemd drop-in that sets the benchmark substitute URL list. This keeps Guix
 package realization on the GitHub runner from depending only on the default
 substitute servers.
 
-The workflow shallow-clones the `guix-rustup` channel and passes
-`.cache/guix-rustup/guix` with `guix shell -L`; this provides the `rustup`
-module resolved by `manifest.scm` for the pinned nightly Rust toolchain without
-running `guix pull` on every benchmark run.
+The workflow shallow-clones Nonguix and `guix-rustup`, then passes
+`.cache/nonguix` and `.cache/guix-rustup/guix` with `guix shell -L`; this
+provides the modules resolved by `manifest.scm` for the pinned nightly Rust
+toolchain without running `guix pull` on every benchmark run.
 
 Cargo commands export Guix's GCC runtime library directory in
 `LD_LIBRARY_PATH` so Rust build scripts can load `libgcc_s.so.1` on hosted CI

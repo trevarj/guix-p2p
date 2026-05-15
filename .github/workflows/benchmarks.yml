@@ -80,11 +80,12 @@ jobs:
 
       - name: Fetch guix-rustup channel
         run: |
+          git clone --depth 1 https://gitlab.com/nonguix/nonguix .cache/nonguix
           git clone --depth 1 https://codeberg.org/declantsien/guix-rustup .cache/guix-rustup
 
       - name: Check benchmark environment
         run: |
-          guix shell -L .cache/guix-rustup/guix -m manifest.scm -- sh -c '
+          guix shell -L .cache/nonguix -L .cache/guix-rustup/guix -m manifest.scm -- sh -c '
             libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
             test -r "$libgcc_dir/libgcc_s.so.1"
             export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -98,7 +99,7 @@ jobs:
 
       - name: Run benchmark
         run: |
-          guix shell -L .cache/guix-rustup/guix -m manifest.scm -- sh -c '
+          guix shell -L .cache/nonguix -L .cache/guix-rustup/guix -m manifest.scm -- sh -c '
             libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
             export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             exec cargo run --locked -p guix-p2p-e2e -- benchmark \
