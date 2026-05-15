@@ -62,9 +62,6 @@ Use the wrapper flow when a `guix-daemon` should route substitute queries
 through the daemon:
 
 ```sh
-GUIX_P2P_SOCKET="${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock" \
-GUIX_P2P_BIN="$PWD/target/release/guix-p2p" \
-REAL_GUIX="$(command -v guix)" \
 target/release/guix-p2p-wrapper build hello
 ```
 
@@ -97,9 +94,6 @@ bootstrap_peers = "/ip4/203.0.113.10/udp/6881/quic-v1/p2p/12D3KooW..."
 Use the wrapper flow to route a local Guix build through the daemon:
 
 ```sh
-GUIX_P2P_SOCKET="${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock" \
-GUIX_P2P_BIN="$PWD/target/release/guix-p2p" \
-REAL_GUIX="$(command -v guix)" \
 target/release/guix-p2p-wrapper build hello
 ```
 

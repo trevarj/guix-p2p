@@ -26,7 +26,13 @@ The daemon owns:
 early in the daemon's `PATH` to intercept only those substitute invocations.
 Other `guix` commands pass through to the real Guix binary.
 
-Environment variables supported by the wrapper:
+Default wrapper behavior:
+
+- relay socket: `${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock`
+- `guix-p2p` binary: resolved from `PATH`
+- real Guix binary: `/run/current-system/profile/bin/guix`
+
+Optional environment overrides:
 
 - `GUIX_P2P_SOCKET`: relay socket path.
 - `GUIX_P2P_BIN`: `guix-p2p` binary path. Defaults to `guix-p2p` on `PATH`.
