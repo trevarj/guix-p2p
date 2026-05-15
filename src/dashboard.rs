@@ -20,8 +20,11 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
-    channel::SwarmCommand, connection::ConnectionManager, dht::ProviderCache, nar_store::NarStore,
-    reputation::ReputationTracker,
+    channel::SwarmCommand,
+    connection::{ConnectionManager, PeerConnectionSnapshot},
+    dht::ProviderCache,
+    nar_store::NarStore,
+    reputation::{PeerScore, ReputationTracker},
 };
 
 mod catalog;
@@ -149,6 +152,8 @@ struct ApiPeer {
     bytes_served: u64,
     connected: bool,
     addresses: Vec<String>,
+    address_count: usize,
+    last_active_secs_ago: Option<u64>,
     country: Option<String>,
     ip: Option<String>,
 }
@@ -303,7 +308,11 @@ fn dashboard_router(state: DashboardState) -> Router {
 }
 
 async fn index_html() -> Html<&'static str> {
-    Html(include_str!("dashboard.html"))
+    Html(dashboard_html())
+}
+
+pub fn dashboard_html() -> &'static str {
+    include_str!("dashboard.html")
 }
 
 async fn api_status(State(state): State<DashboardState>) -> Json<ApiStatus> {
@@ -326,28 +335,49 @@ async fn api_status(State(state): State<DashboardState>) -> Json<ApiStatus> {
 }
 
 async fn api_peers(State(state): State<DashboardState>) -> Json<Vec<ApiPeer>> {
-    let rep = state.reputation.lock().unwrap();
-    let peers: Vec<ApiPeer> = rep
-        .peer_entries()
+    let now = Instant::now();
+    let rep_entries: HashMap<_, _> =
+        state.reputation.lock().unwrap().peer_entries().into_iter().collect();
+    let conn_entries: HashMap<_, _> =
+        state.conn_mgr.lock().unwrap().peer_snapshots().into_iter().map(|s| (s.peer, s)).collect();
+
+    let mut peer_ids: HashSet<_> = rep_entries.keys().copied().collect();
+    peer_ids.extend(conn_entries.keys().copied());
+
+    let mut peers: Vec<ApiPeer> = peer_ids
         .into_iter()
-        .map(|(peer, peer_score)| {
-            let addrs = vec![];
-            let (ip, country) = extract_addr_info(&addrs);
-            ApiPeer {
-                peer_id: peer.to_string(),
-                score: peer_score.score(Instant::now()),
-                completed: peer_score.completed,
-                failed: peer_score.failed,
-                bytes_served: peer_score.bytes_served,
-                connected: false,
-                addresses: addrs.clone(),
-                country,
-                ip,
-            }
-        })
+        .map(|peer| api_peer_from_parts(peer, rep_entries.get(&peer), conn_entries.get(&peer), now))
         .collect();
-    drop(rep);
+    peers.sort_by(|a, b| {
+        b.connected
+            .cmp(&a.connected)
+            .then_with(|| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| a.peer_id.cmp(&b.peer_id))
+    });
     Json(peers)
+}
+
+fn api_peer_from_parts(
+    peer: libp2p::PeerId,
+    peer_score: Option<&PeerScore>,
+    conn: Option<&PeerConnectionSnapshot>,
+    now: Instant,
+) -> ApiPeer {
+    let addresses = conn.map(|snapshot| snapshot.addresses.clone()).unwrap_or_default();
+    let (ip, country) = extract_addr_info(&addresses);
+    ApiPeer {
+        peer_id: peer.to_string(),
+        score: peer_score.map(|score| score.score(now)).unwrap_or(0.5),
+        completed: peer_score.map_or(0, |score| score.completed),
+        failed: peer_score.map_or(0, |score| score.failed),
+        bytes_served: peer_score.map_or(0, |score| score.bytes_served),
+        connected: conn.is_some_and(|snapshot| snapshot.connected),
+        address_count: addresses.len(),
+        last_active_secs_ago: conn.map(|snapshot| snapshot.last_active_secs_ago),
+        addresses,
+        country,
+        ip,
+    }
 }
 
 async fn api_builds(State(state): State<DashboardState>) -> Json<Vec<ApiBuild>> {
@@ -849,6 +879,49 @@ mod tests {
         assert_eq!(peers[0].completed, 1);
         assert_eq!(peers[0].failed, 1);
         assert_eq!(peers[0].bytes_served, 4096);
+        assert!(!peers[0].connected);
+        assert_eq!(peers[0].address_count, 0);
+    }
+
+    #[tokio::test]
+    async fn peers_api_includes_connected_peers_without_reputation() {
+        let (state, _tmp) = dashboard_state();
+        let peer = libp2p::PeerId::random();
+        let address = "/ip4/127.0.0.1/tcp/6881".to_string();
+        state.conn_mgr.lock().unwrap().on_connected_with_addresses(peer, vec![address.clone()]);
+
+        let peers = api_peers(State(state)).await.0;
+
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].peer_id, peer.to_string());
+        assert!(peers[0].connected);
+        assert_eq!(peers[0].score, 0.5);
+        assert_eq!(peers[0].addresses, vec![address]);
+        assert_eq!(peers[0].address_count, 1);
+        assert_eq!(peers[0].last_active_secs_ago, Some(0));
+    }
+
+    #[tokio::test]
+    async fn peers_api_merges_connection_snapshot_with_reputation() {
+        let (state, _tmp) = dashboard_state();
+        let peer = libp2p::PeerId::random();
+        {
+            let mut reputation = state.reputation.lock().unwrap();
+            reputation.record_success(peer, 4096);
+        }
+        state
+            .conn_mgr
+            .lock()
+            .unwrap()
+            .on_connected_with_addresses(peer, vec!["/ip4/127.0.0.1/tcp/6881".to_string()]);
+
+        let peers = api_peers(State(state)).await.0;
+
+        assert_eq!(peers.len(), 1);
+        assert!(peers[0].connected);
+        assert_eq!(peers[0].completed, 1);
+        assert_eq!(peers[0].bytes_served, 4096);
+        assert_eq!(peers[0].address_count, 1);
     }
 
     #[tokio::test]

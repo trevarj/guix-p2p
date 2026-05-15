@@ -8,9 +8,9 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#080908;--fg:#f5d000;--acc:#d4a800;--dim:#5a4a12;
-  --bg2:#10110f;--bg3:#191b18;--line:#2f2b14;--err:#d24b4b;--ok:#56c271;--warn:#d8a642;
-  --muted:#9c8832;--panel:#0f100e;--panel2:#151711;
+  --bg:#090a08;--fg:#efd55a;--acc:#d6b33a;--dim:#6c5a21;
+  --bg2:#11130f;--bg3:#1a1d17;--line:#3a3218;--err:#e36a6a;--ok:#67c879;--warn:#d8a642;
+  --muted:#a89442;--panel:#10120f;--panel2:#171a14;--soft:#d8c875;
   --font:'Cascadia Code','JetBrains Mono','Fira Code','IBM Plex Mono',monospace
 }
 .theme-green{--fg:#59d35f;--acc:#30a943;--dim:#1c5a28;--ok:#69e079;--muted:#67a86f}
@@ -23,7 +23,7 @@ body{
 }
 body::before{
   content:'';position:fixed;inset:0;
-  background:repeating-linear-gradient(rgba(0,0,0,.03) 0px,transparent 2px);
+  background:repeating-linear-gradient(rgba(0,0,0,.018) 0px,transparent 2px);
   pointer-events:none;z-index:999
 }
 *{scrollbar-width:thin;scrollbar-color:var(--dim) var(--bg2)}
@@ -51,6 +51,15 @@ header button{
   padding:5px 10px;font-family:var(--font);font-size:11px;cursor:pointer;border-radius:4px
 }
 header button:hover{border-color:var(--acc)}
+button:focus-visible,input:focus-visible{outline:1px solid var(--acc);outline-offset:2px}
+.status-pill{
+  margin-top:6px;display:inline-flex;align-items:center;gap:6px;color:var(--muted);
+  font-size:10px;text-transform:uppercase;letter-spacing:.8px
+}
+.status-pill::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 8px rgba(216,166,66,.35)}
+.status-pill.live::before{background:var(--ok);box-shadow:0 0 8px rgba(86,194,113,.45)}
+.status-pill.offline::before{background:var(--err);box-shadow:0 0 8px rgba(210,75,75,.45)}
+.status-pill.demo{color:var(--warn)}
 main{
   display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:minmax(150px,.58fr) minmax(260px,1.15fr) minmax(210px,.85fr) minmax(150px,.45fr);
   grid-template-areas:
@@ -111,11 +120,14 @@ main{
   display:flex;align-items:center;gap:6px;padding:3px 0;
   border-bottom:1px solid var(--line);font-size:12px
 }
+.peer-row{display:grid;grid-template-columns:24px minmax(0,1fr) minmax(70px,.45fr) 118px;column-gap:6px}
 .peer-row .flag,.build-row .flag,.seed-row .flag,.package-row .source{font-size:14px;min-width:24px}
-.peer-row .peer-id{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.peer-row .bar,.build-row .bar{flex:1;height:6px;background:var(--bg3)}
+.peer-row .peer-id{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.peer-row .bar,.build-row .bar{height:6px;background:var(--bg3);align-self:center}
 .peer-row .bar-inner,.build-row .bar-inner{height:100%;background:var(--acc)}
-.peer-row .meta{min-width:90px;text-align:right;font-size:11px;opacity:.8}
+.peer-row .meta{text-align:right;font-size:10px;opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.peer-row .status{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:4px}
+.peer-row.offline .status{background:var(--dim)}
 .peer-row.offline{opacity:.55}
 .catalog-row,.build-row,.seed-row,.package-row{cursor:pointer;border-radius:4px;padding-left:3px;padding-right:3px}
 .catalog-row:hover,.build-row:hover,.seed-row:hover,.package-row:hover{background:var(--panel2)}
@@ -158,6 +170,7 @@ main{
 }
 .package-row .seed-action:hover{border-color:var(--acc)}
 .package-row.seeded .seed-action{color:var(--dim)}
+.package-row .seed-action:disabled{cursor:not-allowed;opacity:.55;border-color:var(--line)}
 .transfer-card{
   display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:12px;align-items:center;
   border:1px solid var(--line);background:var(--bg2);padding:8px;border-radius:4px;
@@ -323,6 +336,7 @@ main{
   </div>
   <div>
     <button onclick="cycleTheme()" data-tip="Cycle dashboard color theme.">theme</button>
+    <div class="status-pill offline" id="api-status" data-tip="Dashboard API and WebSocket connection state.">connecting</div>
   </div>
 </header>
 <main>
@@ -396,6 +410,7 @@ var TRANSFERS={};
 var WS=null;
 var WS_RETRY=1000;
 var SERVER_STARTED=null;
+var DEMO_MODE=false;
 var HELP_TEXT={
   dashboard:['Dashboard','This page is the local operational view for a guix-p2p daemon. It combines seed inventory, transfer proof evidence, peer health, discovered substitute metadata, and recent daemon events.'],
   connected:['Connected Peers','The number of currently connected swarm peers reported by the daemon connection manager. A low value can be normal before discovery or when only bootstrap forwarding is available.'],
@@ -450,6 +465,15 @@ function fmtBytes(b){
 
 function fmtScore(s){return (s||0).toFixed(2)}
 
+function fmtAge(seconds){
+  if(seconds==null)return'no activity';
+  if(seconds<5)return'now';
+  if(seconds<60)return seconds+'s ago';
+  var m=Math.floor(seconds/60);
+  if(m<60)return m+'m ago';
+  return Math.floor(m/60)+'h ago'
+}
+
 function clamp(n,min,max){return Math.max(min,Math.min(max,n))}
 
 function esc(v){
@@ -495,6 +519,15 @@ function closeHelp(){
 
 function updatePeerCount(){
   document.getElementById('total-peers').textContent=Object.keys(PEERS).length
+}
+
+function setStatus(text,state){
+  var el=document.getElementById('api-status');
+  if(!el)return;
+  el.textContent=DEMO_MODE?'demo '+text:text;
+  el.classList.remove('live','offline','demo');
+  el.classList.add(state||'offline');
+  if(DEMO_MODE)el.classList.add('demo')
 }
 
 function cycleTheme(){
@@ -582,18 +615,25 @@ function renderPeers(){
   updatePeerCount();
   if(!keys.length){el.innerHTML='<div class="empty">no peers yet</div>';return}
   var h='';
-  keys.sort(function(a,b){return(PEERS[b].score||0)-(PEERS[a].score||0)});
+  keys.sort(function(a,b){
+    return Number(Boolean(PEERS[b].connected))-Number(Boolean(PEERS[a].connected))
+      ||(PEERS[b].score||0)-(PEERS[a].score||0)
+      ||a.localeCompare(b)
+  });
   keys.forEach(function(k){
     var p=PEERS[k];
     var sc=p.score||0;
     var w=clamp(Math.round(sc*100),0,100);
     var flag=p.country?flagEmoji(p.country):'[??] ';
-    var ip=p.ip||'?';
+    var addr=(p.addresses&&p.addresses.length)?p.addresses[0]:(p.ip||'no address');
+    var activity=fmtAge(p.last_active_secs_ago);
+    var counters=(p.completed||0)+' ok / '+(p.failed||0)+' fail';
+    var tip=k+'\n'+addr+'\n'+counters+'\n'+fmtBytes(p.bytes_served||0)+' served\nlast active '+activity;
     h+='<div class="peer-row '+(p.connected?'':'offline')+'">'
       +'<span class="flag">'+esc(flag)+'</span>'
-      +'<span class="peer-id" data-tip="'+attr(k)+'">'+esc(peerIdShort(k))+'</span>'
+      +'<span class="peer-id" data-tip="'+attr(tip)+'"><span class="status"></span>'+esc(peerIdShort(k))+'</span>'
       +'<span class="bar"><span class="bar-inner" style="width:'+w+'%"></span></span>'
-      +'<span class="meta">'+esc(ip)+' ('+esc(fmtScore(sc))+')</span>'
+      +'<span class="meta" data-tip="'+attr(addr)+'">'+esc((p.connected?'up ':'idle ')+fmtScore(sc)+' / '+activity)+'</span>'
       +'</div>';
   });
   el.innerHTML=h;
@@ -674,7 +714,7 @@ function renderPackages(){
       +'<span class="source-meta">'+esc(src)+'</span>'
       +'<span class="meta">'+esc(pkg.store_path||'')+'</span></span>'
       +'<span class="state">'+esc(state)+'</span>'
-      +'<button class="seed-action" data-tip="'+attr(pkg.seeded?'Already seeded locally.':'Seed this installed store path into the local P2P cache.')+'" onclick="seedPackage(event,\''+jsArg(pkg.store_path||'')+'\')">'+esc(button)+'</button>'
+      +'<button class="seed-action" type="button" '+(pkg.seeded?'disabled ':'')+'data-tip="'+attr(pkg.seeded?'Already seeded locally.':'Seed this installed store path into the local P2P cache.')+'" onclick="seedPackage(event,\''+jsArg(pkg.store_path||'')+'\')">'+esc(button)+'</button>'
       +'</div>';
   });
   if(arr.length>200)h+='<div class="empty">showing 200 of '+arr.length+' matches, refine search</div>';
@@ -1031,6 +1071,10 @@ function closeDetail(){
   document.getElementById('overlay').classList.add('hidden')
 }
 
+document.getElementById('overlay').addEventListener('click',function(ev){
+  if(ev.target.id==='overlay')closeDetail()
+});
+
 function toggleNarinfo(el){
   var raw=el.nextElementSibling;
   if(raw.classList.contains('open')){
@@ -1045,7 +1089,10 @@ function toggleNarinfo(el){
 function connectWS(){
   var proto=location.protocol==='https:'?'wss':'ws';
   WS=new WebSocket(proto+'://'+location.host+'/ws');
-  WS.onopen=function(){WS_RETRY=1000};
+  WS.onopen=function(){
+    WS_RETRY=1000;
+    setStatus('live','live')
+  };
   WS.onmessage=function(msg){
     try{
       var e=JSON.parse(msg.data);
@@ -1054,6 +1101,7 @@ function connectWS(){
   };
   WS.onclose=function(){
     WS=null;
+    setStatus('reconnecting','offline');
     setTimeout(connectWS,WS_RETRY);
     WS_RETRY=Math.min(WS_RETRY*2,16000)
   };
@@ -1065,10 +1113,6 @@ function handleEvent(e,meta){
   switch(e.type){
     case 'PeerConnected':
       mergePeer({peer_id:e.peer_id,connected:true,addresses:e.addresses||[]});
-      (e.addresses||[]).forEach(function(a){
-        var ip=extractIP(a);
-        if(ip){PEERS[e.peer_id].ip=ip;PEERS[e.peer_id].country=ipCountry(ip)}
-      });
       addEvent('peer-conn','o','Peer '+peerIdShort(e.peer_id)+' connected',meta);
       renderPeers();
       break;
@@ -1179,13 +1223,15 @@ function ipCountry(ip){
 
 function mergePeer(p){
   if(!p||!p.peer_id)return;
-  var cur=PEERS[p.peer_id]||{peer_id:p.peer_id,score:0.5,completed:0,failed:0,bytes_served:0,connected:false,addresses:[],country:null,ip:null};
+  var cur=PEERS[p.peer_id]||{peer_id:p.peer_id,score:0.5,completed:0,failed:0,bytes_served:0,connected:false,addresses:[],address_count:0,last_active_secs_ago:null,country:null,ip:null};
   if(p.score!=null)cur.score=p.score;
   if(p.completed!=null)cur.completed=p.completed;
   if(p.failed!=null)cur.failed=p.failed;
   if(p.bytes_served!=null)cur.bytes_served=p.bytes_served;
   if(p.connected!=null)cur.connected=p.connected;
   if(p.addresses)cur.addresses=p.addresses;
+  if(p.address_count!=null)cur.address_count=p.address_count;
+  if(p.last_active_secs_ago!=null)cur.last_active_secs_ago=p.last_active_secs_ago;
   if(p.country)cur.country=p.country;
   if(p.ip)cur.ip=p.ip;
   PEERS[p.peer_id]=cur
@@ -1265,7 +1311,10 @@ document.addEventListener('click',function(ev){
   }
 });
 document.addEventListener('keydown',function(ev){
-  if(ev.key==='Escape')closeHelp()
+  if(ev.key==='Escape'){
+    closeHelp();
+    closeDetail()
+  }
 });
 
 (function(){
@@ -1284,8 +1333,9 @@ document.addEventListener('keydown',function(ev){
 
   function refreshStatus(){
     fetch('/api/status').then(function(r){return r.json()}).then(function(s){
+      DEMO_MODE=Boolean(s.demo);
       var peerEl=document.getElementById('peer-id');
-      peerEl.textContent=s.peer_id;
+      peerEl.textContent=s.peer_id+(DEMO_MODE?' [demo]':'');
       peerEl.dataset.tip=s.peer_id;
       document.getElementById('connected').textContent=s.connected_peers;
       document.getElementById('dht-entries').textContent=s.dht_entries;
@@ -1293,13 +1343,17 @@ document.addEventListener('keydown',function(ev){
         SERVER_STARTED=Date.now()-s.uptime_secs*1000;
         tickUptime()
       }
-    }).catch(function(){})
+      setStatus(WS?'live':'api ok',WS?'live':'offline')
+    }).catch(function(){
+      setStatus('api offline','offline')
+    })
   }
   setInterval(refreshStatus,5000);
   refreshStatus();
 
   function loadPeers(){
     fetch('/api/peers').then(function(r){return r.json()}).then(function(ps){
+      PEERS={};
       ps.forEach(function(p){
         mergePeer(p)
       });

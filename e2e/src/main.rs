@@ -8,6 +8,7 @@ use std::{
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
 
+mod dashboard_demo;
 mod format;
 
 use format::{
@@ -30,6 +31,15 @@ struct Cli {
 
 #[derive(clap::Subcommand)]
 enum Commands {
+    /// Serve the real dashboard UI with deterministic demo data
+    DashboardDemo {
+        /// Dashboard bind address
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+        /// Dashboard port
+        #[arg(long, default_value_t = 3030)]
+        port: u16,
+    },
     /// Run a real Guix p2p-only substitute smoke test
     ContainerSmoke {
         /// Guix package to build through the isolated daemon
@@ -421,6 +431,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.cmd {
+        Commands::DashboardDemo { bind, port } => dashboard_demo::serve(&bind, port).await,
         Commands::ContainerSmoke {
             package,
             store_path,

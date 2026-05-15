@@ -62,6 +62,7 @@ pub async fn run_swarm_task(
                         if let libp2p::identify::Event::Received { peer_id, info, .. } = *e {
                             for addr in info.listen_addrs {
                                 tracing::debug!("Identify learned peer {} at {}", peer_id, addr);
+                                conn_mgr.lock().unwrap().add_address(peer_id, addr.to_string());
                                 swarm.behaviour_mut().kad.add_address(&peer_id, addr);
                             }
                         }
@@ -71,7 +72,10 @@ pub async fn run_swarm_task(
                         endpoint: libp2p::core::ConnectedPoint::Dialer { address, .. },
                         ..
                     } => {
-                        conn_mgr.lock().unwrap().on_connected(peer_id);
+                        conn_mgr
+                            .lock()
+                            .unwrap()
+                            .on_connected_with_addresses(peer_id, vec![address.to_string()]);
                         let _ = event_tx.send(dashboard::DashboardEvent::PeerConnected {
                             peer_id: peer_id.to_string(),
                             addresses: vec![address.to_string()],

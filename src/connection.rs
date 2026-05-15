@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     time::{Duration, Instant},
 };
 
@@ -31,6 +31,16 @@ struct PeerState {
     retry_count: u32,
     last_attempt: Instant,
     pub last_active: Instant,
+    connected: bool,
+    addresses: HashSet<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PeerConnectionSnapshot {
+    pub peer: PeerId,
+    pub connected: bool,
+    pub addresses: Vec<String>,
+    pub last_active_secs_ago: u64,
 }
 
 #[derive(Debug)]
@@ -45,36 +55,65 @@ impl ConnectionManager {
     }
 
     pub fn on_connected(&mut self, peer: PeerId) {
+        self.on_connected_with_addresses(peer, Vec::new());
+    }
+
+    pub fn on_connected_with_addresses(&mut self, peer: PeerId, addresses: Vec<String>) {
         let now = Instant::now();
         let entry = self.peers.entry(peer).or_insert(PeerState {
             retry_count: 0,
             last_attempt: now,
             last_active: now,
+            connected: false,
+            addresses: HashSet::new(),
         });
         entry.retry_count = 0;
         entry.last_active = now;
+        entry.connected = true;
+        entry.addresses.extend(addresses);
     }
 
     pub fn on_disconnected(&mut self, peer: PeerId) {
         if let Some(state) = self.peers.get_mut(&peer) {
             state.last_active = Instant::now();
+            state.connected = false;
         }
     }
 
     pub fn on_active(&mut self, peer: PeerId) {
-        if let Some(state) = self.peers.get_mut(&peer) {
-            state.last_active = Instant::now();
-        }
+        let state = self.peer_state(peer);
+        state.last_active = Instant::now();
+    }
+
+    pub fn add_address(&mut self, peer: PeerId, address: String) {
+        let state = self.peer_state(peer);
+        state.addresses.insert(address);
+        state.last_active = Instant::now();
     }
 
     pub fn peer_count(&self) -> usize {
         self.peers.len()
     }
 
-    /// Number of currently connected peers (includes recently active peers
-    /// that haven't been pruned yet).
     pub fn connected_count(&self) -> usize {
-        self.peers.len()
+        self.peers.values().filter(|state| state.connected).count()
+    }
+
+    pub fn peer_snapshots(&self) -> Vec<PeerConnectionSnapshot> {
+        let now = Instant::now();
+        self.peers
+            .iter()
+            .map(|(peer, state)| {
+                let mut addresses: Vec<String> = state.addresses.iter().cloned().collect();
+                addresses.sort();
+                PeerConnectionSnapshot {
+                    peer: *peer,
+                    connected: state.connected,
+                    addresses,
+                    last_active_secs_ago: now.duration_since(state.last_active).as_secs(),
+                }
+            })
+            .collect()
     }
 
     pub fn can_connect(&self, peer: &PeerId) -> bool {
@@ -109,6 +148,8 @@ impl ConnectionManager {
             retry_count: 0,
             last_attempt: now,
             last_active: now,
+            connected: false,
+            addresses: HashSet::new(),
         });
         entry.retry_count += 1;
         entry.last_attempt = now;
@@ -133,6 +174,17 @@ impl ConnectionManager {
     fn backoff_expired(&self, state: &PeerState) -> bool {
         let delay = self.config.backoff_base * 2u32.pow(state.retry_count.min(6));
         state.last_attempt.elapsed() >= delay
+    }
+
+    fn peer_state(&mut self, peer: PeerId) -> &mut PeerState {
+        let now = Instant::now();
+        self.peers.entry(peer).or_insert(PeerState {
+            retry_count: 0,
+            last_attempt: now,
+            last_active: now,
+            connected: false,
+            addresses: HashSet::new(),
+        })
     }
 }
 
@@ -181,6 +233,40 @@ mod tests {
         let dead = mgr.prune_dead();
         assert!(dead.contains(&peer));
         assert!(mgr.peers.is_empty());
+    }
+
+    #[test]
+    fn connected_count_excludes_disconnected_peers() {
+        let mut mgr = ConnectionManager::new(ConnectionConfig::default());
+        let connected = PeerId::random();
+        let disconnected = PeerId::random();
+
+        mgr.on_connected(connected);
+        mgr.on_connected(disconnected);
+        mgr.on_disconnected(disconnected);
+
+        assert_eq!(mgr.peer_count(), 2);
+        assert_eq!(mgr.connected_count(), 1);
+        let snapshots = mgr.peer_snapshots();
+        assert!(snapshots.iter().any(|snapshot| snapshot.peer == connected && snapshot.connected));
+        assert!(
+            snapshots.iter().any(|snapshot| snapshot.peer == disconnected && !snapshot.connected)
+        );
+    }
+
+    #[test]
+    fn peer_snapshots_deduplicate_addresses() {
+        let mut mgr = ConnectionManager::new(ConnectionConfig::default());
+        let peer = PeerId::random();
+        let addr = "/ip4/127.0.0.1/tcp/6881".to_string();
+
+        mgr.on_connected_with_addresses(peer, vec![addr.clone(), addr.clone()]);
+        mgr.add_address(peer, addr.clone());
+
+        let snapshots = mgr.peer_snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].addresses, vec![addr]);
+        assert_eq!(snapshots[0].last_active_secs_ago, 0);
     }
 
     #[test]

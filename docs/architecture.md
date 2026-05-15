@@ -616,6 +616,12 @@ locally-seeded nars in real time:
 - The dashboard server indexes the latest 500 events internally, so
   `/api/events` restores recent history after browser reloads. The live
   WebSocket remains the source for newly-arriving events.
+- The peer panel is backed by connection-manager snapshots plus reputation
+  records. Connected peers are shown even before they have reputation history,
+  disconnected reputation-only peers remain visible, and peer rows use backend
+  address, country, and last-active data instead of browser-only guesses.
+- The embedded dashboard also understands the `demo` flag returned by the e2e
+  demo server and marks the header status as demo data when present.
 
 Dashboard events related to seeding:
 
@@ -640,9 +646,10 @@ whether P2P providers are available.
 
 Dashboard API endpoints:
 
-- `/api/status` returns the local peer id, uptime, connected peer count, DHT
-  entry count, observed build count, and seed count.
-- `/api/peers` returns full peer ids and reputation counters.
+- `/api/status` returns the local peer id, uptime, currently connected peer
+  count, DHT entry count, observed build count, and seed count.
+- `/api/peers` returns full peer ids, connection state, known addresses,
+  address count, last-active age, and reputation counters.
 - `/api/builds` returns observed builds with a `lookup_key` for detail links.
 - `/api/build/{hash}` accepts either the registry lookup key or the nar hash.
 - `/api/transfers` returns aggregate transfer evidence by nar hash, including

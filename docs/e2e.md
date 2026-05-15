@@ -145,6 +145,10 @@ Important files:
 
 ## Notes
 
+- `guix-p2p-e2e dashboard-demo --bind 127.0.0.1 --port 3030` serves the real
+  embedded dashboard with deterministic demo data. It is intended for demos,
+  screenshots, and UI review without starting daemon nodes. The header marks
+  the page as demo data.
 - All nodes use the same image and can act as seeder or fetcher.
 - If `fetch` reports `TARGET_NOT_AVAILABLE_OVER_P2P`, re-run `vm seed <node>
   hello` and inspect `vm logs <seed-node>` and `vm logs <fetch-node>`. The
