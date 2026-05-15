@@ -65,7 +65,7 @@ through the daemon:
 GUIX_P2P_SOCKET="${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock" \
 GUIX_P2P_BIN="$PWD/target/release/guix-p2p" \
 REAL_GUIX="$(command -v guix)" \
-scripts/guix-wrapper.sh build hello
+target/release/guix-p2p-wrapper build hello
 ```
 
 ## Setup For Known Testers
@@ -100,7 +100,7 @@ Use the wrapper flow to route a local Guix build through the daemon:
 GUIX_P2P_SOCKET="${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock" \
 GUIX_P2P_BIN="$PWD/target/release/guix-p2p" \
 REAL_GUIX="$(command -v guix)" \
-scripts/guix-wrapper.sh build hello
+target/release/guix-p2p-wrapper build hello
 ```
 
 The maintained strict validation flow is documented in
@@ -147,6 +147,7 @@ small, medium, and large package tiers.
 | [docs/architecture.md](docs/architecture.md) | Architecture, data flow, dashboard surfaces |
 | [docs/configuration.md](docs/configuration.md) | TOML keys, defaults, CLI overrides |
 | [docs/deployment.md](docs/deployment.md) | Daemon, relay, wrapper, and isolated Guix flow |
+| [docs/scripts.md](docs/scripts.md) | Script inventory and Rust migration status |
 | [docs/bootstrap-node.md](docs/bootstrap-node.md) | Shepherd-first bootstrap node operation |
 | [docs/e2e.md](docs/e2e.md) | Two-node disposable VM proof |
 | [docs/benchmarks.md](docs/benchmarks.md) | Smoke and benchmark harness usage |

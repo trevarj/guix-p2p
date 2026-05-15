@@ -22,7 +22,7 @@ The daemon owns:
 ## Wrapper Flow
 
 `guix-daemon` invokes `guix substitute --query` and
-`guix substitute --substitute`. Install `scripts/guix-wrapper.sh` as `guix`
+`guix substitute --substitute`. Install `guix-p2p-wrapper` as `guix`
 early in the daemon's `PATH` to intercept only those substitute invocations.
 Other `guix` commands pass through to the real Guix binary.
 
@@ -31,6 +31,9 @@ Environment variables supported by the wrapper:
 - `GUIX_P2P_SOCKET`: relay socket path.
 - `GUIX_P2P_BIN`: `guix-p2p` binary path. Defaults to `guix-p2p` on `PATH`.
 - `REAL_GUIX`: real Guix binary. Defaults to `/run/current-system/profile/bin/guix`.
+
+The legacy `scripts/guix-wrapper.sh` file is only a compatibility shim that
+execs `guix-p2p-wrapper`.
 
 Flow:
 

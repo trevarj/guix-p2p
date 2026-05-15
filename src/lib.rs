@@ -17,3 +17,4 @@ pub mod reputation;
 pub mod runtime;
 pub mod store_path;
 pub mod swarm;
+pub mod wrapper;

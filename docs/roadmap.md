@@ -58,10 +58,9 @@ The detailed benchmark method lives in [benchmarks.md](benchmarks.md).
 
 Before a broader release:
 
-- Replace `scripts/guix-wrapper.sh` with a Rust wrapper binary suitable for
-  normal user installs.
-- Audit `scripts/`, remove obsolete helpers, and migrate remaining runtime
-  setup scripts to Rust where practical.
+- Keep `guix-p2p-wrapper` as the documented user-facing PATH wrapper.
+- Continue migrating developer-only shell helpers listed in
+  [scripts.md](scripts.md) when they become part of normal setup.
 - Add a Guix channel package definition.
 - Document Guix channel installation once packaging exists.
 - Decide whether release binaries are supported or source builds remain the

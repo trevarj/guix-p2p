@@ -1,40 +1,7 @@
 #!/bin/sh
-# guix-p2p activation wrapper
-#
-# Intercepts guix-daemon's "guix substitute --query" / "--substitute"
-# invocations. When the daemon is running, relays through the Unix socket
-# for near-instant response with a warm swarm. Falls through to direct
-# invocation when the daemon is not available.
-#
-# Usage:
-#   1. Build/install guix-p2p on PATH
-#   2. Start the daemon: guix-p2p --daemon
-#   3. Install this script as "guix" early in PATH (e.g. ~/.local/bin/guix)
-#   4. Restart guix-daemon with the modified PATH
+# Compatibility shim for older setup docs. Prefer installing
+# `guix-p2p-wrapper` as `guix` early in guix-daemon's PATH.
 
 set -eu
 
-REAL_GUIX="${REAL_GUIX:-/run/current-system/profile/bin/guix}"
-GUIX_P2P="${GUIX_P2P_BIN:-guix-p2p}"
-SOCKET="${GUIX_P2P_SOCKET:-${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock}"
-
-case "${1-}" in
-    substitute)
-        shift
-        case "${1-}" in
-            --query|--substitute)
-                if [ -S "$SOCKET" ]; then
-                    exec "$GUIX_P2P" "$@" --socket "$SOCKET"
-                else
-                    exec "$REAL_GUIX" substitute "$@"
-                fi
-                ;;
-            *)
-                exec "$REAL_GUIX" substitute "$@"
-                ;;
-        esac
-        ;;
-    *)
-        exec "$REAL_GUIX" "$@"
-        ;;
-esac
+exec "${GUIX_P2P_WRAPPER_BIN:-guix-p2p-wrapper}" "$@"

@@ -410,11 +410,12 @@ Each relay connection sends a mode header and then streams daemon protocol
 commands. The daemon processes each connection independently, subscribing to
 the swarm's broadcast notification channel for that connection.
 
-### PATH Wrapper (`scripts/guix-wrapper.sh`)
+### PATH Wrapper (`guix-p2p-wrapper`)
 
-A thin shell script placed earlier in `$PATH` than the real `guix` binary.
+A small Rust binary placed earlier in `$PATH` than the real `guix` binary.
 Detects whether the daemon's socket is available and uses relay mode when
-possible, falling back to direct invocation otherwise:
+possible, falling back to direct invocation otherwise. The legacy
+`scripts/guix-wrapper.sh` file only execs this binary for compatibility:
 
 ```
 guix-daemon invokes "guix substitute --query"
