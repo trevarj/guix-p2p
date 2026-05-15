@@ -68,6 +68,9 @@ The workflow:
 
 The workflow is manual-only because Codeberg runs the normal push and pull
 request checks. GitHub runner time is reserved for benchmarks and Pages deploys.
+The GitHub CI job is guarded with `github.server_url == 'https://github.com'`
+so Forgejo does not try to execute the GitHub-only Guix install action from the
+canonical Codeberg repository.
 
 ## Codeberg CI
 

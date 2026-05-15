@@ -13,6 +13,7 @@ concurrency:
 jobs:
   rust:
     name: Rust checks
+    if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -23,6 +24,13 @@ jobs:
         uses: PromyLOPh/guix-install-action@v1
         with:
           pullAfterInstall: false
+
+      - name: Check Guix
+        run: |
+          command -v guix
+          guix --version
+          guix describe
+
       - name: Check formatting
         run: |
           guix shell -m manifest-ci.scm -- sh -c '
