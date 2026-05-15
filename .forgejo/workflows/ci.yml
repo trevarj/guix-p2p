@@ -10,7 +10,7 @@ on:
 jobs:
   rust:
     name: Rust checks
-    runs-on: self-hosted
+    runs-on: small
 
     steps:
       - name: Check out repository
