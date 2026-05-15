@@ -31,7 +31,7 @@ permissions:
   pages: write
 
 concurrency:
-  group: benchmarks-${{ github.ref }}
+  group: benchmarks-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:

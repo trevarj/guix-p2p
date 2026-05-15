@@ -233,6 +233,8 @@ The artifact contains:
 Successful benchmark runs also deploy a GitHub Pages site with the latest CSV,
 latest markdown report, and links to recent benchmark workflow runs. Older
 reports stay attached to their GitHub Actions runs as artifacts.
+Benchmark dispatches do not share a branch-wide concurrency lock, so a stale
+run cannot block a later fixed run from starting.
 
 Before running `guix shell`, the workflow writes a systemd drop-in for
 `guix-daemon.service` so the runner daemon uses the benchmark mirror list for
