@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Context;
 use clap::Parser;
 use guix_p2p::{
+    bandwidth::{BandwidthConfig, BandwidthLimiter},
     channel::{SwarmCommand, SwarmNotification},
     config::{self, SubstitutePolicy},
     connection::{ConnectionConfig, ConnectionManager},
@@ -168,7 +169,12 @@ async fn main() -> anyhow::Result<()> {
 
     dht::bootstrap(&mut swarm, &config.bootstrap_peers)?;
 
-    // Initialize nar store and announce all seeded nars in the DHT
+    let provider_cache = dht::create_provider_cache();
+    let narinfo_cache = std::sync::Mutex::new(narinfo::NarinfoCache::new(60));
+    let narinfo_cache = std::sync::Arc::new(narinfo_cache);
+    load_local_narinfo_metadata(&config, &narinfo_cache);
+
+    // Initialize nar store and announce all seeded nars in the DHT.
     let nar_store = Arc::new(std::sync::Mutex::new(nar_store::NarStore::new(
         &config.cache_dir,
         config.block_size,
@@ -181,6 +187,11 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) => tracing::warn!("failed to seed {}: {}", path, e),
             }
         }
+        let narinfos = narinfo_cache.lock().unwrap().active_entries();
+        let annotated = store.annotate_from_narinfos(&narinfos);
+        if annotated > 0 {
+            tracing::info!("attached narinfo metadata to {} cached nar(s)", annotated);
+        }
         for hash in store.seeded_hashes() {
             if let Ok(bytes) = hex::decode(&hash) {
                 let key = libp2p::kad::RecordKey::new(&bytes);
@@ -192,11 +203,6 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-
-    let provider_cache = dht::create_provider_cache();
-    let narinfo_cache = std::sync::Mutex::new(narinfo::NarinfoCache::new(60));
-    let narinfo_cache = std::sync::Arc::new(narinfo_cache);
-    load_local_narinfo_metadata(&config, &narinfo_cache);
 
     let http_client = guix_p2p::http_client::create_http_client(&config)
         .context("failed to create HTTP client")?;
@@ -217,6 +223,12 @@ async fn main() -> anyhow::Result<()> {
 
     let (event_tx, _) = tokio::sync::broadcast::channel::<dashboard::DashboardEvent>(256);
     let build_registry: dashboard::BuildRegistry = Arc::new(std::sync::Mutex::new(HashMap::new()));
+    let bandwidth_limiter = Arc::new(BandwidthLimiter::new(BandwidthConfig {
+        upload_limit_bytes_per_sec: config
+            .max_upload_rate_kbps
+            .map(|kbps| kbps.saturating_mul(1024)),
+        download_limit_bytes_per_sec: None,
+    }));
 
     // Emit SeedAdded events for pre-seeded nars
     {
@@ -244,6 +256,7 @@ async fn main() -> anyhow::Result<()> {
     let conn_for_swarm = conn_mgr.clone();
     let evt_for_swarm = event_tx.clone();
     let nar_store_for_swarm = nar_store.clone();
+    let limiter_for_swarm = bandwidth_limiter.clone();
 
     tokio::spawn(async move {
         guix_p2p::runtime::run_swarm_task(
@@ -256,6 +269,7 @@ async fn main() -> anyhow::Result<()> {
             conn_for_swarm,
             evt_for_swarm,
             nar_store_for_swarm,
+            limiter_for_swarm,
         )
         .await;
     });

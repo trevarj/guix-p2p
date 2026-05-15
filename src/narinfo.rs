@@ -32,6 +32,15 @@ impl NarinfoCache {
     pub fn put(&mut self, hash_part: String, narinfo: Narinfo) {
         self.entries.insert(hash_part, (tokio::time::Instant::now() + self.ttl, narinfo));
     }
+
+    pub fn active_entries(&self) -> Vec<Narinfo> {
+        let now = tokio::time::Instant::now();
+        self.entries
+            .values()
+            .filter(|(expiry, _)| now < *expiry)
+            .map(|(_, info)| info.clone())
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone)]

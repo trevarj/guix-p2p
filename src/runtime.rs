@@ -4,6 +4,7 @@ use futures::StreamExt;
 use libp2p::{SwarmBuilder, noise, quic, request_response, swarm::SwarmEvent, tcp, yamux};
 
 use crate::{
+    bandwidth::BandwidthLimiter,
     behaviour::{self, GuixP2PBehaviour, GuixP2PEvent},
     channel::{NotifyTx, SwarmCommand, SwarmNotification},
     connection::ConnectionManager,
@@ -24,8 +25,10 @@ pub async fn run_swarm_task(
     conn_mgr: Arc<std::sync::Mutex<ConnectionManager>>,
     event_tx: dashboard::EventBus,
     nar_store: Arc<std::sync::Mutex<NarStore>>,
+    bandwidth_limiter: Arc<BandwidthLimiter>,
 ) {
     let mut prune_tick = tokio::time::interval(Duration::from_secs(300));
+    let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel();
 
     loop {
         tokio::select! {
@@ -42,15 +45,15 @@ pub async fn run_swarm_task(
                         dht::handle_kad_event(&cache, &notify_tx, e);
                     },
                     SwarmEvent::Behaviour(GuixP2PEvent::BlockExchange(e)) => {
-                        handle_block_exchange(
-                            &notify_tx,
-                            &event_tx,
-                            e,
-                            &reputation,
-                            &conn_mgr,
-                            &mut swarm,
-                            &nar_store,
-                        );
+                        let ctx = BlockExchangeContext {
+                            notify_tx: &notify_tx,
+                            reputation: &reputation,
+                            conn_mgr: &conn_mgr,
+                            nar_store: &nar_store,
+                            bandwidth_limiter: &bandwidth_limiter,
+                            response_tx: &response_tx,
+                        };
+                        handle_block_exchange(ctx, e);
                     },
                     SwarmEvent::Behaviour(GuixP2PEvent::Mdns(libp2p::mdns::Event::Discovered(list))) => {
                         for (peer_id, addr) in list {
@@ -103,6 +106,15 @@ pub async fn run_swarm_task(
             Some(cmd) = cmd_rx.next() => {
                 handle_swarm_command(&mut swarm, cmd);
             }
+            Some(pending) = response_rx.recv() => {
+                let _ = swarm
+                    .behaviour_mut()
+                    .block_exchange
+                    .send_response(pending.channel, pending.response);
+                if let Some(event) = pending.event {
+                    let _ = event_tx.send(event);
+                }
+            }
             Some(hash) = query_rx.recv() => {
                 let key = libp2p::kad::RecordKey::new(&dht::extract_hash_bytes(&hash));
                 swarm.behaviour_mut().kad.get_providers(key);
@@ -144,14 +156,24 @@ fn handle_swarm_command(swarm: &mut libp2p::Swarm<GuixP2PBehaviour>, cmd: SwarmC
     }
 }
 
+struct BlockExchangeContext<'a> {
+    notify_tx: &'a NotifyTx,
+    reputation: &'a Arc<std::sync::Mutex<ReputationTracker>>,
+    conn_mgr: &'a Arc<std::sync::Mutex<ConnectionManager>>,
+    nar_store: &'a Arc<std::sync::Mutex<NarStore>>,
+    bandwidth_limiter: &'a Arc<BandwidthLimiter>,
+    response_tx: &'a tokio::sync::mpsc::UnboundedSender<PendingBlockResponse>,
+}
+
+struct PendingBlockResponse {
+    channel: request_response::ResponseChannel<BlockResponse>,
+    response: BlockResponse,
+    event: Option<dashboard::DashboardEvent>,
+}
+
 fn handle_block_exchange(
-    notify_tx: &NotifyTx,
-    event_bus: &dashboard::EventBus,
+    ctx: BlockExchangeContext<'_>,
     event: request_response::Event<BlockRequest, BlockResponse>,
-    reputation: &Arc<std::sync::Mutex<ReputationTracker>>,
-    conn_mgr: &Arc<std::sync::Mutex<ConnectionManager>>,
-    swarm: &mut libp2p::Swarm<GuixP2PBehaviour>,
-    nar_store: &Arc<std::sync::Mutex<NarStore>>,
 ) {
     match event {
         request_response::Event::Message { peer, message, .. } => match message {
@@ -164,32 +186,52 @@ fn handle_block_exchange(
                     BlockRequest::GetBlocks { indices, .. } => indices.clone(),
                     BlockRequest::Handshake { .. } => vec![],
                 };
-                let resp = nar_store.lock().unwrap().handle_request(&request);
+                let resp = ctx.nar_store.lock().unwrap().handle_request(&request);
                 if let Some(resp) = resp {
-                    let _ = swarm.behaviour_mut().block_exchange.send_response(channel, resp);
-                    tracing::trace!("Served block request to {}", peer);
-                    let _ = event_bus.send(dashboard::DashboardEvent::BlockServed {
+                    let bytes = response_size_bytes(&resp);
+                    let limiter = ctx.bandwidth_limiter.clone();
+                    let response_tx = ctx.response_tx.clone();
+                    let event = dashboard::DashboardEvent::BlockServed {
                         nar_hash: nar_hash_for_event,
                         peer_id: peer.to_string(),
                         indices: indices_for_event,
+                    };
+                    tokio::spawn(async move {
+                        limiter.wait_for_upload(bytes).await;
+                        let _ = response_tx.send(PendingBlockResponse {
+                            channel,
+                            response: resp,
+                            event: Some(event),
+                        });
                     });
+                    tracing::trace!("Queued block response to {}", peer);
                 } else {
                     tracing::trace!("Could not serve block request (request_id={})", request_id);
                 }
             },
             request_response::Message::Response { response, .. } => {
-                let _ = notify_tx.send(SwarmNotification::BlockResponse { peer, response });
-                conn_mgr.lock().unwrap().on_active(peer);
-                reputation.lock().unwrap().record_success(peer, 0);
+                let _ = ctx.notify_tx.send(SwarmNotification::BlockResponse { peer, response });
+                ctx.conn_mgr.lock().unwrap().on_active(peer);
+                ctx.reputation.lock().unwrap().record_success(peer, 0);
             },
         },
         request_response::Event::OutboundFailure { peer, error, .. } => {
             tracing::warn!("Outbound request failed for {}: {:?}", peer, error);
-            reputation.lock().unwrap().record_failure(peer);
+            ctx.reputation.lock().unwrap().record_failure(peer);
         },
         other => {
             tracing::trace!("BlockExchange event: {:?}", other);
         },
+    }
+}
+
+fn response_size_bytes(response: &BlockResponse) -> u64 {
+    match response {
+        BlockResponse::HandshakeReply { block_hashes, .. } => {
+            block_hashes.iter().map(|hash| hash.len() as u64).sum()
+        },
+        BlockResponse::Blocks { data } => data.iter().map(|block| block.data.len() as u64).sum(),
+        BlockResponse::Error { message } => message.len() as u64,
     }
 }
 

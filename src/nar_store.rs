@@ -9,9 +9,13 @@ use anyhow::Context;
 use sha2::{Digest, Sha256};
 use tracing;
 
-use crate::swarm::{
-    block::{BlockInfo, compute_block_hashes},
-    codec::{BlockData, BlockRequest, BlockResponse},
+use crate::{
+    nar_hash,
+    narinfo::Narinfo,
+    swarm::{
+        block::{BlockInfo, compute_block_hashes},
+        codec::{BlockData, BlockRequest, BlockResponse},
+    },
 };
 
 /// Manages locally cached nar data for serving blocks to peers.
@@ -155,6 +159,24 @@ impl NarStore {
     /// Return the list of nar hashes currently stored.
     pub fn seeded_hashes(&self) -> Vec<String> {
         self.index.keys().cloned().collect()
+    }
+
+    /// Attach store-path metadata from trusted narinfos to cached nars.
+    pub fn annotate_from_narinfos(&mut self, narinfos: &[Narinfo]) -> usize {
+        let mut updated = 0;
+        for narinfo in narinfos {
+            let Some(hash) = nar_hash::sha256_bytes(&narinfo.nar_hash).map(hex::encode) else {
+                continue;
+            };
+            let Some(entry) = self.index.get_mut(&hash) else {
+                continue;
+            };
+            if entry.store_path.is_none() && !narinfo.store_path.is_empty() {
+                entry.store_path = Some(narinfo.store_path.clone());
+                updated += 1;
+            }
+        }
+        updated
     }
 
     /// Number of seeded nars.
@@ -481,5 +503,30 @@ mod tests {
         let hashes = store.seeded_hashes();
         assert_eq!(hashes.len(), 1);
         assert_eq!(hashes[0], hash);
+    }
+
+    #[test]
+    fn annotate_from_narinfos_attaches_store_path_to_cached_nar() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = vec![1u8; 100];
+        let hash = hex::encode(Sha256::digest(&data));
+        let store_path = "/gnu/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string();
+
+        let mut store = NarStore::new(tmp.path(), 512);
+        store.save(&hash, &data).unwrap();
+
+        let updated = store.annotate_from_narinfos(&[Narinfo {
+            store_path: store_path.clone(),
+            nar_hash: format!("sha256:{hash}"),
+            nar_size: data.len() as u64,
+            references: vec![],
+            deriver: None,
+            urls: vec![],
+            signed_portion: String::new(),
+            signature: None,
+        }]);
+
+        assert_eq!(updated, 1);
+        assert_eq!(store.seed_info(&hash).unwrap().store_path, Some(store_path));
     }
 }

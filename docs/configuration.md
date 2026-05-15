@@ -19,6 +19,7 @@ socket_path = "/var/cache/guix-p2p/guix-p2p.sock"
 substitute_policy = "p2p-first"
 substitute_urls = "https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org"
 min_providers = 3
+max_upload_rate_kbps = 0
 dashboard_enabled = true
 dashboard_port = 3030
 dashboard_bind = "127.0.0.1"
@@ -40,6 +41,7 @@ seed_paths = ["/gnu/store/...-hello"]
 | `stall_timeout_secs` | `30` | none | Abort a P2P download after this many seconds without block progress. |
 | `max_peers_per_download` | `8` | none | Upper bound on peers used for one active download. |
 | `max_in_flight_blocks_per_peer` | `4` | none | Maximum outstanding block requests kept active per peer during a P2P download. |
+| `max_upload_rate_kbps` | unset | none | Optional seeding upload cap in KiB/s. Unset or `0` means unlimited. |
 | `min_providers` | `3` | `--min-providers` | Minimum DHT providers required before attempting P2P. Local two-node tests set this to `1`. |
 | `max_total_peers` | `50` | none | Connection manager peer limit. |
 | `connection_retries` | `3` | none | Connection retry count. |

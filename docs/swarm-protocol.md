@@ -147,18 +147,18 @@ struct NarDownloader {
 4. **Handshake**: send HANDSHAKE to each peer. Collect:
    - `blocks_available` bitfield per peer
    - `block_hashes` from first peer (verify all peers match or fall back to HTTP)
-5. **Schedule**: rarest-first block selection
-   - Count how many connected peers have each block (from bitfields)
-   - Sort needed blocks by availability count (ascending = rarest first)
-   - Request rarest blocks first
+5. **Schedule**: dynamic multi-peer block selection
+   - Track each block as pending, in-flight, or complete
+   - Assign pending blocks to the least-loaded peer that advertises the block
+   - Keep up to `max_in_flight_blocks_per_peer` requests active per peer
 6. **Download loop**:
    - For each peer, if peer has blocks we need AND peer has < 4 outstanding requests:
-     - Select up to 8 rarest blocks this peer has
+     - Select pending blocks this peer has
      - Send REQUEST with `nar_hash` and block indices
    - When BLOCKS response arrives:
      - Verify each block: SHA-256(block) == block_hash[index]
      - On success: store block, mark as received in needed_blocks
-     - On failure: blacklist peer for this nar, re-queue blocks
+     - On failure or timeout: penalize the peer and re-queue blocks
    - Pipe new requests immediately (don't wait for batch completion)
 7. **Completion**: when needed_blocks is empty
    - Join all blocks in order: block_0 || block_1 || ... || block_N-1

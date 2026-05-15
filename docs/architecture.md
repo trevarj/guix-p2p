@@ -469,6 +469,7 @@ stall_timeout_secs = 30
 block_size = 262144
 max_peers_per_download = 8
 max_in_flight_blocks_per_peer = 4
+max_upload_rate_kbps = 0
 max_total_peers = 50
 acl_path = "/etc/guix/acl"
 seed_paths = ["/gnu/store/abc-foo", "/gnu/store/def-bar"]
@@ -517,11 +518,12 @@ and serving.
 - **Startup scan**: On startup, `NarStore::new()` scans `<cache_dir>/nar/*.nar`
   and indexes each file by its filename stem (the hex sha256). Files whose
   bytes do not hash to the filename stem are skipped. All indexed nars are
-  announced in the DHT.
+  annotated with any matching local narinfo metadata and announced in the DHT.
 - **Serving**: Incoming block requests are served from the nar store. The
   `NarStore::handle_request()` method dispatches to handshake replies (with
-  block hashes) or block data reads. The old `serve_block_request()` stub has
-  been replaced.
+  block hashes) or block data reads. Outbound responses pass through
+  `BandwidthLimiter` when `max_upload_rate_kbps` is set. The old
+  `serve_block_request()` stub has been replaced.
 
 ### NarStore wire-up
 

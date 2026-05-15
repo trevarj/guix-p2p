@@ -116,4 +116,18 @@ mod tests {
         assert!(elapsed >= Duration::from_millis(9_000));
         assert!(elapsed < Duration::from_millis(12_000));
     }
+
+    #[tokio::test]
+    async fn test_upload_rate_limited() {
+        let config =
+            BandwidthConfig { upload_limit_bytes_per_sec: Some(100_000), ..Default::default() };
+        let limiter = BandwidthLimiter::new(config);
+
+        let start = Instant::now();
+        limiter.wait_for_upload(1_000_000).await;
+        let elapsed = start.elapsed();
+
+        assert!(elapsed >= Duration::from_millis(9_000));
+        assert!(elapsed < Duration::from_millis(12_000));
+    }
 }

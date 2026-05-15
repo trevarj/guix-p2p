@@ -33,13 +33,6 @@ small, medium, and large packages with 1, 3, 5, and 8 seeders.
 The methodology and acceptance criteria are documented in
 `docs/benchmarks.md` under "Future Benchmark Work".
 
-## Bandwidth Limits for Seeding
-
-The `BandwidthLimiter` module exists (token-bucket rate limiting) but is not
-wired into the outbound block-serving path. Adding upload rate caps lets
-seeders contribute bandwidth without saturating their upstream. A config
-option like `max_upload_rate_kbps` would control this.
-
 ## Corporate/LAN Proxy Mode
 
 A single guix-p2p daemon in an office can serve as a local substitute mirror.
@@ -69,9 +62,9 @@ triggers a separate DHT provider lookup. Batching these into a single DHT
 batch query would reduce latency and DHT overhead for large substituter
 queries.
 
-## Re-seed on Startup from Narinfo Cache
+## Re-fetch Missing Narinfo Cache Entries
 
-On daemon startup, iterate the `NarinfoCache` entries and check which nars
-the local node has recently downloaded. If they exist in the nar store,
-re-announce them. If not, optionally re-fetch from HTTP to maintain
-seeding availability for popular packages.
+On daemon startup, cached nars are already re-indexed, annotated with matching
+local narinfo metadata, and re-announced. A future availability task could
+iterate narinfo metadata whose NAR bytes are missing locally, optionally
+re-fetch those nars from HTTP, and seed them proactively.

@@ -80,6 +80,5 @@ items are:
 
 - Background health monitoring for provider counts.
 - Parallel HTTP plus P2P fetching.
-- Upload bandwidth limits for seeders.
 - Corporate/LAN proxy mode.
-- Re-seeding from the narinfo cache on startup.
+- Re-fetching missing narinfo cache entries for proactive seeding.
