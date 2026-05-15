@@ -102,12 +102,22 @@ The available suites are:
 - `standard`: `hello`, `git`, and `linux-libre`.
 - `system-profile`: package set from the E2E Guix System profile: `bash`,
   `curl`, `gcc-toolchain`, `guix`, `openssh-sans-x`, and `openssl`.
+- `system-build`: full `guix system build` of a controlled E2E operating
+  system configuration.
 
 `system-profile` is a reconfigure-like workload: it compares the same
 HTTP-only, p2p-only, and p2p-first substitute paths against the packages that
 make up the QEMU node's system profile. It does not run `guix system
 reconfigure` itself yet; that would require a separate driver for building and
 activating a full operating-system generation inside the fetch VM.
+
+`system-build` is the preferred reconfigure precursor benchmark. It builds a
+complete operating-system generation inside the VM with grafts enabled, seeds
+the resulting grafted system output from the seed VM, and fetches the same
+grafted output on the fetch VM. It intentionally runs `guix system build`
+rather than `guix system reconfigure`, so it measures the substitute/build
+portion of reconfiguration without bootloader, Shepherd, or activation side
+effects.
 
 For multiple seeders, start and push additional VM nodes, then pass them as a
 comma-separated list:

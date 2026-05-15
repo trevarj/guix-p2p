@@ -336,6 +336,8 @@ enum BenchmarkSuite {
     Large,
     #[value(name = "system-profile")]
     SystemProfile,
+    #[value(name = "system-build")]
+    SystemBuild,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -377,6 +379,8 @@ const BENCHMARK_SECONDARY_SUBSTITUTE_URL: &str = "https://cache-cdn.guix.moe";
 const BENCHMARK_SUBSTITUTE_URLS_COMMA: &str = "https://ci.guix.trop.in,https://cache-cdn.guix.moe,https://cache-fi.guix.moe,https://guix.bordeaux.inria.fr,https://nonguix-proxy.ditigal.xyz,https://ci.guix.gnu.org,https://bordeaux.guix.gnu.org,https://cache-sg.guix.moe,https://mirror.yandex.ru/mirrors/guix,https://substitutes.nonguix.org";
 const BENCHMARK_SUBSTITUTE_URLS_SPACE: &str = "https://ci.guix.trop.in https://cache-cdn.guix.moe https://cache-fi.guix.moe https://guix.bordeaux.inria.fr https://nonguix-proxy.ditigal.xyz https://ci.guix.gnu.org https://bordeaux.guix.gnu.org https://cache-sg.guix.moe https://mirror.yandex.ru/mirrors/guix https://substitutes.nonguix.org";
 const BENCHMARK_DEAD_PRIMARY_SUBSTITUTE_URLS_COMMA: &str = "http://127.0.0.1:9,https://ci.guix.trop.in,https://cache-cdn.guix.moe,https://cache-fi.guix.moe,https://guix.bordeaux.inria.fr,https://nonguix-proxy.ditigal.xyz,https://ci.guix.gnu.org,https://bordeaux.guix.gnu.org,https://cache-sg.guix.moe,https://mirror.yandex.ru/mirrors/guix,https://substitutes.nonguix.org";
+const SYSTEM_BUILD_BENCHMARK_NAME: &str = "system-build";
+const SYSTEM_BUILD_CONFIG_PATH: &str = "/tmp/guix-p2p-system-benchmark.scm";
 
 impl HttpCondition {
     fn substitute_urls(self) -> &'static str {
@@ -777,7 +781,15 @@ fn benchmark_package_selections(
             },
             BenchmarkPackageSelection { tier: BenchmarkTier::Medium, name: "openssl".to_string() },
         ],
+        BenchmarkSuite::SystemBuild => vec![BenchmarkPackageSelection {
+            tier: BenchmarkTier::Large,
+            name: SYSTEM_BUILD_BENCHMARK_NAME.to_string(),
+        }],
     }
+}
+
+fn is_system_build_benchmark(name: &str) -> bool {
+    name == SYSTEM_BUILD_BENCHMARK_NAME
 }
 
 struct ManagedChild {
@@ -1378,16 +1390,21 @@ fn vm_seed(config: &VmConfig, name: &str, package: &str) -> anyhow::Result<()> {
     let mut registry = VmRegistry::load(config)?;
     let node = registry.node(name)?.clone();
     let bootstrap = registry.bootstrap_multiaddr()?;
-    let output = ssh_run(
-        config,
-        &node,
-        &seed_node_command(
+    let command = if is_system_build_benchmark(package) {
+        seed_system_build_command(
+            bootstrap.as_deref(),
+            &config.substitute_urls,
+            &vm_external_multiaddr(&node),
+        )
+    } else {
+        seed_node_command(
             package,
             bootstrap.as_deref(),
             &config.substitute_urls,
             &vm_external_multiaddr(&node),
-        ),
-    )?;
+        )
+    };
+    let output = ssh_run(config, &node, &command)?;
     print_vm_node_output(config, &node, &output);
     let store_path = parse_key_line(&output, "store_path")
         .ok_or_else(|| anyhow::anyhow!("seed output did not include store_path"))?;
@@ -1443,17 +1460,28 @@ fn vm_remove(
     let target = resolve_fetch_target(&registry, &node, store_path, package)?;
     registry.node_mut(name)?.last_fetch = Some(target.clone());
     registry.save(config)?;
-    let output = ssh_run(
-        config,
-        &node,
-        &format!(
+    let command = if is_system_build_benchmark(&target.package) {
+        format!(
+            r#"
+set -eu
+STORE_PATH={store_path}
+if [ -e "$STORE_PATH" ]; then
+  guix gc -D "$STORE_PATH"
+fi
+test ! -e {store_path} && echo TARGET_ABSENT_AFTER_DELETE
+"#,
+            store_path = shell_quote(&target.store_path)
+        )
+    } else {
+        format!(
             "set -eu; guix build --no-grafts {}; guix gc -D {}; test ! -e {} && echo \
              TARGET_ABSENT_AFTER_DELETE",
             shell_quote(&target.package),
             shell_quote(&target.store_path),
             shell_quote(&target.store_path)
-        ),
-    )?;
+        )
+    };
+    let output = ssh_run(config, &node, &command)?;
     print!("{output}");
     Ok(())
 }
@@ -1701,13 +1729,28 @@ fn vm_fetch_timed_with_options(
     let daemon_start_ms = phase_start.elapsed().as_millis();
 
     let phase_start = std::time::Instant::now();
-    let build_command = format!(
-        "set -eu; test ! -e {}; GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build \
-         --no-grafts {}; test -d {} && echo IMPORTED_OUTPUT_IN_NODE_STORE",
-        shell_quote(&target.store_path),
-        shell_quote(&target.package),
-        shell_quote(&target.store_path)
-    );
+    let build_command = if is_system_build_benchmark(&target.package) {
+        format!(
+            r#"
+set -eu
+test ! -e {store_path}
+{write_config}
+GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix system build {config_path}
+test -d {store_path} && echo IMPORTED_OUTPUT_IN_NODE_STORE
+"#,
+            store_path = shell_quote(&target.store_path),
+            write_config = system_build_config_write_command(),
+            config_path = shell_quote(SYSTEM_BUILD_CONFIG_PATH)
+        )
+    } else {
+        format!(
+            "set -eu; test ! -e {}; GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix build \
+             --no-grafts {}; test -d {} && echo IMPORTED_OUTPUT_IN_NODE_STORE",
+            shell_quote(&target.store_path),
+            shell_quote(&target.package),
+            shell_quote(&target.store_path)
+        )
+    };
     let output = match ssh_run(config, &node, &build_command) {
         Ok(output) => output,
         Err(e) => {
@@ -1762,8 +1805,21 @@ fn vm_http_fetch_timed(
     let target = resolve_fetch_target(&registry, &node, store_path, package)?;
     registry.node_mut(name)?.last_fetch = Some(target.clone());
     registry.save(config)?;
-    let prepare_command = format!(
-        r#"
+    let prepare_command = if is_system_build_benchmark(&target.package) {
+        format!(
+            r#"
+set -eu
+STORE_PATH={store_path}
+if [ -e "$STORE_PATH" ]; then
+  guix gc -D "$STORE_PATH" >/tmp/e2e-http-delete.log
+fi
+test ! -e "$STORE_PATH"
+"#,
+            store_path = shell_quote(&target.store_path)
+        )
+    } else {
+        format!(
+            r#"
 set -eu
 PACKAGE={package}
 STORE_PATH={store_path}
@@ -1772,12 +1828,30 @@ guix build --no-grafts --substitute-urls="$SUBSTITUTE_URLS" "$PACKAGE" >/tmp/e2e
 guix gc -D "$STORE_PATH" >/tmp/e2e-http-delete.log
 test ! -e "$STORE_PATH"
 "#,
-        package = shell_quote(&target.package),
-        store_path = shell_quote(&target.store_path),
-        substitute_urls = shell_quote(&substitute_urls_for_guix(&config.substitute_urls))
-    );
-    let import_command = format!(
-        r#"
+            package = shell_quote(&target.package),
+            store_path = shell_quote(&target.store_path),
+            substitute_urls = shell_quote(&substitute_urls_for_guix(&config.substitute_urls))
+        )
+    };
+    let import_command = if is_system_build_benchmark(&target.package) {
+        format!(
+            r#"
+set -eu
+STORE_PATH={store_path}
+SUBSTITUTE_URLS={substitute_urls}
+{write_config}
+guix system build --substitute-urls="$SUBSTITUTE_URLS" {config_path}
+test -d "$STORE_PATH"
+echo HTTP_IMPORTED_OUTPUT_IN_NODE_STORE
+"#,
+            store_path = shell_quote(&target.store_path),
+            substitute_urls = shell_quote(&substitute_urls_for_guix(&config.substitute_urls)),
+            write_config = system_build_config_write_command(),
+            config_path = shell_quote(SYSTEM_BUILD_CONFIG_PATH)
+        )
+    } else {
+        format!(
+            r#"
 set -eu
 PACKAGE={package}
 STORE_PATH={store_path}
@@ -1786,10 +1860,11 @@ guix build --no-grafts --substitute-urls="$SUBSTITUTE_URLS" "$PACKAGE"
 test -d "$STORE_PATH"
 echo HTTP_IMPORTED_OUTPUT_IN_NODE_STORE
 "#,
-        package = shell_quote(&target.package),
-        store_path = shell_quote(&target.store_path),
-        substitute_urls = shell_quote(&substitute_urls_for_guix(&config.substitute_urls))
-    );
+            package = shell_quote(&target.package),
+            store_path = shell_quote(&target.store_path),
+            substitute_urls = shell_quote(&substitute_urls_for_guix(&config.substitute_urls))
+        )
+    };
     let started = std::time::Instant::now();
 
     let phase_start = std::time::Instant::now();
@@ -1907,6 +1982,10 @@ async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> 
 }
 
 async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
+    if opts.suite == BenchmarkSuite::SystemBuild {
+        anyhow::bail!("system-build is only supported by the VM benchmark harness");
+    }
+
     if opts.iterations == 0 {
         anyhow::bail!("--iterations must be greater than zero");
     }
@@ -2265,9 +2344,14 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
     let mut packages = Vec::new();
     for selection in &selections {
         tracing::info!("resolving benchmark package {} ({})", selection.name, selection.tier);
-        let store_path = resolve_package(&guix, &selection.name)?;
-        let nar_hash = compute_nar_hash(&guix, &store_path)?;
-        let closure_paths = resolve_requisites(&guix, &store_path)?;
+        let (store_path, nar_hash, closure_paths) = if is_system_build_benchmark(&selection.name) {
+            (String::new(), String::new(), Vec::new())
+        } else {
+            let store_path = resolve_package(&guix, &selection.name)?;
+            let nar_hash = compute_nar_hash(&guix, &store_path)?;
+            let closure_paths = resolve_requisites(&guix, &store_path)?;
+            (store_path, nar_hash, closure_paths)
+        };
         packages.push(BenchmarkPackage {
             tier: selection.tier,
             name: selection.name.clone(),
@@ -2340,14 +2424,25 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                 slugify_node_name(&package.name),
                 condition
             ));
-            write_vm_benchmark_local_narinfo_metadata(
-                &local_narinfo_path,
-                &guix,
-                &package.closure_paths,
-                &store_path,
-                &vm_nar_hash,
-                vm_nar_size,
-            )
+            if is_system_build_benchmark(&package.name) {
+                write_vm_benchmark_local_narinfo_metadata_from_vm(
+                    &condition_config,
+                    &seed_node.name,
+                    &local_narinfo_path,
+                    &store_path,
+                    &vm_nar_hash,
+                    vm_nar_size,
+                )
+            } else {
+                write_vm_benchmark_local_narinfo_metadata(
+                    &local_narinfo_path,
+                    &guix,
+                    &package.closure_paths,
+                    &store_path,
+                    &vm_nar_hash,
+                    vm_nar_size,
+                )
+            }
             .with_context(|| {
                 format!("failed to write VM benchmark narinfo metadata for {}", package.name)
             })?;
@@ -3757,6 +3852,88 @@ fn write_vm_benchmark_local_narinfo_metadata(
         .with_context(|| format!("failed to write {}", path.display()))
 }
 
+fn write_vm_benchmark_local_narinfo_metadata_from_vm(
+    config: &VmConfig,
+    node_name: &str,
+    path: &std::path::Path,
+    vm_store_path: &str,
+    vm_nar_hash: &str,
+    vm_nar_size: Option<u64>,
+) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    let node = registry.node(node_name)?;
+    let command = format!(
+        r#"
+set -eu
+STORE_PATH={store_path}
+guix gc -R "$STORE_PATH" | sort -u | while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  printf 'PATH\t%s\n' "$path"
+  printf 'HASH\t%s\n' "$(guix hash -S nar -f hex "$path")"
+  printf 'REFS'
+  guix gc --references "$path" | sort -u | while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    printf '\t%s' "$ref"
+  done
+  printf '\nEND\n'
+done
+"#,
+        store_path = shell_quote(vm_store_path)
+    );
+    let output = ssh_run(config, node, &command)?;
+    let mut narinfos = Vec::new();
+    let mut current_path: Option<String> = None;
+    let mut current_hash: Option<String> = None;
+    let mut current_refs: Vec<String> = Vec::new();
+
+    for line in output.lines() {
+        if let Some(value) = line.strip_prefix("PATH\t") {
+            current_path = Some(value.to_string());
+            current_hash = None;
+            current_refs.clear();
+        } else if let Some(value) = line.strip_prefix("HASH\t") {
+            current_hash = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("REFS") {
+            current_refs =
+                value.split('\t').filter(|part| !part.is_empty()).map(str::to_string).collect();
+        } else if line == "END" {
+            let store_path = current_path
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("VM metadata block ended without PATH"))?;
+            let nar_hash = current_hash
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("VM metadata block ended without HASH"))?;
+            let nar_size = if store_path == vm_store_path { vm_nar_size.unwrap_or(0) } else { 0 };
+            narinfos.push(serde_json::json!({
+                "store_path": store_path,
+                "nar_hash": nar_hash,
+                "nar_size": nar_size,
+                "references": current_refs,
+                "deriver": null,
+                "download_size": nar_size
+            }));
+            current_refs = Vec::new();
+        }
+    }
+
+    if !narinfos.iter().any(|entry| {
+        entry.get("store_path").and_then(serde_json::Value::as_str) == Some(vm_store_path)
+    }) {
+        narinfos.push(serde_json::json!({
+            "store_path": vm_store_path,
+            "nar_hash": vm_nar_hash,
+            "nar_size": vm_nar_size.unwrap_or(0),
+            "references": [],
+            "deriver": null,
+            "download_size": vm_nar_size.unwrap_or(0)
+        }));
+    }
+
+    let document = serde_json::json!({ "narinfos": narinfos });
+    std::fs::write(path, serde_json::to_vec_pretty(&document)?)
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
 fn compute_nar_hash(guix: &std::path::Path, store_path: &str) -> anyhow::Result<String> {
     let output = checked_output(
         std::process::Command::new(guix).args(["hash", "-S", "nar", "-f", "hex", store_path]),
@@ -4641,6 +4818,153 @@ printf 'pid=%s\nlog=%s\nsocket=%s\ndashboard=http://127.0.0.1:%s\n' "$PID" "$LOG
     )
 }
 
+fn seed_system_build_command(
+    bootstrap: Option<&str>,
+    substitute_urls: &str,
+    external_address: &str,
+) -> String {
+    let bootstrap = bootstrap.unwrap_or("");
+    format!(
+        r#"
+set -eu
+export LD_LIBRARY_PATH="/run/current-system/profile/lib${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
+PACKAGE={package}
+BOOTSTRAP={bootstrap}
+SUBSTITUTE_URLS={substitute_urls}
+EXTERNAL_ADDRESS={external_address}
+P2P="${{GUIX_P2P_E2E_P2P_BIN:-guix-p2p}}"
+CACHE_DIR="${{GUIX_P2P_E2E_A_CACHE:-/tmp/guix-p2p-a}}"
+LOG="${{GUIX_P2P_E2E_A_LOG:-/tmp/guix-p2p-a.log}}"
+SOCKET="${{GUIX_P2P_E2E_A_SOCKET:-$CACHE_DIR/guix-p2p.sock}}"
+LISTEN="${{GUIX_P2P_E2E_A_LISTEN:-/ip4/0.0.0.0/tcp/6881}}"
+DASHBOARD_BIND="${{GUIX_P2P_E2E_A_DASHBOARD_BIND:-0.0.0.0}}"
+DASHBOARD_PORT="${{GUIX_P2P_E2E_A_DASHBOARD_PORT:-3031}}"
+cat > {config_path} <<'EOF_SYSTEM_BUILD_CONFIG'
+{system_config}
+EOF_SYSTEM_BUILD_CONFIG
+GUIX_BUILD_OUTPUT="$(guix system build --substitute-urls="$SUBSTITUTE_URLS" {config_path})"
+STORE_PATH="$(printf '%s\n' "$GUIX_BUILD_OUTPUT" | awk '/^\/gnu\/store\// {{ path=$0 }} END {{ if (path != "") print path }}')"
+if [ -z "$STORE_PATH" ]; then
+  echo "guix system build did not print a store path" >&2
+  exit 1
+fi
+mkdir -p "$CACHE_DIR" "$HOME/.config/guix-p2p"
+printf 'min_providers = 1\n' > "$HOME/.config/guix-p2p/config.toml"
+if [ -f /tmp/guix-p2p-a.pid ]; then
+  OLD_PID="$(cat /tmp/guix-p2p-a.pid 2>/dev/null || true)"
+  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+    kill "$OLD_PID" 2>/dev/null || true
+    sleep 1
+  fi
+fi
+rm -f "$SOCKET"
+BOOTSTRAP_ARGS=''
+if [ -n "$BOOTSTRAP" ]; then
+  BOOTSTRAP_ARGS="--bootstrap-peers $BOOTSTRAP"
+fi
+RUST_LOG="${{RUST_LOG:-info}}" "$P2P" --daemon \
+  --cache-dir "$CACHE_DIR" \
+  --listen-addr "$LISTEN" \
+  --socket "$SOCKET" \
+  --dashboard --dashboard-bind "$DASHBOARD_BIND" --dashboard-port "$DASHBOARD_PORT" \
+  --external-addresses "$EXTERNAL_ADDRESS" \
+  $BOOTSTRAP_ARGS \
+  --seed "$STORE_PATH" \
+  > "$LOG" 2>&1 &
+PID="$!"
+printf '%s\n' "$PID" > /tmp/guix-p2p-a.pid
+PEER_ID=''
+i=0
+while [ "$i" -lt 120 ]; do
+  PEER_ID="$(sed -n 's/.*Peer ID: //p' "$LOG" 2>/dev/null | tail -n 1)"
+  [ -n "$PEER_ID" ] && break
+  if ! kill -0 "$PID" 2>/dev/null; then
+    echo "guix-p2p seed daemon exited before reporting a peer id" >&2
+    tail -n 80 "$LOG" >&2 || true
+    exit 1
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+if [ -z "$PEER_ID" ]; then
+  echo "guix-p2p seed daemon did not report a peer id" >&2
+  tail -n 80 "$LOG" >&2 || true
+  exit 1
+fi
+[ -n "$PEER_ID" ] && printf '%s\n' "$PEER_ID" > /tmp/guix-p2p-a-peer-id
+printf 'store_path=%s\n' "$STORE_PATH"
+printf 'peer_id=%s\n' "$PEER_ID"
+printf 'pid=%s\nlog=%s\nsocket=%s\ndashboard=http://127.0.0.1:%s\n' "$PID" "$LOG" "$SOCKET" "$DASHBOARD_PORT"
+"#,
+        package = shell_quote(SYSTEM_BUILD_BENCHMARK_NAME),
+        bootstrap = shell_quote(bootstrap),
+        substitute_urls = shell_quote(&substitute_urls_for_guix(substitute_urls)),
+        external_address = shell_quote(external_address),
+        config_path = shell_quote(SYSTEM_BUILD_CONFIG_PATH),
+        system_config = system_build_config_text()
+    )
+}
+
+fn system_build_config_text() -> &'static str {
+    r#"(use-modules (gnu)
+             (gnu bootloader grub)
+             (gnu packages bash)
+             (gnu packages commencement)
+             (gnu packages curl)
+             (gnu packages package-management)
+             (gnu packages ssh)
+             (gnu packages tls)
+             (gnu services networking)
+             (gnu services ssh)
+             (gnu system nss))
+
+(operating-system
+  (host-name "guix-p2p-system-build")
+  (timezone "Etc/UTC")
+  (locale "en_US.utf8")
+  (bootloader
+   (bootloader-configuration
+    (bootloader grub-bootloader)
+    (targets '("/dev/vda"))
+    (timeout 1)
+    (terminal-outputs '(serial))
+    (terminal-inputs '(serial))
+    (serial-unit 0)
+    (serial-speed 115200)))
+  (kernel-arguments '("console=ttyS0,115200n8"))
+  (file-systems
+   (cons (file-system
+           (mount-point "/")
+           (device (file-system-label "Guix_image"))
+           (type "ext4"))
+         %base-file-systems))
+  (users %base-user-accounts)
+  (packages
+   (append
+    (list bash curl gcc-toolchain guix openssh-sans-x openssl)
+    %base-packages))
+  (services
+   (append
+    (list (service dhcpcd-service-type)
+          (service openssh-service-type
+                   (openssh-configuration
+                    (openssh openssh-sans-x)
+                    (generate-host-keys? #t)
+                    (password-authentication? #t)
+                    (port-number 22))))
+    %base-services))
+  (name-service-switch %mdns-host-lookup-nss))
+"#
+}
+
+fn system_build_config_write_command() -> String {
+    format!(
+        "cat > {} <<'EOF_SYSTEM_BUILD_CONFIG'\n{}EOF_SYSTEM_BUILD_CONFIG",
+        shell_quote(SYSTEM_BUILD_CONFIG_PATH),
+        system_build_config_text()
+    )
+}
+
 fn fetch_target_available_command(target: &VmFetch) -> String {
     format!(
         r#"
@@ -5118,6 +5442,24 @@ mod tests {
             names,
             vec!["bash", "curl", "gcc-toolchain", "guix", "openssh-sans-x", "openssl"]
         );
+
+        let system_build = benchmark_package_selections(BenchmarkSuite::SystemBuild, None);
+        assert_eq!(system_build.len(), 1);
+        assert_eq!(system_build[0].tier, BenchmarkTier::Large);
+        assert_eq!(system_build[0].name, SYSTEM_BUILD_BENCHMARK_NAME);
+    }
+
+    #[test]
+    fn system_build_seed_command_uses_grafted_system_build() {
+        let command = seed_system_build_command(
+            Some("/ip4/10.0.2.2/tcp/6883/p2p/12D3KooWbootstrap"),
+            "https://ci.guix.gnu.org https://bordeaux.guix.gnu.org",
+            "/ip4/10.0.2.2/tcp/6881",
+        );
+
+        assert!(command.contains("guix system build --substitute-urls=\"$SUBSTITUTE_URLS\""));
+        assert!(command.contains("guix-p2p-system-benchmark.scm"));
+        assert!(!command.contains("--no-grafts"));
     }
 
     #[test]

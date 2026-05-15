@@ -88,6 +88,10 @@ Use `--suite system-profile` to benchmark the explicit package set installed
 in the E2E Guix System profile (`bash`, `curl`, `gcc-toolchain`, `guix`,
 `openssh-sans-x`, and `openssl`) across the same HTTP-only, p2p-only, and
 p2p-first modes.
+Use `--suite system-build` to benchmark a full `guix system build` of a
+controlled E2E operating-system configuration. This keeps grafts enabled and
+compares the same HTTP-only, p2p-only, and p2p-first paths without activating
+the new system generation.
 VM commands use the `guix-p2p` binary embedded in the image by default. Use
 `vm push-binary --all` plus `GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p` only when you
 need to test a replacement binary without rebuilding the image.
