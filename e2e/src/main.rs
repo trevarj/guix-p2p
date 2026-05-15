@@ -362,9 +362,9 @@ enum HttpCondition {
 // or rate limits on the default Guix substitute servers.
 const BENCHMARK_PRIMARY_SUBSTITUTE_URL: &str = "https://ci.guix.trop.in";
 const BENCHMARK_SECONDARY_SUBSTITUTE_URL: &str = "https://cache-cdn.guix.moe";
-const BENCHMARK_SUBSTITUTE_URLS_COMMA: &str = "https://ci.guix.trop.in,https://cache-cdn.guix.moe,https://cache-fi.guix.moe,https://guix.bordeaux.inria.fr,https://nonguix-proxy.ditigal.xyz,https://ci.guix.gnu.org,https://bordeaux.guix.gnu.org,https://cache-sg.guix.moe,https://bordeaux-singapore-mirror.cbaines.net,https://mirror.yandex.ru/mirrors/guix,https://substitutes.nonguix.org";
-const BENCHMARK_SUBSTITUTE_URLS_SPACE: &str = "https://ci.guix.trop.in https://cache-cdn.guix.moe https://cache-fi.guix.moe https://guix.bordeaux.inria.fr https://nonguix-proxy.ditigal.xyz https://ci.guix.gnu.org https://bordeaux.guix.gnu.org https://cache-sg.guix.moe https://bordeaux-singapore-mirror.cbaines.net https://mirror.yandex.ru/mirrors/guix https://substitutes.nonguix.org";
-const BENCHMARK_DEAD_PRIMARY_SUBSTITUTE_URLS_COMMA: &str = "http://127.0.0.1:9,https://ci.guix.trop.in,https://cache-cdn.guix.moe,https://cache-fi.guix.moe,https://guix.bordeaux.inria.fr,https://nonguix-proxy.ditigal.xyz,https://ci.guix.gnu.org,https://bordeaux.guix.gnu.org,https://cache-sg.guix.moe,https://bordeaux-singapore-mirror.cbaines.net,https://mirror.yandex.ru/mirrors/guix,https://substitutes.nonguix.org";
+const BENCHMARK_SUBSTITUTE_URLS_COMMA: &str = "https://ci.guix.trop.in,https://cache-cdn.guix.moe,https://cache-fi.guix.moe,https://guix.bordeaux.inria.fr,https://nonguix-proxy.ditigal.xyz,https://ci.guix.gnu.org,https://bordeaux.guix.gnu.org,https://cache-sg.guix.moe,https://mirror.yandex.ru/mirrors/guix,https://substitutes.nonguix.org";
+const BENCHMARK_SUBSTITUTE_URLS_SPACE: &str = "https://ci.guix.trop.in https://cache-cdn.guix.moe https://cache-fi.guix.moe https://guix.bordeaux.inria.fr https://nonguix-proxy.ditigal.xyz https://ci.guix.gnu.org https://bordeaux.guix.gnu.org https://cache-sg.guix.moe https://mirror.yandex.ru/mirrors/guix https://substitutes.nonguix.org";
+const BENCHMARK_DEAD_PRIMARY_SUBSTITUTE_URLS_COMMA: &str = "http://127.0.0.1:9,https://ci.guix.trop.in,https://cache-cdn.guix.moe,https://cache-fi.guix.moe,https://guix.bordeaux.inria.fr,https://nonguix-proxy.ditigal.xyz,https://ci.guix.gnu.org,https://bordeaux.guix.gnu.org,https://cache-sg.guix.moe,https://mirror.yandex.ru/mirrors/guix,https://substitutes.nonguix.org";
 
 impl HttpCondition {
     fn substitute_urls(self) -> &'static str {
@@ -4711,12 +4711,22 @@ mod tests {
                 .substitute_urls()
                 .starts_with("https://ci.guix.trop.in,https://cache-cdn.guix.moe")
         );
+        assert!(
+            !HttpCondition::Normal
+                .substitute_urls()
+                .contains("bordeaux-singapore-mirror.cbaines.net")
+        );
         assert_eq!(HttpCondition::SinglePrimary.substitute_urls(), "https://ci.guix.trop.in");
         assert_eq!(HttpCondition::SingleSecondary.substitute_urls(), "https://cache-cdn.guix.moe");
         assert!(
             HttpCondition::DeadPrimary
                 .substitute_urls()
                 .starts_with("http://127.0.0.1:9,https://ci.guix.trop.in")
+        );
+        assert!(
+            !HttpCondition::DeadPrimary
+                .substitute_urls()
+                .contains("bordeaux-singapore-mirror.cbaines.net")
         );
     }
 

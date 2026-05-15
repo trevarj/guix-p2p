@@ -52,7 +52,6 @@ jobs:
         https://ci.guix.gnu.org
         https://bordeaux.guix.gnu.org
         https://cache-sg.guix.moe
-        https://bordeaux-singapore-mirror.cbaines.net
         https://mirror.yandex.ru/mirrors/guix
         https://substitutes.nonguix.org
 
