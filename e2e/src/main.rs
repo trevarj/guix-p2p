@@ -1913,7 +1913,15 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
     std::fs::create_dir_all(&base)?;
     let tmp_root = base.join("tmp");
     reset_dir(&tmp_root)?;
-    ensure_container_guix_store_writable(&tools, &tmp_root, false)?;
+    if let Err(e) = ensure_container_guix_store_writable(&tools, &tmp_root, false) {
+        if std::env::var_os("GUIX_P2P_E2E_ALLOW_READ_ONLY_STORE").is_none() {
+            return Err(e);
+        }
+        // Hosted CI can publish an explicit skipped report when it cannot
+        // provide a private writable store; local benchmark runs still fail.
+        write_read_only_store_skip_report(&base, &tmp_root, &opts, &selections, &e)?;
+        return Ok(());
+    }
 
     let mut packages = Vec::new();
     for selection in &selections {
@@ -2131,6 +2139,84 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
             failures.len()
         );
     }
+}
+
+fn write_read_only_store_skip_report(
+    base: &std::path::Path,
+    tmp_root: &std::path::Path,
+    opts: &BenchmarkOptions,
+    selections: &[BenchmarkPackageSelection],
+    error: &anyhow::Error,
+) -> anyhow::Result<()> {
+    let skip_reason = format!(
+        "runner does not provide a writable /gnu/store; benchmark isolation unavailable: {error}"
+    );
+    let packages: Vec<BenchmarkPackage> = selections
+        .iter()
+        .map(|selection| BenchmarkPackage {
+            tier: selection.tier,
+            name: selection.name.clone(),
+            store_path: "unavailable".to_string(),
+            nar_hash: "unavailable".to_string(),
+            closure_paths: Vec::new(),
+        })
+        .collect();
+    let mut records = Vec::new();
+
+    for package in &packages {
+        for condition in &opts.http_conditions {
+            for mode in &opts.modes {
+                let seed_counts: Vec<usize> =
+                    if *mode == BenchmarkMode::Http { vec![1] } else { opts.seed_counts.clone() };
+                for seed_count in seed_counts {
+                    for iteration in 1..=opts.iterations {
+                        records.push(BenchmarkRecord {
+                            tier: package.tier,
+                            package: package.name.clone(),
+                            store_path: package.store_path.clone(),
+                            nar_hash: package.nar_hash.clone(),
+                            nar_size: None,
+                            mode: *mode,
+                            http_condition: *condition,
+                            seed_count,
+                            iteration,
+                            elapsed_ms: None,
+                            success: false,
+                            skipped: true,
+                            p2p_evidence: false,
+                            http_evidence: false,
+                            provider_count: None,
+                            run_dir: tmp_root.join(format!(
+                                "{}-{}-{}-seed{}-{}",
+                                sanitize_name(&package.name),
+                                condition,
+                                mode,
+                                seed_count,
+                                iteration
+                            )),
+                            error: None,
+                            skip_reason: Some(skip_reason.clone()),
+                            phases: BenchmarkPhaseTimings::default(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let csv_path = base.join("results.csv");
+    write_benchmark_csv(&csv_path, &records)?;
+    write_benchmark_report(
+        &project_root().join("docs/benchmark-results.md"),
+        &records,
+        &packages,
+        opts.transport,
+        opts.iterations,
+    )?;
+    tracing::warn!("{skip_reason}");
+    tracing::info!("benchmark CSV: {}", csv_path.display());
+    tracing::info!("benchmark report: docs/benchmark-results.md");
+    Ok(())
 }
 
 fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {

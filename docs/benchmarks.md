@@ -253,6 +253,10 @@ writable `/gnu/store`.
 Hosted GitHub runners cannot reliably share the checked-out repository into
 nested Guix containers, so the workflow sets `GUIX_P2P_E2E_NO_GUIX_SHELL=1`
 and lets the disposable runner provide the isolation boundary.
+If the runner exposes `/gnu/store` read-only, the workflow sets
+`GUIX_P2P_E2E_ALLOW_READ_ONLY_STORE=1` so the harness publishes an explicit
+skipped report instead of failing before Pages/artifact upload. Local benchmark
+runs and VM benchmarks still fail when writable-store isolation is unavailable.
 
 Cargo commands export Guix's GCC runtime library directory in
 `LD_LIBRARY_PATH` so Rust build scripts can load `libgcc_s.so.1` on hosted CI
