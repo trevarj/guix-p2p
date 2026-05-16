@@ -988,12 +988,17 @@ cat > "$site_dir/index.html" <<'HTML'
       <div class="section-grid">
         <article class="info-card">
           <h3>Local shell</h3>
-          <p class="muted">Use the repository package definition for a temporary development environment:</p>
+          <p class="muted">Use the manifest for the contributor shell with Rust, Cargo, C toolchain packages, certificates, and test helpers:</p>
+          <pre data-language="Shell"><code class="language-sh"><span class="tok-keyword">guix</span> shell -m manifest.scm</code></pre>
+        </article>
+        <article class="info-card">
+          <h3>Package shell</h3>
+          <p class="muted">Use the local Guix package entrypoint when you want to test the packaged binary and extension exactly as the channel package builds them:</p>
           <pre data-language="Shell"><code class="language-sh"><span class="tok-keyword">guix</span> shell -f guix.scm</code></pre>
         </article>
         <article class="info-card">
           <h3>Checks</h3>
-          <p class="muted">Run focused Rust checks before sending changes:</p>
+          <p class="muted">Inside the contributor shell, run focused Rust checks before sending changes:</p>
           <pre data-language="Shell"><code class="language-sh"><span class="tok-keyword">cargo</span> fmt
 <span class="tok-keyword">cargo</span> clippy <span class="tok-symbol">--all-targets</span> <span class="tok-symbol">--all-features</span> <span class="tok-symbol">--</span> -D warnings
 <span class="tok-keyword">cargo</span> test</code></pre>

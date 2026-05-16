@@ -20,8 +20,14 @@ configuration:
 (use-modules (guix-p2p services))
 ```
 
-From a checkout, the local package definition remains available for temporary
-development shells:
+From a checkout, use the manifest for contributor shells:
+
+```sh
+guix shell -m manifest.scm
+```
+
+The local package definition remains available when you want to test the
+packaged binary and extension exactly as the channel package builds them:
 
 ```sh
 guix shell -f guix.scm

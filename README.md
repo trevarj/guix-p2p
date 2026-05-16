@@ -104,15 +104,22 @@ See [docs/deployment.md](docs/deployment.md) for persistent service details.
 
 ## Local Development
 
-From a checkout, the local package definition still works as a compatibility
-entrypoint. This exposes the commands and extension in a temporary shell:
+From a checkout, use the manifest for the contributor shell. It includes Rust,
+Cargo, C toolchain packages, certificates, and local test helpers:
+
+```sh
+guix shell -m manifest.scm
+```
+
+The local package definition remains available when you want to test the
+packaged binary and extension exactly as the channel package builds them:
 
 ```sh
 guix shell -f guix.scm
 ```
 
 Start a daemon with the default cache directory, relay socket, and local
-dashboard from that shell:
+dashboard from the shell:
 
 ```sh
 guix-p2p --daemon \
