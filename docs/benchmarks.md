@@ -286,6 +286,7 @@ The artifact contains:
 
 - `results.csv`
 - `benchmark-results.md`
+- per-run logs from `target/guix-p2p-bench/logs/`
 - VM logs such as `base-image-build.log` when image creation fails
 
 Successful benchmark runs upload a `guix-p2p-benchmark-*` artifact. A separate

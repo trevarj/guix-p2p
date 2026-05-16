@@ -1499,7 +1499,7 @@ cat > /tmp/e2e-guix-wrapper <<'EOF'
 #!/bin/sh
 set -eu
 export GUIX_P2P_SOCKET=/tmp/guix-p2p-b/guix-p2p.sock
-export GUIX_P2P_BIN="${GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}"
+export GUIX_P2P_BIN="${GUIX_P2P_E2E_P2P_BIN:-guix-p2p}"
 export REAL_GUIX=/run/current-system/profile/bin/guix
 exec /tmp/guix-p2p-wrapper "$@"
 EOF

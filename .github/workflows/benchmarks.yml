@@ -150,5 +150,6 @@ jobs:
           if-no-files-found: ignore
           path: |
             target/guix-p2p-bench/results.csv
+            target/guix-p2p-bench/logs/**/*.log
             target/guix-p2p-e2e/logs/*.log
             docs/benchmark-results.md
