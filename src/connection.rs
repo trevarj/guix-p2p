@@ -5,6 +5,7 @@ use std::{
 
 use libp2p::PeerId;
 
+/// Tunable limits for peer dialing, retry backoff, and connection pruning.
 #[derive(Debug, Clone)]
 pub struct ConnectionConfig {
     pub connect_timeout: Duration,
@@ -35,6 +36,10 @@ struct PeerState {
     addresses: HashSet<String>,
 }
 
+/// Snapshot of connection-manager state for one peer.
+///
+/// This is used by the dashboard and provider selection code so callers do not
+/// need to inspect mutable connection-manager internals.
 #[derive(Debug, Clone)]
 pub struct PeerConnectionSnapshot {
     pub peer: PeerId,
@@ -43,6 +48,11 @@ pub struct PeerConnectionSnapshot {
     pub last_active_secs_ago: u64,
 }
 
+/// Tracks peer connection state and retry backoff.
+///
+/// This manager is deliberately separate from `ReputationTracker`: connection
+/// state answers "can we dial this peer now?", while reputation answers "how
+/// reliable has this peer been when serving blocks?".
 #[derive(Debug)]
 pub struct ConnectionManager {
     config: ConnectionConfig,
@@ -50,14 +60,17 @@ pub struct ConnectionManager {
 }
 
 impl ConnectionManager {
+    /// Create a connection manager with the given limits.
     pub fn new(config: ConnectionConfig) -> Self {
         ConnectionManager { config, peers: HashMap::new() }
     }
 
+    /// Mark a peer as connected without adding new address metadata.
     pub fn on_connected(&mut self, peer: PeerId) {
         self.on_connected_with_addresses(peer, Vec::new());
     }
 
+    /// Mark a peer as connected and merge any dialable addresses learned.
     pub fn on_connected_with_addresses(&mut self, peer: PeerId, addresses: Vec<String>) {
         let now = Instant::now();
         let entry = self.peers.entry(peer).or_insert(PeerState {
@@ -73,6 +86,7 @@ impl ConnectionManager {
         entry.addresses.extend(addresses);
     }
 
+    /// Mark a peer as disconnected while keeping address and retry history.
     pub fn on_disconnected(&mut self, peer: PeerId) {
         if let Some(state) = self.peers.get_mut(&peer) {
             state.last_active = Instant::now();
@@ -80,11 +94,13 @@ impl ConnectionManager {
         }
     }
 
+    /// Mark recent successful peer activity.
     pub fn on_active(&mut self, peer: PeerId) {
         let state = self.peer_state(peer);
         state.last_active = Instant::now();
     }
 
+    /// Store a dialable address learned from identify, mDNS, or dialing.
     pub fn add_address(&mut self, peer: PeerId, address: String) {
         let state = self.peer_state(peer);
         state.addresses.insert(address);
@@ -99,6 +115,7 @@ impl ConnectionManager {
         self.peers.values().filter(|state| state.connected).count()
     }
 
+    /// Return a read-only dashboard/API snapshot sorted by each caller as needed.
     pub fn peer_snapshots(&self) -> Vec<PeerConnectionSnapshot> {
         let now = Instant::now();
         self.peers
@@ -116,6 +133,7 @@ impl ConnectionManager {
             .collect()
     }
 
+    /// Return true if the peer is below retry limits or its backoff expired.
     pub fn can_connect(&self, peer: &PeerId) -> bool {
         if self.peers.len() >= self.config.max_peers {
             return false;
@@ -129,6 +147,7 @@ impl ConnectionManager {
         }
     }
 
+    /// Return the remaining backoff before another dial should be attempted.
     pub fn next_retry_delay(&self, peer: &PeerId) -> Option<Duration> {
         self.peers.get(peer).and_then(|state| {
             if state.retry_count >= self.config.max_retries {
@@ -142,6 +161,7 @@ impl ConnectionManager {
         })
     }
 
+    /// Record an outbound dial or handshake attempt.
     pub fn record_attempt(&mut self, peer: PeerId) {
         let now = Instant::now();
         let entry = self.peers.entry(peer).or_insert(PeerState {
@@ -155,6 +175,7 @@ impl ConnectionManager {
         entry.last_attempt = now;
     }
 
+    /// Remove peers that have been inactive beyond the health-check window.
     pub fn prune_dead(&mut self) -> Vec<PeerId> {
         let now = Instant::now();
         let threshold = now - self.config.health_check_interval * 2;

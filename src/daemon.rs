@@ -978,12 +978,43 @@ fn merge_provider_lists(left: &[PeerId], right: &[PeerId]) -> Vec<PeerId> {
     left.iter().chain(right.iter()).copied().filter(|peer| seen.insert(*peer)).collect()
 }
 
+/// Provider candidates that survived reputation and connection-backoff filters.
+///
+/// The downloader queries the DHT first, then narrows those providers to peers
+/// that are both non-banned and dialable right now. Keeping this report as a
+/// named type makes the two filtering reasons explicit without changing the
+/// public substitute behavior.
+#[derive(Debug)]
+struct ProviderCandidateSelection {
+    peers: Vec<PeerId>,
+    skipped_by_backoff: usize,
+}
+
 fn select_provider_candidates(
     providers: &[PeerId],
     reputation: &Arc<Mutex<ReputationTracker>>,
     conn_mgr: &Arc<Mutex<ConnectionManager>>,
     max_peers: usize,
 ) -> Vec<PeerId> {
+    let selection =
+        select_provider_candidates_with_report(providers, reputation, conn_mgr, max_peers);
+
+    if selection.skipped_by_backoff > 0 {
+        tracing::debug!(
+            "Skipped {} provider candidates because connection backoff is active",
+            selection.skipped_by_backoff
+        );
+    }
+
+    selection.peers
+}
+
+fn select_provider_candidates_with_report(
+    providers: &[PeerId],
+    reputation: &Arc<Mutex<ReputationTracker>>,
+    conn_mgr: &Arc<Mutex<ConnectionManager>>,
+    max_peers: usize,
+) -> ProviderCandidateSelection {
     let ranked = {
         let tracker = reputation.lock().unwrap();
         tracker.best_peers(providers, providers.len())
@@ -1006,17 +1037,13 @@ fn select_provider_candidates(
         }
     }
 
-    if skipped > 0 {
-        tracing::debug!(
-            "Skipped {} provider candidates because connection backoff is active",
-            skipped
-        );
-    }
-
-    selected
+    ProviderCandidateSelection { peers: selected, skipped_by_backoff: skipped }
 }
 
-/// Handshake results: for each peer, which blocks they have.
+/// Successful handshake with a provider.
+///
+/// The block hash list is later used by `ActiveDownload` to reject corrupted
+/// blocks before the final full-NAR hash check.
 struct PeerHandshake {
     peer: PeerId,
     blocks_available: Vec<u32>,
@@ -1024,6 +1051,7 @@ struct PeerHandshake {
     block_count: u32,
 }
 
+/// Shared inputs for the block download scheduler.
 struct BlockDownloadContext<'a> {
     cmd_tx: &'a UnboundedSender<SwarmCommand>,
     notify_rx: &'a mut NotifyRx,
@@ -1038,6 +1066,7 @@ enum BlockFetchState {
     Complete,
 }
 
+/// Per-peer state tracked while one NAR download is active.
 #[derive(Debug)]
 struct PeerFetchState {
     available: HashSet<u32>,

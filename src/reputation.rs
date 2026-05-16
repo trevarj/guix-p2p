@@ -6,6 +6,10 @@ use std::{
 
 use libp2p::PeerId;
 
+/// Runtime scorecard for a peer that has participated in block exchange.
+///
+/// Reputation is intentionally transport-only. It ranks peers for reliability
+/// and backoff decisions, but it must not be used as build or metadata trust.
 #[derive(Debug, Clone)]
 pub struct PeerScore {
     pub completed: u32,
@@ -21,6 +25,11 @@ impl Default for PeerScore {
 }
 
 impl PeerScore {
+    /// Compute a bounded reliability score for provider ordering.
+    ///
+    /// New peers are neutral through `ReputationTracker::score`; once a peer
+    /// has history, successful transfers, recent activity, and bytes served
+    /// raise the score while failures lower it.
     pub fn score(&self, now: Instant) -> f64 {
         let base = self.completed as f64 / (self.completed + self.failed + 1) as f64;
 
@@ -34,6 +43,11 @@ impl PeerScore {
     }
 }
 
+/// Persistent peer reliability tracker used by the downloader.
+///
+/// Scores are saved under the guix-p2p cache directory and restored across
+/// daemon restarts. The tracker only describes how well a peer served blocks;
+/// it does not authenticate narinfo, attestations, or build outputs.
 #[derive(Debug)]
 pub struct ReputationTracker {
     peers: HashMap<PeerId, PeerScore>,
@@ -41,10 +55,12 @@ pub struct ReputationTracker {
 }
 
 impl ReputationTracker {
+    /// Create an empty tracker that bans peers after `ban_threshold` failures.
     pub fn new(ban_threshold: u32) -> Self {
         ReputationTracker { peers: HashMap::new(), ban_threshold }
     }
 
+    /// Record a successful interaction with a peer.
     pub fn record_success(&mut self, peer: PeerId, bytes: u64) {
         let entry = self.peers.entry(peer).or_default();
         entry.completed += 1;
@@ -52,16 +68,19 @@ impl ReputationTracker {
         entry.last_seen = Instant::now();
     }
 
+    /// Record a failed interaction with a peer.
     pub fn record_failure(&mut self, peer: PeerId) {
         let entry = self.peers.entry(peer).or_default();
         entry.failed += 1;
         entry.last_seen = Instant::now();
     }
 
+    /// Return true when a peer has crossed the local failure threshold.
     pub fn is_banned(&self, peer: &PeerId) -> bool {
         self.peers.get(peer).map(|s| s.failed >= self.ban_threshold).unwrap_or(false)
     }
 
+    /// Return the peer's current reliability score, or neutral for unknown peers.
     pub fn score(&self, peer: &PeerId) -> f64 {
         let now = Instant::now();
         self.peers.get(peer).map(|s| s.score(now)).unwrap_or(0.5)
@@ -76,6 +95,7 @@ impl ReputationTracker {
         self.peers.iter().map(|(k, v)| (*k, v.clone())).collect()
     }
 
+    /// Sort peer IDs in-place from most to least reliable.
     pub fn sort_by_score(&self, peers: &mut [PeerId]) {
         let now = Instant::now();
         peers.sort_by(|a, b| {
@@ -85,6 +105,7 @@ impl ReputationTracker {
         });
     }
 
+    /// Return the best non-banned peers, preserving only the top `max` by score.
     pub fn best_peers(&self, peers: &[PeerId], max: usize) -> Vec<PeerId> {
         let mut scored: Vec<(PeerId, f64)> =
             peers.iter().filter(|p| !self.is_banned(p)).map(|p| (*p, self.score(p))).collect();
@@ -93,11 +114,13 @@ impl ReputationTracker {
         scored.into_iter().take(max).map(|(p, _)| p).collect()
     }
 
+    /// Drop reputation entries that have not been touched within `max_age`.
     pub fn prune_stale(&mut self, max_age: Duration) {
         let now = Instant::now();
         self.peers.retain(|_, s| now.duration_since(s.last_seen) < max_age);
     }
 
+    /// Persist reputation counters to JSON.
     pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
         let data: Vec<(PeerId, (u32, u32, u64))> =
             self.peers.iter().map(|(p, s)| (*p, (s.completed, s.failed, s.bytes_served))).collect();
@@ -107,6 +130,7 @@ impl ReputationTracker {
         Ok(())
     }
 
+    /// Load reputation counters from JSON, or return an empty tracker if missing.
     pub fn load(path: &Path, ban_threshold: u32) -> Result<Self, std::io::Error> {
         if !path.exists() {
             return Ok(Self::new(ban_threshold));

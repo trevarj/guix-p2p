@@ -120,10 +120,14 @@ Connection management, peer reputation, and bandwidth limiting are implemented
 as separate modules outside the behaviour:
 
 ```rust
-struct ReputationTracker { .. }     // src/reputation.rs: time-decay peer scoring
-struct ConnectionManager { .. }     // src/connection.rs: retry/backoff, pruning
+struct ReputationTracker { .. }     // src/reputation.rs: transport reliability scoring
+struct ConnectionManager { .. }     // src/connection.rs: dial state, retry/backoff, pruning
 struct BandwidthLimiter { .. }     // src/bandwidth.rs: token-bucket rate limiting
 ```
+
+Reputation is deliberately transport-only. It ranks peers for block download
+selection and stale-provider avoidance, but it does not authenticate narinfo,
+attestations, or build outputs.
 
 ## Daemon Protocol Layer
 
@@ -241,7 +245,9 @@ Peer → Client: BLOCKS { data: [(u32, Vec<u8>); 1..8] }
 - Track availability per peer via handshake replies.
 - Retry handshakes during the handshake window.
 - Filter provider candidates through peer reputation and connection backoff
-  before handshakes so stale DHT records are deprioritized after failures.
+  before handshakes so stale DHT records are deprioritized after failures. The
+  selection report keeps reputation filtering and connection-backoff filtering
+  visible as separate reasons.
 - If cached providers are filtered below `min_providers`, wait for fresh DHT
   provider notifications before failing the P2P attempt.
 - Require at least `min_providers` successful handshakes before downloading.
