@@ -49,18 +49,18 @@ reply to guix-daemon as a normal substitute
 
 ## Quick Start
 
-Build the release binaries from a development shell:
+The local package definition installs both `guix-p2p` and
+`guix-p2p-wrapper`:
 
 ```sh
-guix shell -m manifest.scm
-cargo build --release
+guix shell -f guix.scm
 ```
 
 Start a daemon with the default cache directory, relay socket, and local
-dashboard:
+dashboard from that shell:
 
 ```sh
-target/release/guix-p2p --daemon \
+guix-p2p --daemon \
     --listen-addr /ip4/0.0.0.0/udp/6881/quic-v1 \
     --dashboard \
     --dashboard-bind 127.0.0.1 \
@@ -70,16 +70,8 @@ target/release/guix-p2p --daemon \
 Install `guix-p2p-wrapper` as the `guix` command earlier in the `guix-daemon`
 service `PATH` than the real Guix binary. The wrapper passes ordinary Guix
 commands through unchanged, but intercepts the substitute protocol calls that
-`guix-daemon` makes during a build or reconfigure:
-
-```sh
-mkdir -p "$HOME/.local/libexec/guix-p2p/bin"
-ln -sf "$PWD/target/release/guix-p2p-wrapper" "$HOME/.local/libexec/guix-p2p/bin/guix"
-ln -sf "$PWD/target/release/guix-p2p" "$HOME/.local/libexec/guix-p2p/bin/guix-p2p"
-```
-
-Configure the daemon to start with that directory first in `PATH`, then keep
-using normal Guix commands:
+`guix-daemon` makes during a build or reconfigure. With the daemon configured
+for that wrapper path, keep using normal Guix commands:
 
 ```sh
 guix build hello
@@ -93,7 +85,15 @@ The wrapper defaults to:
 - real Guix binary: `/run/current-system/profile/bin/guix`
 
 See [docs/deployment.md](docs/deployment.md) for persistent service and wrapper
-installation options.
+installation options. To add the local package to a Guix profile, use:
+
+```sh
+guix package -f guix.scm
+```
+
+Note: the package definition currently builds from Cargo's locked dependency
+graph. A fully offline Guix build still requires importing or vendoring the Rust
+crate dependencies.
 
 ## Bootstrap Peers
 

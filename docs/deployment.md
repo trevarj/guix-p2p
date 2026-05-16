@@ -2,6 +2,16 @@
 
 ## Daemon
 
+From a checkout, the local package definition installs both runtime commands:
+
+```sh
+guix shell -f guix.scm
+```
+
+The pure package build still depends on importing or vendoring the Rust crate
+dependency graph, so use the development manifest while working on packaging
+itself.
+
 Run a persistent node:
 
 ```sh
