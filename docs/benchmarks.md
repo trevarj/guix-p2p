@@ -303,6 +303,9 @@ deploy Pages without waiting for the VM benchmark job.
 
 `index.html` is the project landing page. It focuses on what guix-p2p does,
 channel-based setup, configuration, normal usage, and development entrypoints.
+`configuration.html` and `deployment.html` render their Markdown source files
+with the same static styling as the rest of the Pages site, while keeping raw
+Markdown links available for source viewing.
 `benchmarks.html` is secondary evidence and renders the latest benchmark report
 as HTML tables with links to the raw CSV, raw markdown report, and recent
 benchmark workflow runs. Older reports stay attached to their GitHub Actions

@@ -453,7 +453,9 @@ function escapeHtml(value) {
 }
 
 function renderInline(value) {
-  return escapeHtml(value).replace(/`([^`]+)`/g, "<code>$1</code>");
+  return escapeHtml(value)
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
 function languageLabel(language) {
@@ -474,7 +476,7 @@ function detectLanguage(code, hint) {
   if (trimmed.startsWith("(use-modules") || trimmed.startsWith("(cons*") || trimmed.includes("(channel")) {
     return "scheme";
   }
-  if (/^(guix|sudo|cargo|\.\//m.test(trimmed)) {
+  if (/^(guix|sudo|cargo|\.\/)/m.test(trimmed)) {
     return "sh";
   }
   if (/^[a-z0-9_-]+\s*=/im.test(trimmed)) {
@@ -872,6 +874,28 @@ async function loadBenchmarkCharts() {
 }
 JS
 
+cat > "$site_dir/doc-page.js" <<'JS'
+async function loadMarkdownDocument(source, fallbackTitle) {
+  const documentTitle = document.getElementById("document-title");
+  const documentBody = document.getElementById("document-body");
+  const rawLink = document.getElementById("raw-markdown-link");
+  if (rawLink) {
+    rawLink.href = source;
+  }
+  const response = await fetch(source, { cache: "no-store" });
+  if (!response.ok) {
+    documentTitle.textContent = fallbackTitle;
+    documentBody.textContent = `Could not load ${source}.`;
+    return;
+  }
+  const markdown = await response.text();
+  const heading = /^#\s+(.+)$/m.exec(markdown);
+  documentTitle.textContent = heading ? heading[1] : fallbackTitle;
+  documentBody.classList.remove("muted");
+  documentBody.innerHTML = renderMarkdown(markdown);
+}
+JS
+
 cat > "$site_dir/index.html" <<'HTML'
 <!doctype html>
 <html lang="en">
@@ -899,8 +923,8 @@ cat > "$site_dir/index.html" <<'HTML'
       <p class="lead muted">guix-p2p is a libp2p daemon and Guix substitute extension. It lets Guix machines discover peers through a Kademlia DHT, download NAR blocks from those peers, verify official Guix nar hashes, and fall back to configured HTTP substitutes when policy allows it.</p>
       <p class="actions">
         <a class="button" href="#getting-started">Get started</a>
-        <a class="button" href="configuration.md">Configuration reference</a>
-        <a class="button" href="deployment.md">Deployment guide</a>
+        <a class="button" href="configuration.html">Configuration reference</a>
+        <a class="button" href="deployment.html">Deployment guide</a>
         <a class="button" href="benchmarks.html">Benchmarks</a>
         <a class="button" href="https://codeberg.org/trevarj/guix-p2p">Source on Codeberg</a>
       </p>
@@ -1014,13 +1038,99 @@ cat > "$site_dir/index.html" <<'HTML'
     <section>
       <h2>Reference</h2>
       <div class="doc-grid">
-        <a class="doc-link" href="configuration.md">Configuration<span>Runtime options, paths, and substitute settings.</span></a>
-        <a class="doc-link" href="deployment.md">Deployment<span>Bootstrap node and deployment notes.</span></a>
+        <a class="doc-link" href="configuration.html">Configuration<span>Runtime options, paths, and substitute settings.</span></a>
+        <a class="doc-link" href="deployment.html">Deployment<span>Bootstrap node and deployment notes.</span></a>
         <a class="doc-link" href="benchmark-methodology.md">Benchmark methodology<span>How local and VM benchmark suites are run.</span></a>
         <a class="doc-link" href="benchmarks.html">Benchmark results<span>Rendered latest report, CSV, charts, and workflow-run links.</span></a>
       </div>
     </section>
   </main>
+</body>
+</html>
+HTML
+
+cat > "$site_dir/configuration.html" <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>guix-p2p configuration</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
+      <nav aria-label="Site navigation">
+        <a href="index.html">Home</a>
+        <a href="configuration.html" aria-current="page">Configuration</a>
+        <a href="deployment.html">Deployment</a>
+        <a href="benchmarks.html">Benchmarks</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="hero">
+      <h1 id="document-title">Configuration Reference</h1>
+      <p class="lead muted">Runtime options, paths, CLI overrides, and substitute policy settings.</p>
+      <p class="actions">
+        <a id="raw-markdown-link" class="button" href="configuration.md">Raw Markdown</a>
+      </p>
+    </section>
+    <section>
+      <div id="document-body" class="markdown muted">Loading configuration.md...</div>
+    </section>
+  </main>
+
+  <script src="markdown.js"></script>
+  <script src="doc-page.js"></script>
+  <script>
+    loadMarkdownDocument("configuration.md", "Configuration Reference");
+  </script>
+</body>
+</html>
+HTML
+
+cat > "$site_dir/deployment.html" <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>guix-p2p deployment</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
+      <nav aria-label="Site navigation">
+        <a href="index.html">Home</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="deployment.html" aria-current="page">Deployment</a>
+        <a href="benchmarks.html">Benchmarks</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="hero">
+      <h1 id="document-title">Deployment Guide</h1>
+      <p class="lead muted">Guix channel setup, daemon operation, substitute extension flow, and E2E validation.</p>
+      <p class="actions">
+        <a id="raw-markdown-link" class="button" href="deployment.md">Raw Markdown</a>
+      </p>
+    </section>
+    <section>
+      <div id="document-body" class="markdown muted">Loading deployment.md...</div>
+    </section>
+  </main>
+
+  <script src="markdown.js"></script>
+  <script src="doc-page.js"></script>
+  <script>
+    loadMarkdownDocument("deployment.md", "Deployment Guide");
+  </script>
 </body>
 </html>
 HTML
