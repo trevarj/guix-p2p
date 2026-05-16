@@ -36,6 +36,13 @@ popular nars from it instead of hitting the remote substitute servers. This
 is the highest-ROI use case for organizations running multiple Guix
 machines behind a single internet connection.
 
+## Full-P2P Attestations
+
+Full-P2P mode needs decentralized substitute metadata, not just P2P NAR bytes.
+The future plan is documented in
+[full-p2p-attestations.md](full-p2p-attestations.md): reuse Guix
+publish-style signing keys, require explicit threshold trust, and fail closed.
+
 ## Seeding Priority for Heavy Packages
 
 Large, slow-to-build packages (linux kernels, firefox, llvm, rust)

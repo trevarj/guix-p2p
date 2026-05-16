@@ -83,6 +83,14 @@ needs:
 - Documented node upgrade and restart procedure.
 - Clear guidance for trusted testers versus public peers.
 
+## Full-P2P Metadata
+
+Current P2P downloads still rely on trusted narinfo metadata from official
+substitute servers or local test metadata. A future full-P2P mode is planned in
+[full-p2p-attestations.md](full-p2p-attestations.md). It uses Guix
+publish-style signed attestations with explicit threshold trust and keeps peer
+reputation separate from build trust.
+
 ## Deferred Ideas
 
 Deferred work remains in [future-ideas.md](future-ideas.md). The highest-value
