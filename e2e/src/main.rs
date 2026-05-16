@@ -1383,7 +1383,7 @@ fn vm_push_binary(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::R
     let libgcrypt_runtime = guix_build_last_path("libgcrypt")?;
     for target in targets {
         push_binary_to_node(config, target, &libgcrypt_runtime)?;
-        push_wrapper_to_node(config, target)?;
+        push_wrapper_to_node(config, target, &libgcrypt_runtime)?;
         println!("pushed binary to {}:/tmp/guix-p2p", target.name);
     }
     Ok(())
@@ -1492,7 +1492,8 @@ test ! -e {store_path} && echo TARGET_ABSENT_AFTER_DELETE
 fn vm_start_daemon(config: &VmConfig, name: &str) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
-    push_wrapper_to_node(config, &node)?;
+    let libgcrypt_runtime = guix_build_last_path("libgcrypt")?;
+    push_wrapper_to_node(config, node, &libgcrypt_runtime)?;
     let remote = r#"
 set -eu
 cat > /tmp/e2e-guix-wrapper <<'EOF'
@@ -4702,7 +4703,11 @@ chmod 755 /tmp/guix-p2p /tmp/guix-p2p-real
     Ok(())
 }
 
-fn push_wrapper_to_node(config: &VmConfig, node: &VmNode) -> anyhow::Result<()> {
+fn push_wrapper_to_node(
+    config: &VmConfig,
+    node: &VmNode,
+    libgcrypt_runtime: &str,
+) -> anyhow::Result<()> {
     let wrapper = ensure_guix_p2p_wrapper_binary()?;
     ensure_ssh_client_key(config)?;
     let status = std::process::Command::new("scp")
@@ -4724,13 +4729,15 @@ fn push_wrapper_to_node(config: &VmConfig, node: &VmNode) -> anyhow::Result<()> 
     if !status.success() {
         anyhow::bail!("scp wrapper to {} failed with {status}", node.name);
     }
-    let install = r#"set -eu
+    let install = format!(
+        r#"set -eu
 mv /tmp/guix-p2p-wrapper-real.next /tmp/guix-p2p-wrapper-real
 cat > /tmp/guix-p2p-wrapper <<'EOF'
 #!/bin/sh
 set -eu
+LIBGCRYPT="${{GUIX_P2P_E2E_LIBGCRYPT:-{}}}"
 LOADER="/run/current-system/profile/lib/ld-linux-x86-64.so.2"
-LIBRARY_PATH="/run/current-system/profile/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+LIBRARY_PATH="$LIBGCRYPT/lib:/run/current-system/profile/lib${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
 if [ -x "$LOADER" ]; then
   exec "$LOADER" --library-path "$LIBRARY_PATH" /tmp/guix-p2p-wrapper-real "$@"
 fi
@@ -4738,8 +4745,10 @@ export LD_LIBRARY_PATH="$LIBRARY_PATH"
 exec /tmp/guix-p2p-wrapper-real "$@"
 EOF
 chmod 755 /tmp/guix-p2p-wrapper /tmp/guix-p2p-wrapper-real
-"#;
-    ssh_run(config, node, install)?;
+"#,
+        libgcrypt_runtime
+    );
+    ssh_run(config, node, &install)?;
     Ok(())
 }
 

@@ -167,10 +167,12 @@ unavailable dependency paths during standard benchmarks. When VM p2p modes
 provide local narinfo metadata, info and substitute lookups stay local instead
 of falling through to remote substitute servers for unrelated Guix queries. This
 keeps p2p-only query handling from blocking on substitute-server narinfo
-timeouts for the target. The latest
-two-seeder `hello` run completed successfully, found multiple providers, and
-imported the NAR through P2P. Provider selection now filters candidates through
-peer reputation and connection backoff, so stale provider records should be
+timeouts for the target. The VM `push-binary` command installs loader wrappers
+for both `guix-p2p` and `guix-p2p-wrapper` so the copied release binaries can
+find their Guix runtime libraries inside the guest. The latest two-seeder
+`hello` run completed successfully, found multiple providers, and imported the
+NAR through P2P. Provider selection now filters candidates through peer
+reputation and connection backoff, so stale provider records should be
 penalized after handshake timeouts instead of being retried first on later
 downloads. Remaining benchmark work should focus on larger packages, repeated
 runs, and HTTP comparison modes before making performance claims.
