@@ -16,6 +16,7 @@ developing `guix-p2p`.
 | [mirror.md](mirror.md) | Codeberg-to-GitHub mirror and GitHub CI setup |
 | [dht-protocol.md](dht-protocol.md) | Kademlia DHT design |
 | [swarm-protocol.md](swarm-protocol.md) | Block exchange wire protocol |
+| [contributing.md](contributing.md) | Contribution and AI-assisted work policy |
 | [roadmap.md](roadmap.md) | Current remaining work |
 | [future-ideas.md](future-ideas.md) | Deferred implementation ideas |
 

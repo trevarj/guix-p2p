@@ -206,9 +206,10 @@ and [docs/benchmarks.md](docs/benchmarks.md) for benchmark runs and artifacts.
 | [docs/mirror.md](docs/mirror.md) | Codeberg-to-GitHub mirror and GitHub CI setup |
 | [docs/dht-protocol.md](docs/dht-protocol.md) | Kademlia DHT design |
 | [docs/swarm-protocol.md](docs/swarm-protocol.md) | Block exchange wire protocol |
+| [docs/contributing.md](docs/contributing.md) | Contribution and AI-assisted work policy |
 | [docs/roadmap.md](docs/roadmap.md) | Current remaining work |
 | [docs/README.md](docs/README.md) | Full documentation index |
 
 ## License
 
-GPL-3.0-or-later
+GPL-3.0-or-later. See [COPYING](COPYING).

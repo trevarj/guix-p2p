@@ -3,6 +3,7 @@ name = "guix-p2p-e2e"
 version = "0.1.0"
 edition = "2024"
 description = "End-to-end multi-node integration tests for guix-p2p"
+license = "GPL-3.0-or-later"
 
 [[bin]]
 name = "guix-p2p-e2e"

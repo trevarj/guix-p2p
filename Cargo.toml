@@ -7,6 +7,7 @@ name = "guix-p2p"
 version = "0.1.0"
 edition = "2024"
 description = "P2P binary substitute distribution for GNU Guix"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 libp2p = { version = "0.56", features = ["full", "kad", "quic", "tcp", "dns", "request-response", "mdns", "identify", "macros", "autonat", "relay"] }
