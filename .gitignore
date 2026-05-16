@@ -1,4 +1,5 @@
 /target
+/site
 /.cache
 .direnv
 e2e/target/

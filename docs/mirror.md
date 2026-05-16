@@ -149,11 +149,13 @@ Pages must also be supported by the repository's GitHub plan and visibility.
 When Pages is unavailable, the benchmark workflow still succeeds and keeps the
 CSV/report as a run artifact.
 
-The Pages site publishes a user-facing docs home at `index.html` and a rendered
-benchmark report at `benchmarks.html`. The benchmark page renders the latest
-markdown report as HTML tables and links to the raw CSV, raw markdown report,
-and recent benchmark workflow runs. Older CSV and markdown reports remain
-attached to their corresponding GitHub Actions runs as artifacts.
+The Pages site publishes a user-facing project home at `index.html` and a
+rendered benchmark report at `benchmarks.html`. The home page focuses on
+project purpose, channel-based setup, configuration, normal usage, and
+development entrypoints. The benchmark page renders the latest markdown report
+as HTML tables and links to the raw CSV, raw markdown report, and recent
+benchmark workflow runs. Older CSV and markdown reports remain attached to
+their corresponding GitHub Actions runs as artifacts.
 The site generator copies the `docs/assets/guix-p2p-wordmark.svg` wordmark into
 the Pages artifact and uses it in the header and hero. Benchmark dates are
 shown as UTC datetimes; older epoch-second reports are normalized in the

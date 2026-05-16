@@ -164,6 +164,13 @@ h2 {
   flex-wrap: wrap;
   gap: 12px;
 }
+.note {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent-strong) 28%, var(--border));
+  border-radius: 8px;
+  max-width: 780px;
+  padding: 12px 14px;
+}
 .button, .doc-link {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -193,6 +200,30 @@ h2 {
   color: var(--muted);
   font-weight: 400;
   margin-top: 6px;
+}
+.section-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+.info-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  min-width: 0;
+  padding: 16px;
+}
+.info-card h3 {
+  font-size: 1.05rem;
+  margin: 0 0 8px;
+}
+.info-card p,
+.info-card ul {
+  margin-bottom: 0;
+}
+.info-card ul {
+  padding-left: 20px;
 }
 .markdown {
   overflow-wrap: anywhere;
@@ -715,7 +746,7 @@ cat > "$site_dir/index.html" <<'HTML'
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>guix-p2p documentation</title>
+  <title>guix-p2p</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -723,29 +754,133 @@ cat > "$site_dir/index.html" <<'HTML'
     <div class="site-header-inner">
       <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
       <nav aria-label="Site navigation">
-        <a href="index.html" aria-current="page">Docs</a>
+        <a href="index.html" aria-current="page">Start</a>
+        <a href="#configure">Configure</a>
+        <a href="#development">Develop</a>
         <a href="benchmarks.html">Benchmarks</a>
-        <a href="https://github.com/trevarj/guix-p2p/actions/workflows/benchmarks.yml">Runs</a>
       </nav>
     </div>
   </header>
   <main>
     <section class="hero">
-      <h1>guix-p2p documentation</h1>
-      <p class="lead muted">User-facing documentation and benchmark evidence for the GitHub mirror.</p>
+      <h1>P2P binary substitutes for GNU Guix</h1>
+      <p class="lead muted">guix-p2p is a libp2p daemon and Guix substitute extension. It lets Guix machines discover peers through a Kademlia DHT, download NAR blocks from those peers, verify official Guix nar hashes, and fall back to configured HTTP substitutes when policy allows it.</p>
       <p class="actions">
-        <a class="button" href="benchmarks.html">View latest benchmarks</a>
+        <a class="button" href="#getting-started">Get started</a>
+        <a class="button" href="configuration.md">Configuration reference</a>
+        <a class="button" href="deployment.md">Deployment guide</a>
+        <a class="button" href="benchmarks.html">Benchmarks</a>
         <a class="button" href="https://codeberg.org/trevarj/guix-p2p">Source on Codeberg</a>
-        <a class="button" href="https://github.com/trevarj/guix-p2p">GitHub mirror</a>
       </p>
+      <p class="note muted">Proof-of-concept experiment: this project is being developed using Codex GPT-5.5 with maintainer guidance.</p>
     </section>
+
     <section>
-      <h2>Documentation</h2>
+      <h2>What It Does</h2>
+      <div class="section-grid">
+        <article class="info-card">
+          <h3>Uses normal Guix commands</h3>
+          <p class="muted">Keep running <code>guix build</code>, <code>guix package</code>, and <code>guix system reconfigure</code>. The extension intercepts the internal <code>guix substitute</code> protocol calls made by <code>guix-daemon</code>.</p>
+        </article>
+        <article class="info-card">
+          <h3>Verifies official content</h3>
+          <p class="muted">Peers serve NAR blocks, but downloaded content is accepted only after Guix nar hash verification against trusted narinfo metadata.</p>
+        </article>
+        <article class="info-card">
+          <h3>Finds peers over libp2p</h3>
+          <p class="muted">Nodes advertise providers in Kademlia, can use bootstrap peers, and persist learned reachable peers between daemon starts.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="getting-started">
+      <h2>Get Started</h2>
+      <p>Add the repository as a Guix channel, then run <code>guix pull</code>:</p>
+      <pre><code>(cons*
+ (channel
+  (name 'guix-p2p)
+  (url "https://codeberg.org/trevarj/guix-p2p")
+  (branch "main"))
+ %default-channels)</code></pre>
+      <p>Import the service module in your operating-system configuration and enable the daemon extension:</p>
+      <pre><code>(use-modules (guix-p2p services))
+
+(services
+  (modify-services
+      (cons (service guix-p2p-service-type) %base-services)
+    (guix-service-type config =>
+      (guix-p2p-enable-guix-daemon-extension config))))</code></pre>
+      <p>After reconfiguring, use Guix normally:</p>
+      <pre><code>guix build hello
+sudo guix system reconfigure /etc/config.scm</code></pre>
+    </section>
+
+    <section id="configure">
+      <h2>Configure</h2>
+      <div class="section-grid">
+        <article class="info-card">
+          <h3>Runtime config</h3>
+          <p class="muted">The daemon reads <code>~/.config/guix-p2p/config.toml</code>. Configure substitute URLs, bootstrap peers, external addresses, cache paths, provider thresholds, and dashboard settings there.</p>
+        </article>
+        <article class="info-card">
+          <h3>Bootstrap peers</h3>
+          <p class="muted">Use full peer multiaddrs such as <code>/dns4/node.example.org/udp/6881/quic-v1/p2p/12D3KooW...</code> in <code>bootstrap_peers</code>. Do not share <code>/ip4/0.0.0.0/...</code>; that is only a local bind address.</p>
+        </article>
+        <article class="info-card">
+          <h3>Dashboard</h3>
+          <p class="muted">Enable the dashboard to inspect daemon state, recent substitute activity, provider discovery, and the full shareable peer address derived from <code>external_addresses</code> plus the node PeerId.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Use</h2>
+      <div class="section-grid">
+        <article class="info-card">
+          <h3>System service</h3>
+          <p class="muted">The Guix service starts <code>guix-p2p --daemon</code>, adds the package to the system profile, and prepends the extension directory to <code>GUIX_EXTENSIONS_PATH</code> without clobbering other extensions.</p>
+        </article>
+        <article class="info-card">
+          <h3>Substitution policy</h3>
+          <p class="muted">The daemon answers <code>have</code> and <code>info</code> only when trusted narinfo metadata exists and enough P2P providers are available. HTTP fallback remains policy-controlled.</p>
+        </article>
+        <article class="info-card">
+          <h3>Benchmarks</h3>
+          <p class="muted">Benchmark results are secondary project evidence. The benchmark page renders the latest CI report, CSV, charts, and workflow-run links.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="development">
+      <h2>Development</h2>
+      <div class="section-grid">
+        <article class="info-card">
+          <h3>Local shell</h3>
+          <p class="muted">Use the repository package definition for a temporary development environment:</p>
+          <pre><code>guix shell -f guix.scm</code></pre>
+        </article>
+        <article class="info-card">
+          <h3>Checks</h3>
+          <p class="muted">Run focused Rust checks before sending changes:</p>
+          <pre><code>cargo fmt
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test</code></pre>
+        </article>
+        <article class="info-card">
+          <h3>E2E proof</h3>
+          <p class="muted">The VM channel proof is the strict deployment check. Longer benchmarks should run in CI, not on developer workstations.</p>
+          <pre><code>cargo run -p guix-p2p-e2e -- vm channel-proof</code></pre>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Reference</h2>
       <div class="doc-grid">
-        <a class="doc-link" href="benchmarks.html">Benchmarks<span>Rendered latest report, CSV, and recent workflow runs.</span></a>
-        <a class="doc-link" href="benchmark-methodology.md">Benchmark methodology<span>How local and VM benchmark suites are run.</span></a>
         <a class="doc-link" href="configuration.md">Configuration<span>Runtime options, paths, and substitute settings.</span></a>
         <a class="doc-link" href="deployment.md">Deployment<span>Bootstrap node and deployment notes.</span></a>
+        <a class="doc-link" href="benchmark-methodology.md">Benchmark methodology<span>How local and VM benchmark suites are run.</span></a>
+        <a class="doc-link" href="benchmarks.html">Benchmark results<span>Rendered latest report, CSV, charts, and workflow-run links.</span></a>
       </div>
     </section>
   </main>
@@ -767,9 +902,8 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
     <div class="site-header-inner">
       <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
       <nav aria-label="Site navigation">
-        <a href="index.html">Docs</a>
+        <a href="index.html">Start</a>
         <a href="benchmarks.html" aria-current="page">Benchmarks</a>
-        <a href="https://github.com/trevarj/guix-p2p/actions/workflows/benchmarks.yml">Runs</a>
       </nav>
     </div>
   </header>

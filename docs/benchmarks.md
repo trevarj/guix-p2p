@@ -301,10 +301,12 @@ Pages workflow listens for successful benchmark runs, downloads that artifact,
 and deploys the documentation site with the new report. Normal docs changes can
 deploy Pages without waiting for the VM benchmark job.
 
-`index.html` is the docs landing page and `benchmarks.html` renders the latest
-benchmark report as HTML tables with links to the raw CSV, raw markdown report,
-and recent benchmark workflow runs. Older reports stay attached to their GitHub
-Actions runs as artifacts.
+`index.html` is the project landing page. It focuses on what guix-p2p does,
+channel-based setup, configuration, normal usage, and development entrypoints.
+`benchmarks.html` is secondary evidence and renders the latest benchmark report
+as HTML tables with links to the raw CSV, raw markdown report, and recent
+benchmark workflow runs. Older reports stay attached to their GitHub Actions
+runs as artifacts.
 Wide benchmark tables scroll horizontally so timing, package, and store path
 columns stay readable.
 Benchmark report dates are written as UTC datetimes, and the Pages renderer
