@@ -8,9 +8,9 @@ From a checkout, the local package definition installs both runtime commands:
 guix shell -f guix.scm
 ```
 
-The pure package build still depends on importing or vendoring the Rust crate
-dependency graph, so use the development manifest while working on packaging
-itself.
+The package definition imports Rust crate sources from `Cargo.lock` using
+Guix's lockfile importer. Use a Guix revision that supports
+`guix import crate --lockfile` and `cargo-inputs-from-lockfile`.
 
 Run a persistent node:
 

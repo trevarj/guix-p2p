@@ -91,9 +91,9 @@ installation options. To add the local package to a Guix profile, use:
 guix package -f guix.scm
 ```
 
-Note: the package definition currently builds from Cargo's locked dependency
-graph. A fully offline Guix build still requires importing or vendoring the Rust
-crate dependencies.
+The package definition uses Guix's Rust lockfile importer to build from
+`Cargo.lock`, so it requires a Guix revision with `guix import crate --lockfile`
+and `cargo-inputs-from-lockfile` support.
 
 ## Bootstrap Peers
 
