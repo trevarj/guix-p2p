@@ -212,4 +212,4 @@ and [docs/benchmarks.md](docs/benchmarks.md) for benchmark runs and artifacts.
 
 ## License
 
-GPL-3.0-or-later. See [COPYING](COPYING).
+GPL-3.0-or-later. See [LICENSE.md](LICENSE.md) and [COPYING](COPYING).
