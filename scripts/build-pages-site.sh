@@ -42,6 +42,14 @@ cat > "$site_dir/styles.css" <<'CSS'
   --accent-strong: #9a6a00;
   --green: #2f7d57;
   --link: #1769aa;
+  --code-bg: #1f2937;
+  --code-text: #e5e7eb;
+  --code-muted: #94a3b8;
+  --code-keyword: #93c5fd;
+  --code-string: #fde68a;
+  --code-comment: #9ca3af;
+  --code-symbol: #86efac;
+  --code-number: #fca5a5;
   --shadow: 0 18px 42px rgb(56 45 14 / 10%);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
@@ -60,6 +68,14 @@ cat > "$site_dir/styles.css" <<'CSS'
     --accent-strong: #ffd75c;
     --green: #6fca98;
     --link: #7db7f0;
+    --code-bg: #0f172a;
+    --code-text: #e2e8f0;
+    --code-muted: #94a3b8;
+    --code-keyword: #7dd3fc;
+    --code-string: #fde68a;
+    --code-comment: #94a3b8;
+    --code-symbol: #86efac;
+    --code-number: #fca5a5;
     --shadow: 0 18px 42px rgb(0 0 0 / 28%);
   }
 }
@@ -97,7 +113,7 @@ a {
   display: flex;
   gap: 18px;
   justify-content: space-between;
-  min-height: 52px;
+  min-height: 64px;
 }
 .brand {
   align-items: center;
@@ -109,11 +125,13 @@ a {
 }
 .brand img {
   background: #fbfaf4;
-  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgb(56 45 14 / 10%);
   display: block;
-  height: 24px;
-  padding: 1px 4px;
-  width: 96px;
+  height: 36px;
+  padding: 3px 8px;
+  width: 144px;
 }
 nav {
   display: flex;
@@ -132,6 +150,10 @@ nav a[aria-current="page"] {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
   opacity: 1;
   font-weight: 650;
+}
+nav a:hover {
+  background: color-mix(in srgb, var(--surface-muted) 70%, transparent);
+  opacity: 1;
 }
 main {
   padding-bottom: 48px;
@@ -266,9 +288,53 @@ code {
   padding: 0.12em 0.34em;
 }
 pre {
-  background: var(--surface-muted);
+  background: var(--code-bg);
+  border: 1px solid color-mix(in srgb, var(--code-muted) 22%, transparent);
+  border-radius: 8px;
+  box-shadow: 0 18px 42px rgb(15 23 42 / 14%);
+  color: var(--code-text);
+  line-height: 1.55;
+  margin: 14px 0;
   overflow: auto;
-  padding: 16px;
+  padding: 18px 20px;
+  position: relative;
+}
+pre code {
+  background: transparent;
+  border-radius: 0;
+  color: inherit;
+  display: block;
+  font-size: 0.9rem;
+  padding: 0;
+}
+pre[data-language]::before {
+  color: var(--code-muted);
+  content: attr(data-language);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  position: absolute;
+  right: 14px;
+  text-transform: uppercase;
+  top: 10px;
+}
+.tok-keyword {
+  color: var(--code-keyword);
+  font-weight: 650;
+}
+.tok-string {
+  color: var(--code-string);
+}
+.tok-comment {
+  color: var(--code-comment);
+  font-style: italic;
+}
+.tok-symbol {
+  color: var(--code-symbol);
+}
+.tok-number {
+  color: var(--code-number);
 }
 .chart-grid {
   display: grid;
@@ -390,6 +456,69 @@ function renderInline(value) {
   return escapeHtml(value).replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
+function languageLabel(language) {
+  const labels = {
+    scheme: "Scheme",
+    sh: "Shell",
+    shell: "Shell",
+    bash: "Shell",
+    toml: "TOML",
+    text: "Text",
+  };
+  return labels[language] || language || "Text";
+}
+
+function detectLanguage(code, hint) {
+  if (hint) return hint.toLowerCase();
+  const trimmed = code.trimStart();
+  if (trimmed.startsWith("(use-modules") || trimmed.startsWith("(cons*") || trimmed.includes("(channel")) {
+    return "scheme";
+  }
+  if (/^(guix|sudo|cargo|\.\//m.test(trimmed)) {
+    return "sh";
+  }
+  if (/^[a-z0-9_-]+\s*=/im.test(trimmed)) {
+    return "toml";
+  }
+  return "text";
+}
+
+function highlightScheme(code) {
+  return escapeHtml(code)
+    .replace(/(;.*)$/gm, '<span class="tok-comment">$1</span>')
+    .replace(/(&quot;[^&]*?&quot;)/g, '<span class="tok-string">$1</span>')
+    .replace(/\b(use-modules|services|modify-services|service|channel|name|url|branch|cons\*|guix-service-type|guix-p2p-enable-guix-daemon-extension)\b/g, '<span class="tok-keyword">$1</span>')
+    .replace(/(%[a-z0-9-]+|'[a-z0-9-]+)/gi, '<span class="tok-symbol">$1</span>');
+}
+
+function highlightShell(code) {
+  return escapeHtml(code)
+    .replace(/(#.*)$/gm, '<span class="tok-comment">$1</span>')
+    .replace(/(&quot;[^&]*?&quot;|'[^']*?')/g, '<span class="tok-string">$1</span>')
+    .replace(/\b(guix|sudo|cargo|git|export|GUIX_EXTENSIONS_PATH)\b/g, '<span class="tok-keyword">$1</span>')
+    .replace(/(\s|^)(--[a-z0-9-]+)/gi, '$1<span class="tok-symbol">$2</span>');
+}
+
+function highlightToml(code) {
+  return escapeHtml(code)
+    .replace(/(#.*)$/gm, '<span class="tok-comment">$1</span>')
+    .replace(/(&quot;[^&]*?&quot;)/g, '<span class="tok-string">$1</span>')
+    .replace(/^([a-z0-9_-]+)(\s*=)/gim, '<span class="tok-keyword">$1</span>$2')
+    .replace(/\b(\d+)\b/g, '<span class="tok-number">$1</span>');
+}
+
+function renderCodeBlock(code, hint) {
+  const language = detectLanguage(code, hint);
+  const highlighted = language === "scheme"
+    ? highlightScheme(code)
+    : language === "sh" || language === "shell" || language === "bash"
+      ? highlightShell(code)
+      : language === "toml"
+        ? highlightToml(code)
+        : escapeHtml(code);
+  return `<pre data-language="${languageLabel(language)}"><code class="language-${language}">${highlighted}</code></pre>`;
+}
+
 function normalizeLine(line) {
   return line.replace(/^- Date: (\d+) seconds since 1970-01-01 UTC$/, (_match, seconds) => {
     const date = new Date(Number(seconds) * 1000);
@@ -415,6 +544,7 @@ function renderMarkdown(markdown) {
   let list = [];
   let inFence = false;
   let fence = [];
+  let fenceLanguage = "";
 
   function flushParagraph() {
     if (paragraph.length === 0) return;
@@ -433,12 +563,14 @@ function renderMarkdown(markdown) {
 
     if (line.startsWith("```")) {
       if (inFence) {
-        html.push(`<pre><code>${escapeHtml(fence.join("\n"))}</code></pre>`);
+        html.push(renderCodeBlock(fence.join("\n"), fenceLanguage));
         fence = [];
+        fenceLanguage = "";
         inFence = false;
       } else {
         flushParagraph();
         flushList();
+        fenceLanguage = line.slice(3).trim().split(/\s+/)[0] || "";
         inFence = true;
       }
       continue;
@@ -754,7 +886,7 @@ cat > "$site_dir/index.html" <<'HTML'
     <div class="site-header-inner">
       <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
       <nav aria-label="Site navigation">
-        <a href="index.html" aria-current="page">Start</a>
+        <a href="index.html" aria-current="page">Home</a>
         <a href="#configure">Configure</a>
         <a href="#development">Develop</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -796,23 +928,23 @@ cat > "$site_dir/index.html" <<'HTML'
     <section id="getting-started">
       <h2>Get Started</h2>
       <p>Add the repository as a Guix channel, then run <code>guix pull</code>:</p>
-      <pre><code>(cons*
+      <pre data-language="Scheme"><code class="language-scheme"><span class="tok-keyword">(cons*</span>
  (channel
-  (name 'guix-p2p)
-  (url "https://codeberg.org/trevarj/guix-p2p")
-  (branch "main"))
- %default-channels)</code></pre>
+  (<span class="tok-keyword">name</span> <span class="tok-symbol">'guix-p2p</span>)
+  (<span class="tok-keyword">url</span> <span class="tok-string">"https://codeberg.org/trevarj/guix-p2p"</span>)
+  (<span class="tok-keyword">branch</span> <span class="tok-string">"main"</span>))
+ <span class="tok-symbol">%default-channels</span>)</code></pre>
       <p>Import the service module in your operating-system configuration and enable the daemon extension:</p>
-      <pre><code>(use-modules (guix-p2p services))
+      <pre data-language="Scheme"><code class="language-scheme">(<span class="tok-keyword">use-modules</span> (guix-p2p services))
 
-(services
-  (modify-services
-      (cons (service guix-p2p-service-type) %base-services)
-    (guix-service-type config =>
-      (guix-p2p-enable-guix-daemon-extension config))))</code></pre>
+(<span class="tok-keyword">services</span>
+  (<span class="tok-keyword">modify-services</span>
+      (cons (<span class="tok-keyword">service</span> guix-p2p-service-type) <span class="tok-symbol">%base-services</span>)
+    (<span class="tok-keyword">guix-service-type</span> config =>
+      (<span class="tok-keyword">guix-p2p-enable-guix-daemon-extension</span> config))))</code></pre>
       <p>After reconfiguring, use Guix normally:</p>
-      <pre><code>guix build hello
-sudo guix system reconfigure /etc/config.scm</code></pre>
+      <pre data-language="Shell"><code class="language-sh"><span class="tok-keyword">guix</span> build hello
+<span class="tok-keyword">sudo</span> <span class="tok-keyword">guix</span> system reconfigure /etc/config.scm</code></pre>
     </section>
 
     <section id="configure">
@@ -857,19 +989,19 @@ sudo guix system reconfigure /etc/config.scm</code></pre>
         <article class="info-card">
           <h3>Local shell</h3>
           <p class="muted">Use the repository package definition for a temporary development environment:</p>
-          <pre><code>guix shell -f guix.scm</code></pre>
+          <pre data-language="Shell"><code class="language-sh"><span class="tok-keyword">guix</span> shell -f guix.scm</code></pre>
         </article>
         <article class="info-card">
           <h3>Checks</h3>
           <p class="muted">Run focused Rust checks before sending changes:</p>
-          <pre><code>cargo fmt
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test</code></pre>
+          <pre data-language="Shell"><code class="language-sh"><span class="tok-keyword">cargo</span> fmt
+<span class="tok-keyword">cargo</span> clippy <span class="tok-symbol">--all-targets</span> <span class="tok-symbol">--all-features</span> <span class="tok-symbol">--</span> -D warnings
+<span class="tok-keyword">cargo</span> test</code></pre>
         </article>
         <article class="info-card">
           <h3>E2E proof</h3>
           <p class="muted">The VM channel proof is the strict deployment check. Longer benchmarks should run in CI, not on developer workstations.</p>
-          <pre><code>cargo run -p guix-p2p-e2e -- vm channel-proof</code></pre>
+          <pre data-language="Shell"><code class="language-sh"><span class="tok-keyword">cargo</span> run -p guix-p2p-e2e <span class="tok-symbol">--</span> vm channel-proof</code></pre>
         </article>
       </div>
     </section>
@@ -902,7 +1034,7 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
     <div class="site-header-inner">
       <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
       <nav aria-label="Site navigation">
-        <a href="index.html">Start</a>
+        <a href="index.html">Home</a>
         <a href="benchmarks.html" aria-current="page">Benchmarks</a>
       </nav>
     </div>

@@ -163,6 +163,8 @@ browser renderer.
 The benchmark page renders SVG charts in the browser from `results.csv`, and
 falls back to the markdown report tables when a docs-only Pages deploy does not
 include a fresh CSV artifact.
+The static renderer also provides dependency-free code block language labels
+and lightweight highlighting for Scheme, shell, and TOML examples.
 
 ## References
 
