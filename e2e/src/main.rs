@@ -236,6 +236,27 @@ enum VmCommand {
         #[arg(long)]
         skip_push_binary: bool,
     },
+    /// Run the VM proof using the Guix channel service module for daemon setup
+    ChannelProof {
+        /// Seedless DHT bootstrap node
+        #[arg(long, default_value = "Bootstrap")]
+        bootstrap_node: String,
+        /// Seeder node names, comma-separated
+        #[arg(long, value_delimiter = ',', default_value = "Alice,Charles")]
+        seed_nodes: Vec<String>,
+        /// Fetcher node
+        #[arg(long, default_value = "Bob")]
+        fetch_node: String,
+        /// Guix package to seed, remove, and fetch
+        #[arg(long, default_value = "hello")]
+        package: String,
+        /// Fetch policy passed to the fetch node
+        #[arg(long, default_value = "p2p-only")]
+        policy: String,
+        /// Skip copying target/release/guix-p2p into the proof VMs
+        #[arg(long)]
+        skip_push_binary: bool,
+    },
     /// Benchmark configured VM nodes using the VM proof workflow
     Benchmark {
         /// Benchmark package tier suite
@@ -630,6 +651,12 @@ struct VmFetch {
     peer_id: String,
 }
 
+#[derive(Clone, Copy)]
+enum VmDaemonIntegration {
+    RawExtension,
+    ChannelService,
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct VmBootstrap {
     node: String,
@@ -643,9 +670,8 @@ struct HarnessTools {
     real_guix: PathBuf,
     real_guix_closure: Vec<String>,
     guix_p2p: PathBuf,
-    guix_p2p_wrapper: PathBuf,
+    guix_p2p_extension: PathBuf,
     guix_p2p_library_path: String,
-    shell: PathBuf,
 }
 
 struct P2pBuildSpec<'a> {
@@ -885,6 +911,24 @@ fn run_vm_command(opts: VmOptions) -> anyhow::Result<()> {
             policy,
             skip_push_binary,
         } => vm_proof(
+            &config,
+            VmProofOptions {
+                bootstrap_node,
+                seed_nodes,
+                fetch_node,
+                package,
+                policy,
+                skip_push_binary,
+            },
+        ),
+        VmCommand::ChannelProof {
+            bootstrap_node,
+            seed_nodes,
+            fetch_node,
+            package,
+            policy,
+            skip_push_binary,
+        } => vm_channel_proof(
             &config,
             VmProofOptions {
                 bootstrap_node,
@@ -1375,6 +1419,7 @@ fn vm_wait_ssh(config: &VmConfig, nodes: &[String]) -> anyhow::Result<()> {
 fn vm_push_binary(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::Result<()> {
     ensure_guix_p2p_binary(config)?;
     ensure_guix_p2p_wrapper_binary()?;
+    ensure_guix_p2p_extension()?;
     let registry = VmRegistry::load(config)?;
     let targets: Vec<&VmNode> = match (all, node) {
         (true, _) | (_, None) => registry.nodes.iter().collect(),
@@ -1384,6 +1429,7 @@ fn vm_push_binary(config: &VmConfig, node: Option<&str>, all: bool) -> anyhow::R
     for target in targets {
         push_binary_to_node(config, target, &libgcrypt_runtime)?;
         push_wrapper_to_node(config, target, &libgcrypt_runtime)?;
+        push_extension_to_node(config, target)?;
         println!("pushed binary to {}:/tmp/guix-p2p", target.name);
     }
     Ok(())
@@ -1489,27 +1535,31 @@ test ! -e {store_path} && echo TARGET_ABSENT_AFTER_DELETE
     Ok(())
 }
 
-fn vm_start_daemon(config: &VmConfig, name: &str) -> anyhow::Result<()> {
+fn vm_start_daemon_with_integration(
+    config: &VmConfig,
+    name: &str,
+    integration: VmDaemonIntegration,
+) -> anyhow::Result<()> {
+    match integration {
+        VmDaemonIntegration::RawExtension => vm_start_raw_extension_daemon(config, name),
+        VmDaemonIntegration::ChannelService => vm_start_channel_service_daemon(config, name),
+    }
+}
+
+fn vm_start_raw_extension_daemon(config: &VmConfig, name: &str) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
-    let libgcrypt_runtime = guix_build_last_path("libgcrypt")?;
-    push_wrapper_to_node(config, node, &libgcrypt_runtime)?;
+    push_extension_to_node(config, node)?;
     let remote = r#"
 set -eu
-cat > /tmp/e2e-guix-wrapper <<'EOF'
-#!/bin/sh
-set -eu
-export GUIX_P2P_SOCKET=/tmp/guix-p2p-b/guix-p2p.sock
-export GUIX_P2P_BIN="${GUIX_P2P_E2E_P2P_BIN:-guix-p2p}"
-export REAL_GUIX=/run/current-system/profile/bin/guix
-exec /tmp/guix-p2p-wrapper "$@"
-EOF
-chmod +x /tmp/e2e-guix-wrapper
 printf "e2e\n" | sudo -S sh -c '
 mount -o remount,rw /gnu/store
 kill $(cat /tmp/e2e-guix-daemon.pid 2>/dev/null) 2>/dev/null || true
 rm -f /tmp/e2e-guix-daemon.sock /tmp/e2e-guix-daemon.log /tmp/e2e-guix-daemon.pid
-GUIX=/tmp/e2e-guix-wrapper /run/current-system/profile/bin/guix-daemon \
+GUIX_EXTENSIONS_PATH="/tmp/guix-p2p-extensions/guix/extensions${GUIX_EXTENSIONS_PATH:+:$GUIX_EXTENSIONS_PATH}" \
+GUIX_P2P_SOCKET=/tmp/guix-p2p-b/guix-p2p.sock \
+GUIX_P2P_BIN="${GUIX_P2P_E2E_P2P_BIN:-guix-p2p}" \
+/run/current-system/profile/bin/guix-daemon \
   --disable-chroot \
   --build-users-group=guixbuild \
   --max-jobs=0 \
@@ -1527,6 +1577,77 @@ while [ ! -S /tmp/e2e-guix-daemon.sock ]; do
     fi
     sleep 1
 done
+echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
+"#;
+    let output = ssh_run(config, node, remote)?;
+    print!("{output}");
+    Ok(())
+}
+
+fn vm_start_channel_service_daemon(config: &VmConfig, name: &str) -> anyhow::Result<()> {
+    let registry = VmRegistry::load(config)?;
+    let node = registry.node(name)?;
+    push_extension_to_node(config, node)?;
+    push_channel_to_node(config, node)?;
+    let remote = r#"
+set -eu
+cat > /tmp/guix-p2p-channel-proof-env.scm <<'EOF'
+(use-modules (gnu services)
+             (gnu services base)
+             (guix-p2p services))
+
+(define config
+  (guix-p2p-enable-guix-daemon-extension
+   (guix-configuration)
+   #:extensions "/tmp/guix-p2p-extensions/guix/extensions"
+   #:guix-p2p-bin "/tmp/guix-p2p"
+   #:socket "/tmp/guix-p2p-b/guix-p2p.sock"))
+
+(format #t "CHANNEL_SERVICE=~a~%" (service-type-name guix-p2p-service-type))
+(for-each (lambda (entry)
+            (format #t "ENV ~a~%" entry))
+          (guix-configuration-environment config))
+EOF
+guix repl -L /tmp/guix-p2p-channel/channel /tmp/guix-p2p-channel-proof-env.scm \
+  > /tmp/guix-p2p-channel-proof-env.out
+grep -qx 'CHANNEL_SERVICE=guix-p2p' /tmp/guix-p2p-channel-proof-env.out
+grep -q '^ENV GUIX_EXTENSIONS_PATH=/tmp/guix-p2p-extensions/guix/extensions' \
+  /tmp/guix-p2p-channel-proof-env.out
+grep -qx 'ENV GUIX_P2P_BIN=/tmp/guix-p2p' /tmp/guix-p2p-channel-proof-env.out
+grep -qx 'ENV GUIX_P2P_SOCKET=/tmp/guix-p2p-b/guix-p2p.sock' \
+  /tmp/guix-p2p-channel-proof-env.out
+sed -n 's/^ENV /export /p' /tmp/guix-p2p-channel-proof-env.out \
+  > /tmp/guix-p2p-channel-proof-env.sh
+echo CHANNEL_PROOF_MODULE_IMPORTED
+printf "e2e\n" | sudo -S sh -c '
+set -eu
+. /tmp/guix-p2p-channel-proof-env.sh
+mount -o remount,rw /gnu/store
+kill $(cat /tmp/e2e-guix-daemon.pid 2>/dev/null) 2>/dev/null || true
+rm -f /tmp/e2e-guix-daemon.sock /tmp/e2e-guix-daemon.log /tmp/e2e-guix-daemon.pid
+env \
+  GUIX_EXTENSIONS_PATH="$GUIX_EXTENSIONS_PATH" \
+  GUIX_P2P_SOCKET="$GUIX_P2P_SOCKET" \
+  GUIX_P2P_BIN="$GUIX_P2P_BIN" \
+  /run/current-system/profile/bin/guix-daemon \
+    --disable-chroot \
+    --build-users-group=guixbuild \
+    --max-jobs=0 \
+    --listen=/tmp/e2e-guix-daemon.sock \
+    > /tmp/e2e-guix-daemon.log 2>&1 &
+echo $! > /tmp/e2e-guix-daemon.pid
+'
+i=0
+while [ ! -S /tmp/e2e-guix-daemon.sock ]; do
+    i=$((i + 1))
+    if [ "$i" -gt 30 ]; then
+        echo DAEMON_SOCKET_TIMEOUT
+        printf "e2e\n" | sudo -S cat /tmp/e2e-guix-daemon.log
+        exit 1
+    fi
+    sleep 1
+done
+echo CHANNEL_PROOF_DAEMON_ENV_READY
 echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
 "#;
     let output = ssh_run(config, node, remote)?;
@@ -1608,6 +1729,18 @@ fn vm_fetch(
 }
 
 fn vm_proof(config: &VmConfig, opts: VmProofOptions) -> anyhow::Result<()> {
+    vm_proof_with_integration(config, opts, VmDaemonIntegration::RawExtension)
+}
+
+fn vm_channel_proof(config: &VmConfig, opts: VmProofOptions) -> anyhow::Result<()> {
+    vm_proof_with_integration(config, opts, VmDaemonIntegration::ChannelService)
+}
+
+fn vm_proof_with_integration(
+    config: &VmConfig,
+    opts: VmProofOptions,
+    integration: VmDaemonIntegration,
+) -> anyhow::Result<()> {
     if opts.seed_nodes.is_empty() {
         anyhow::bail!("vm proof requires at least one seed node");
     }
@@ -1654,6 +1787,7 @@ fn vm_proof(config: &VmConfig, opts: VmProofOptions) -> anyhow::Result<()> {
         Some(opts.seed_nodes.len()),
         Some(1),
         None,
+        integration,
     )?;
 
     vm_require_seeders_served_blocks(config, &opts.seed_nodes)?;
@@ -1674,7 +1808,18 @@ fn vm_fetch_timed(
     package: Option<&str>,
     policy: &str,
 ) -> anyhow::Result<BenchmarkPhaseTimings> {
-    vm_fetch_timed_with_options(config, name, store_path, package, policy, &[], None, None, None)
+    vm_fetch_timed_with_options(
+        config,
+        name,
+        store_path,
+        package,
+        policy,
+        &[],
+        None,
+        None,
+        None,
+        VmDaemonIntegration::RawExtension,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1688,6 +1833,7 @@ fn vm_fetch_timed_with_options(
     min_providers: Option<usize>,
     max_in_flight_blocks_per_peer: Option<usize>,
     local_narinfo_path: Option<&str>,
+    integration: VmDaemonIntegration,
 ) -> anyhow::Result<BenchmarkPhaseTimings> {
     let mut registry = VmRegistry::load(config)?;
     let node = registry.node(name)?.clone();
@@ -1714,7 +1860,7 @@ fn vm_fetch_timed_with_options(
     let provider_wait_ms = phase_start.elapsed().as_millis();
 
     let phase_start = std::time::Instant::now();
-    vm_start_daemon(config, name)?;
+    vm_start_daemon_with_integration(config, name, integration)?;
     let daemon_start_ms = phase_start.elapsed().as_millis();
 
     let phase_start = std::time::Instant::now();
@@ -2514,6 +2660,7 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                                 None,
                                 None,
                                 Some(remote_local_narinfo_path),
+                                VmDaemonIntegration::RawExtension,
                             )
                             .map(|mut phases| {
                                 phases.seed_ms = Some(seed_ms);
@@ -2757,11 +2904,6 @@ fn prepare_harness_tools(guix_p2p_bin: Option<&std::path::Path>) -> anyhow::Resu
     let guix = find_on_path("guix").context("missing required command: guix")?;
     let guix_daemon =
         find_on_path("guix-daemon").context("missing required command: guix-daemon")?;
-    let shell = find_on_path("sh")
-        .or_else(|| {
-            canonicalize_existing(std::path::Path::new("/run/current-system/profile/bin/sh")).ok()
-        })
-        .context("missing required command: sh")?;
     let real_guix = canonicalize_existing(&guix)?;
     let guix_daemon = resolve_raw_guix_daemon(&guix_daemon)?;
     let real_guix_closure = resolve_requisites(&guix, &real_guix.display().to_string())?;
@@ -2777,14 +2919,7 @@ fn prepare_harness_tools(guix_p2p_bin: Option<&std::path::Path>) -> anyhow::Resu
     if !guix_p2p.is_file() {
         anyhow::bail!("guix-p2p binary not found at {}", guix_p2p.display());
     }
-    let guix_p2p_wrapper = project_root().join("target/release/guix-p2p-wrapper");
-    if !guix_p2p_wrapper.is_file() {
-        let cargo = find_on_path("cargo").context("missing required command: cargo")?;
-        build_release_binary(&cargo)?;
-    }
-    if !guix_p2p_wrapper.is_file() {
-        anyhow::bail!("guix-p2p-wrapper binary not found at {}", guix_p2p_wrapper.display());
-    }
+    let guix_p2p_extension = ensure_guix_p2p_extension()?;
     let guix_p2p_library_path = runtime_library_path(&guix_p2p)?;
     Ok(HarnessTools {
         guix,
@@ -2793,9 +2928,8 @@ fn prepare_harness_tools(guix_p2p_bin: Option<&std::path::Path>) -> anyhow::Resu
         real_guix,
         real_guix_closure,
         guix_p2p,
-        guix_p2p_wrapper,
+        guix_p2p_extension,
         guix_p2p_library_path,
-        shell,
     })
 }
 
@@ -2949,7 +3083,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
     let node_b_config_home = node_b_dir.join("config-home");
     let node_b_socket = node_b_dir.join("guix-p2p.sock");
     let daemon_socket = node_b_dir.join("guix-daemon.sock");
-    let wrapper_path = node_b_dir.join("guix-wrapper.sh");
+    let extension_path = node_b_dir.join("extensions/guix/extensions/substitute.scm");
     let local_narinfo_path = spec.base.join("local-narinfo.json");
 
     std::fs::create_dir_all(&node_b_cache)?;
@@ -2990,15 +3124,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         substitute_urls: spec.substitute_urls,
     })?;
 
-    write_wrapper(
-        &wrapper_path,
-        &node_b_socket,
-        &spec.tools.guix_p2p,
-        &spec.tools.guix_p2p_wrapper,
-        &spec.tools.guix_p2p_library_path,
-        &spec.tools.real_guix,
-        &spec.tools.shell,
-    )?;
+    install_extension_file(&spec.tools.guix_p2p_extension, &extension_path)?;
 
     let mut processes = ProcessSet::default();
     let mut bootstrap_peers = Vec::new();
@@ -3154,12 +3280,15 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         .arg("-c")
         .arg(format!(
             "export HOME={}; export GUIX={}; export GUIX_STATE_DIRECTORY={}; export \
-             GUIX_CONFIGURATION_DIRECTORY={}; export GUIX_P2P_E2E_REAL_GUIX={}; exec \"$@\"",
+             GUIX_CONFIGURATION_DIRECTORY={}; export GUIX_EXTENSIONS_PATH={}${{GUIX_EXTENSIONS_PATH:+:$GUIX_EXTENSIONS_PATH}}; export \
+             GUIX_P2P_SOCKET={}; export GUIX_P2P_BIN={}; exec \"$@\"",
             shell_quote(&node_b_dir.display().to_string()),
-            shell_quote(&wrapper_path.display().to_string()),
+            shell_quote(&spec.tools.real_guix.display().to_string()),
             shell_quote(&guix_state.state_dir.display().to_string()),
             shell_quote(&guix_state.config_dir.display().to_string()),
-            shell_quote(&spec.tools.real_guix.display().to_string())
+            shell_quote(&extension_path.parent().unwrap().display().to_string()),
+            shell_quote(&node_b_socket.display().to_string()),
+            shell_quote(&spec.tools.guix_p2p.display().to_string())
         ))
         .arg("guix-daemon-wrapper")
         .arg(&spec.tools.guix_daemon)
@@ -3402,41 +3531,6 @@ fn prepare_guix_daemon_state(base: &std::path::Path) -> anyhow::Result<GuixDaemo
         let _ = std::fs::copy(host_acl, config_dir.join("acl"));
     }
     Ok(GuixDaemonState { state_dir, config_dir })
-}
-
-fn write_wrapper(
-    wrapper: &std::path::Path,
-    socket: &std::path::Path,
-    guix_p2p: &std::path::Path,
-    guix_p2p_wrapper: &std::path::Path,
-    guix_p2p_library_path: &str,
-    real_guix: &std::path::Path,
-    _shell: &std::path::Path,
-) -> anyhow::Result<()> {
-    let content = format!(
-        r#"#!/bin/sh
-GUIX_P2P_LIBRARY_PATH={}
-export LD_LIBRARY_PATH="${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}$GUIX_P2P_LIBRARY_PATH${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
-export GUIX_P2P_SOCKET={}
-export GUIX_P2P_BIN={}
-export REAL_GUIX="${{GUIX_P2P_E2E_REAL_GUIX:-{}}}"
-exec {} "$@"
-"#,
-        shell_quote(guix_p2p_library_path),
-        shell_quote(&socket.display().to_string()),
-        shell_quote(&guix_p2p.display().to_string()),
-        shell_quote(&real_guix.display().to_string()),
-        shell_quote(&guix_p2p_wrapper.display().to_string())
-    );
-    std::fs::write(wrapper, content)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = std::fs::metadata(wrapper)?.permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(wrapper, permissions)?;
-    }
-    Ok(())
 }
 
 fn run_guix_build_logged(
@@ -4468,6 +4562,31 @@ fn ensure_guix_p2p_wrapper_binary() -> anyhow::Result<PathBuf> {
     Ok(wrapper)
 }
 
+fn ensure_guix_p2p_extension() -> anyhow::Result<PathBuf> {
+    let extension = project_root().join("guix/extensions/substitute.scm");
+    if !extension.is_file() {
+        anyhow::bail!("guix-p2p substitute extension not found at {}", extension.display());
+    }
+    Ok(extension)
+}
+
+fn install_extension_file(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> anyhow::Result<()> {
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::copy(source, destination).with_context(|| {
+        format!(
+            "failed to copy substitute extension from {} to {}",
+            source.display(),
+            destination.display()
+        )
+    })?;
+    Ok(())
+}
+
 fn ensure_ssh_host_key(config: &VmConfig) -> anyhow::Result<()> {
     if config.ssh_host_key.is_file() && config.ssh_host_key_pub.is_file() {
         return Ok(());
@@ -4752,6 +4871,49 @@ chmod 755 /tmp/guix-p2p-wrapper /tmp/guix-p2p-wrapper-real
     Ok(())
 }
 
+fn push_extension_to_node(config: &VmConfig, node: &VmNode) -> anyhow::Result<()> {
+    let extension = ensure_guix_p2p_extension()?;
+    push_file_to_node(config, node, &extension, "/tmp/guix-p2p-substitute-extension.scm.next")?;
+    let install = r#"set -eu
+mkdir -p /tmp/guix-p2p-extensions/guix/extensions
+mv /tmp/guix-p2p-substitute-extension.scm.next /tmp/guix-p2p-extensions/guix/extensions/substitute.scm
+chmod 644 /tmp/guix-p2p-extensions/guix/extensions/substitute.scm
+"#;
+    ssh_run(config, node, install)?;
+    Ok(())
+}
+
+fn push_channel_to_node(config: &VmConfig, node: &VmNode) -> anyhow::Result<()> {
+    ensure_ssh_client_key(config)?;
+    let root = project_root();
+    let channel_dir = root.join("channel");
+    let channel_metadata = root.join(".guix-channel");
+    if !channel_dir.is_dir() {
+        anyhow::bail!("Guix channel directory is missing: {}", channel_dir.display());
+    }
+    if !channel_metadata.is_file() {
+        anyhow::bail!("Guix channel metadata is missing: {}", channel_metadata.display());
+    }
+    ssh_run(
+        config,
+        node,
+        "set -eu; rm -rf /tmp/guix-p2p-channel /tmp/guix-p2p-channel.next; mkdir -p \
+         /tmp/guix-p2p-channel.next",
+    )?;
+    let mut command = scp_base_command(config, node);
+    let status = command
+        .arg("-r")
+        .arg(&channel_dir)
+        .arg(&channel_metadata)
+        .arg("e2e@127.0.0.1:/tmp/guix-p2p-channel.next/")
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("scp channel to {} failed with {status}", node.name);
+    }
+    ssh_run(config, node, "set -eu; mv /tmp/guix-p2p-channel.next /tmp/guix-p2p-channel")?;
+    Ok(())
+}
+
 fn push_file_to_node(
     config: &VmConfig,
     node: &VmNode,
@@ -4759,7 +4921,19 @@ fn push_file_to_node(
     remote_path: &str,
 ) -> anyhow::Result<()> {
     ensure_ssh_client_key(config)?;
-    let status = std::process::Command::new("scp")
+    let status = scp_base_command(config, node)
+        .arg(local_path)
+        .arg(format!("e2e@127.0.0.1:{remote_path}"))
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("scp {} to {} failed with {status}", local_path.display(), node.name);
+    }
+    Ok(())
+}
+
+fn scp_base_command(config: &VmConfig, node: &VmNode) -> std::process::Command {
+    let mut command = std::process::Command::new("scp");
+    command
         .arg("-i")
         .arg(&config.ssh_client_key)
         .arg("-o")
@@ -4771,14 +4945,8 @@ fn push_file_to_node(
         .arg("-o")
         .arg("ConnectTimeout=10")
         .arg("-P")
-        .arg(node.ssh_port.to_string())
-        .arg(local_path)
-        .arg(format!("e2e@127.0.0.1:{remote_path}"))
-        .status()?;
-    if !status.success() {
-        anyhow::bail!("scp {} to {} failed with {status}", local_path.display(), node.name);
-    }
-    Ok(())
+        .arg(node.ssh_port.to_string());
+    command
 }
 
 fn guix_build_last_path(package: &str) -> anyhow::Result<String> {

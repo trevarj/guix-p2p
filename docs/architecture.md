@@ -7,8 +7,11 @@ existing substituter pipe protocol, but sources binary substitutes (nars) from a
 libp2p-powered Kademlia DHT + custom block-swarm network instead of (or
 alongside) HTTP.
 
-Zero changes to the guix-daemon. Minimal 4-line Guile wrapper in `guix
-substitute` gated by an environment variable.
+Zero changes to the guix-daemon. A Guix command extension shadows the internal
+`guix substitute` command when the daemon environment includes the package's
+extension directory in `GUIX_EXTENSIONS_PATH`. The extension delegates
+substitute protocol traffic to the Rust relay when the `guix-p2p` socket is
+available.
 
 ## Architecture Overview
 
@@ -28,8 +31,8 @@ guix-daemon
   │ stdin: "have /gnu/store/...", "info /gnu/store/...", "substitute /gnu/store/... /tmp/dest"
   │ fd 4:  reads "success sha256:... 12345" or "not-found" or "hash-mismatch ..."
   ▼
-guix-p2p-wrapper selected by guix-daemon's GUIX environment
-  │ if wrapper detects "substitute" and socket exists → exec guix-p2p
+guix-p2p substitute extension from GUIX_EXTENSIONS_PATH
+  │ if extension detects substitute protocol mode and socket exists → exec guix-p2p
   ▼
 guix-p2p (Rust, libp2p)
   │
@@ -84,7 +87,7 @@ guix-p2p (Rust, libp2p)
 | Swarm | Custom nar block protocol | BTv2 infohash is mathematically incompatible with nar-SHA-256 |
 | Transport | QUIC (libp2p-quic) + TCP fallback | QUIC is the default listen address; TCP is enabled for restricted containers and networks where UDP is unavailable |
 | NAT traversal | Built into libp2p (autonat/relay/dcutr), deferred post-MVP | Significant complexity; initial users need open ports or IPv6 |
-| Daemon integration | Unix socket relay + `GUIX` wrapper | Zero daemon C++ changes; relay gives <1ms startup |
+| Daemon integration | Unix socket relay + Guix substitute extension | Zero daemon C++ changes; relay gives <1ms startup |
 | Narinfos | HTTP fetch from official substitute URLs, optional local metadata file for offline harnesses | Tiny (<500 bytes); existing trust chain unchanged for HTTP, while local metadata lets seeded p2p-only tests avoid network lookup |
 | Nars | DHT + swarm; not-found replies let guix-daemon chain to HTTP substituters | Heavy payload; distributed across peers for P2P |
 | Distribution | External project, crates.io for development, Guix channel for packaging | Not targeting upstream Guix inclusion (would need pure Guile) |
@@ -339,6 +342,13 @@ Narinfo flow:
 ## Source Layout
 
 ```
+.guix-channel                 # Guix channel metadata
+guix.scm                      # Compatibility package entrypoint for local builds
+channel/guix-p2p/
+├── packages.scm              # Channel package module: (guix-p2p packages)
+└── services.scm              # Channel service module: (guix-p2p services)
+guix/
+└── extensions/substitute.scm # Guix command extension installed by the package
 src/
 ├── lib.rs                   # Crate root (public API for integration tests)
 ├── main.rs                  # CLI, config overlay, daemon/relay mode dispatch
@@ -410,31 +420,43 @@ Each relay connection sends a mode header and then streams daemon protocol
 commands. The daemon processes each connection independently, subscribing to
 the swarm's broadcast notification channel for that connection.
 
-### Guix Daemon Wrapper (`guix-p2p-wrapper`)
+### Guix Substitute Extension
 
-A small Rust binary selected by the `guix-daemon` service's `GUIX` environment
-variable. It detects whether the daemon's socket is available and uses relay
-mode when possible, falling back to direct invocation otherwise. The legacy
-`scripts/guix-wrapper.sh` file only execs this binary for compatibility:
+The package installs `(guix extensions substitute)` under
+`share/guix/extensions/substitute.scm`. Adding the package to a system profile
+makes this available as
+`/run/current-system/profile/share/guix/extensions/substitute.scm`, but Guix
+does not scan that directory unless it is in `GUIX_EXTENSIONS_PATH`. The
+`guix-daemon` service helper prepends that directory to the daemon's existing
+`GUIX_EXTENSIONS_PATH`, so Guix resolves this extension before its built-in
+`guix substitute` implementation:
 
 ```
 guix-daemon invokes "guix substitute --query"
-  → wrapper intercepts "substitute"
+  → extension intercepts "--query"
   → if socket exists: exec guix-p2p --query --socket $SOCKET
-  → else: exec real guix substitute --query
+  → else: delegate to built-in guix substitute --query
 
 guix-daemon invokes "guix substitute --substitute"
-  → wrapper intercepts "substitute"
+  → extension intercepts "--substitute"
   → if socket exists: exec guix-p2p --substitute --socket $SOCKET
-  → else: exec real guix substitute --substitute
+  → else: delegate to built-in guix substitute --substitute
 
-user invokes "guix build/install/system/..."
-  → wrapper passes through to real guix unchanged
+other substitute invocations
+  → delegate to built-in guix substitute
 ```
 
-This works for ALL guix commands (build, install, pull, system reconfigure,
-home reconfigure, shell) because they all go through the same daemon
-substitute protocol.
+Integration contract:
+
+- `GUIX_EXTENSIONS_PATH` lets Guix find `(guix extensions substitute)`.
+- `GUIX_P2P_SOCKET` tells the extension where the warm relay daemon is
+  listening.
+- `GUIX_P2P_BIN` tells the extension which binary to exec for relay mode.
+
+No `GUIX` wrapper is required for the recommended path.
+
+The Rust `guix-p2p-wrapper` binary remains installed for compatibility with
+older setups that set the daemon's `GUIX` environment variable.
 
 ### Shepherd Service (Daemon Mode)
 
@@ -497,11 +519,12 @@ each VM, the dashboard and P2P daemon always listen on fixed guest ports (3031
 and 6881 respectively), and QEMU host forwarding maps the unique host-side port
 to the fixed guest port.
 
-### Future: Upstream Guile Patch
+### Future: Upstream Hook
 
-If upstream merges a patch to `guix/scripts/substitute.scm`, the PATH
-wrapper becomes unnecessary. The patch would detect the P2P socket and
-relay through it directly.
+If upstream accepts a daemon-owned substituter hook, the extension becomes
+unnecessary. The cleaner upstream shape is `guix-daemon
+--substituter-program=FILE`, where the custom program receives `--query` or
+`--substitute` directly and speaks the existing substituter pipe protocol.
 
 ## Seeding Strategy
 

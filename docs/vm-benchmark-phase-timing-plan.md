@@ -24,7 +24,7 @@ VMs are already built, running, SSH-ready, binary-pushed, and bootstrapped.
   - remove target from fetcher
   - start fetch-node `guix-p2p`
   - wait for provider visibility
-  - start wrapped `guix-daemon`
+  - start extension-enabled raw `guix-daemon`
   - run `guix build` import
 - Split the VM HTTP path into measured steps:
   - realize dependencies and delete only the target output

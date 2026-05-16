@@ -43,7 +43,7 @@ The harness:
 - preflights `guix shell -CN` with writable `/gnu/store`
 - starts Node A in a Guix container with the resolved store path seeded
 - starts Node B in a separate Guix container with `substitute_policy = "p2p-only"` and `min_providers = 1`
-- starts an isolated raw `guix-daemon` in Node B's Guix container with `GUIX` pointing at a generated wrapper
+- starts an isolated raw `guix-daemon` in Node B's Guix container with `GUIX_EXTENSIONS_PATH` prepended to include the copied substitute extension directory
 - runs `guix build <package>` in a Guix container through Node B's daemon socket
 - captures logs under `$BASE/logs/`
 - with `--hold`, keeps daemons and dashboards alive after validation until Ctrl-C
@@ -65,8 +65,8 @@ containers are not a valid full proof for that requirement.
 
 Use `cargo run -p guix-p2p-e2e -- vm ...` for the strict named-node VM proof
 with separate writable stores. The VM proof currently passes for `hello`
-through a fetcher node's raw `guix-daemon` wrapper path and verifies that the
-imported store path is a restored directory.
+through a fetcher node's raw extension-enabled `guix-daemon` path and verifies
+that the imported store path is a restored directory.
 
 ## Benchmark
 
@@ -152,7 +152,7 @@ The CSV keeps the original result columns and appends phase timings:
 - `prepare_ms`: realize dependencies and remove only the target output.
 - `p2p_start_ms`: start the fetch-node `guix-p2p` daemon.
 - `provider_wait_ms`: wait until the target is visible through P2P.
-- `daemon_start_ms`: start the wrapped `guix-daemon`.
+- `daemon_start_ms`: start the extension-enabled raw `guix-daemon`.
 - `import_ms`: run the final `guix build` import.
 - `total_ms`: total measured mode time.
 
@@ -167,9 +167,9 @@ unavailable dependency paths during standard benchmarks. When VM p2p modes
 provide local narinfo metadata, info and substitute lookups stay local instead
 of falling through to remote substitute servers for unrelated Guix queries. This
 keeps p2p-only query handling from blocking on substitute-server narinfo
-timeouts for the target. The VM `push-binary` command installs loader wrappers
-for both `guix-p2p` and `guix-p2p-wrapper` so the copied release binaries can
-find their Guix runtime libraries inside the guest. The latest two-seeder
+timeouts for the target. The VM `push-binary` command installs the substitute
+extension and loader wrappers for copied Rust binaries so they can find their
+Guix runtime libraries inside the guest. The latest two-seeder
 `hello` run completed successfully, found multiple providers, and imported the
 NAR through P2P. Provider selection now filters candidates through peer
 reputation and connection backoff, so stale provider records should be
@@ -238,7 +238,7 @@ guix shell -m manifest.scm -- \
 
 Modes:
 
-- `http`: isolated raw `guix-daemon` without the P2P wrapper.
+- `http`: isolated raw `guix-daemon` without the P2P extension.
 - `p2p-only`: seed nodes provide the NAR, fetch node is p2p-only,
   `min_providers = 1`.
 - `p2p-first`: seed nodes provide the NAR, fetch node tries P2P before HTTP.

@@ -14,9 +14,13 @@ allows it.
 ## How It Works
 
 `guix-daemon` already talks to substituters through the `guix substitute`
-protocol. `guix-p2p` keeps that protocol intact: a small wrapper intercepts
-`guix substitute --query` and `guix substitute --substitute`, then forwards
-those requests to a long-running `guix-p2p --daemon` over a Unix socket.
+protocol. `guix-p2p` keeps that protocol intact: the daemon still invokes
+`guix substitute --query` and `guix substitute --substitute` normally. The
+integration point is the daemon environment: `GUIX_EXTENSIONS_PATH` must include
+the `guix-p2p` extension directory. When that is true, Guix resolves the
+`substitute` command from the extension first, and the extension forwards
+substitute protocol requests to a long-running `guix-p2p --daemon` over a Unix
+socket.
 
 The daemon answers `have` and `info` queries only when the requested store path
 has trusted narinfo metadata and enough P2P providers. For `substitute`
@@ -32,7 +36,7 @@ guix-daemon
       |
       | spawns: guix substitute --query / --substitute
       v
-guix-p2p-wrapper selected by guix-daemon's GUIX environment
+guix-p2p substitute extension from GUIX_EXTENSIONS_PATH
       |
       | forwards stdin/fd 4 over Unix socket
       v
@@ -49,8 +53,59 @@ reply to guix-daemon as a normal substitute
 
 ## Quick Start
 
-The local package definition installs both `guix-p2p` and
-`guix-p2p-wrapper`:
+For persistent Guix System usage, add this repository as a Guix channel:
+
+```scheme
+(cons*
+ (channel
+  (name 'guix-p2p)
+  (url "https://codeberg.org/trevarj/guix-p2p")
+  (branch "main"))
+ %default-channels)
+```
+
+After `guix pull`, import the service module in your `operating-system`
+configuration and configure the system daemon environment with
+`guix-p2p-enable-guix-daemon-extension`:
+
+```scheme
+(use-modules (guix-p2p services))
+
+(services
+  (modify-services
+      (cons (service guix-p2p-service-type) %base-services)
+    (guix-service-type config =>
+      (guix-p2p-enable-guix-daemon-extension config))))
+```
+
+The service starts `guix-p2p --daemon`, adds the package to the system profile,
+and configures `guix-daemon` to resolve the `guix-p2p` substitute extension
+through `GUIX_EXTENSIONS_PATH`. The helper prepends the package extension
+directory to any existing `GUIX_EXTENSIONS_PATH`; it does not replace or
+discard other Guix extensions. Ordinary Guix commands are unchanged; only the
+internal substitute protocol calls that `guix-daemon` makes during a build or
+reconfigure are intercepted.
+
+After reconfiguring, keep using normal Guix commands:
+
+```sh
+guix build hello
+sudo guix system reconfigure /etc/config.scm
+```
+
+The extension defaults to:
+
+- relay socket: `/var/cache/guix-p2p/guix-p2p.sock`
+- `guix-p2p` binary: `/run/current-system/profile/bin/guix-p2p`
+
+`guix-p2p-wrapper` remains installed for compatibility with older setups.
+
+See [docs/deployment.md](docs/deployment.md) for persistent service details.
+
+## Local Development
+
+From a checkout, the local package definition still works as a compatibility
+entrypoint. This exposes the commands and extension in a temporary shell:
 
 ```sh
 guix shell -f guix.scm
@@ -67,41 +122,10 @@ guix-p2p --daemon \
     --dashboard-port 3030
 ```
 
-For a persistent Guix System setup, load `guix.scm` in your
-`operating-system` configuration and add the service to its `services` field:
-
-```scheme
-(load "/path/to/guix-p2p/guix.scm")
-
-(services
- (modify-services
-  (cons (service guix-p2p-service-type) %base-services)
-  (guix-service-type config =>
-    (guix-p2p-enable-guix-daemon-wrapper config))))
-```
-
-The service starts `guix-p2p --daemon` and configures `guix-daemon` to invoke
-`guix-p2p-wrapper` through its `GUIX` environment variable. The wrapper passes
-ordinary Guix commands through unchanged, but intercepts the substitute protocol
-calls that `guix-daemon` makes during a build or reconfigure. After
-reconfiguring, keep using normal Guix commands:
+To build the local package directly:
 
 ```sh
-guix build hello
-sudo guix system reconfigure /etc/config.scm
-```
-
-The wrapper defaults to:
-
-- relay socket: `${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock`
-- `guix-p2p` binary: `guix-p2p` from `PATH`
-- real Guix binary: `/run/current-system/profile/bin/guix`
-
-See [docs/deployment.md](docs/deployment.md) for persistent service details.
-To add the local package to a Guix profile, use:
-
-```sh
-guix package -f guix.scm
+guix build -f guix.scm
 ```
 
 The package definition uses Guix's Rust lockfile importer to build from
@@ -126,9 +150,15 @@ cargo test
 cargo test -p guix-p2p-e2e
 ```
 
-The strict end-to-end proof uses disposable Guix System VMs with separate
-writable stores. Follow [docs/e2e.md](docs/e2e.md) for the maintained command
-sequence. A faster container smoke test is also available:
+The strict end-to-end deployment proof uses disposable Guix System VMs with
+separate writable stores and exercises the Guix channel service module:
+
+```sh
+cargo run -p guix-p2p-e2e -- vm channel-proof
+```
+
+Follow [docs/e2e.md](docs/e2e.md) for the maintained VM setup sequence. A
+faster container smoke test is also available:
 
 ```sh
 guix shell -m manifest.scm -- \
@@ -145,7 +175,7 @@ and [docs/benchmarks.md](docs/benchmarks.md) for benchmark runs and artifacts.
 |------|-------|
 | [docs/architecture.md](docs/architecture.md) | Architecture, data flow, dashboard surfaces |
 | [docs/configuration.md](docs/configuration.md) | TOML keys, defaults, CLI overrides |
-| [docs/deployment.md](docs/deployment.md) | Daemon, relay, wrapper, and isolated Guix flow |
+| [docs/deployment.md](docs/deployment.md) | Daemon, relay, extension, and isolated Guix flow |
 | [docs/scripts.md](docs/scripts.md) | Script inventory and Rust migration status |
 | [docs/bootstrap-node.md](docs/bootstrap-node.md) | Shepherd-first bootstrap node operation |
 | [docs/e2e.md](docs/e2e.md) | Two-node disposable VM proof |

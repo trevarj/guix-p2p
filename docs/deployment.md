@@ -2,7 +2,26 @@
 
 ## Daemon
 
-From a checkout, the local package definition installs both runtime commands:
+For a persistent Guix System setup, add this repository as a Guix channel:
+
+```scheme
+(cons*
+ (channel
+  (name 'guix-p2p)
+  (url "https://codeberg.org/trevarj/guix-p2p")
+  (branch "main"))
+ %default-channels)
+```
+
+After `guix pull`, import the service module from your `operating-system`
+configuration:
+
+```scheme
+(use-modules (guix-p2p services))
+```
+
+From a checkout, the local package definition remains available for temporary
+development shells:
 
 ```sh
 guix shell -f guix.scm
@@ -29,44 +48,49 @@ The daemon owns:
 - Unix relay socket
 - dashboard API, when enabled
 
-## Wrapper Flow
+## Extension Flow
 
 `guix-daemon` invokes `guix substitute --query` and
-`guix substitute --substitute`. The recommended Guix System setup sets the
-daemon's `GUIX` environment variable to `guix-p2p-wrapper`, avoiding `PATH`
-shadowing and fake `guix` symlinks. Other `guix` commands pass through to the
-real Guix binary.
+`guix substitute --substitute` normally. The recommended Guix System setup
+runs the daemon with `GUIX_EXTENSIONS_PATH` containing the `guix-p2p` extension
+directory, so Guix resolves the extension before its built-in substitute
+command.
 
 Put this in the `services` field of your `operating-system` configuration:
 
 ```scheme
-(load "/path/to/guix-p2p/guix.scm")
+(use-modules (guix-p2p services))
 
 (services
- (modify-services
-  (cons (service guix-p2p-service-type) %base-services)
-  (guix-service-type config =>
-    (guix-p2p-enable-guix-daemon-wrapper config))))
+  (modify-services
+      (cons (service guix-p2p-service-type) %base-services)
+    (guix-service-type config =>
+      (guix-p2p-enable-guix-daemon-extension config))))
 ```
 
 `guix-p2p-service-type` starts `guix-p2p --daemon`, adds the package to the
-system profile, and creates the default cache directory. Guix Home can run user
-services and set login-shell environment, but it cannot directly configure the
-system `guix-daemon` service environment.
+system profile, and creates the default cache directory. Installing the package
+puts the extension at
+`/run/current-system/profile/share/guix/extensions/substitute.scm`, but
+`guix-daemon` only sees it when that directory is in the daemon environment.
+`guix-p2p-enable-guix-daemon-extension` prepends the package extension
+directory to any existing `GUIX_EXTENSIONS_PATH`; it does not discard other
+configured Guix extensions. Guix Home can run user services and set login-shell
+environment, but it cannot directly configure the system `guix-daemon` service
+environment.
 
-Default wrapper behavior:
+Default extension behavior:
 
-- relay socket: `${XDG_CACHE_HOME:-$HOME/.cache}/guix-p2p/guix-p2p.sock`
-- `guix-p2p` binary: resolved from `PATH`
-- real Guix binary: `/run/current-system/profile/bin/guix`
+- relay socket: `/var/cache/guix-p2p/guix-p2p.sock`
+- `guix-p2p` binary: `/run/current-system/profile/bin/guix-p2p`
 
 Optional environment overrides:
 
-- `GUIX`: Guix program used by `guix-daemon`. The helper sets this to
-  `/run/current-system/profile/bin/guix-p2p-wrapper`.
+- `GUIX_EXTENSIONS_PATH`: extension directory used by Guix command lookup. The
+  helper prepends `/run/current-system/profile/share/guix/extensions` to the
+  daemon's existing value.
 - `GUIX_P2P_SOCKET`: relay socket path.
-- `GUIX_P2P_BIN`: `guix-p2p` binary path. Defaults to `guix-p2p` on `PATH`.
-- `REAL_GUIX`: real Guix binary. Defaults to `/run/current-system/profile/bin/guix`.
+- `GUIX_P2P_BIN`: `guix-p2p` binary path.
 
 The legacy `scripts/guix-wrapper.sh` file is only a compatibility shim that
 execs `guix-p2p-wrapper`.
@@ -76,7 +100,7 @@ Flow:
 ```text
 guix-daemon
   -> guix substitute --query
-  -> wrapper
+  -> guix-p2p substitute extension
   -> guix-p2p --query --socket <socket>
   -> daemon socket
 ```
@@ -89,14 +113,22 @@ The strict E2E proof must run named VM nodes with separate writable Guix
 stores. A fetcher must not already have the package seeded by another node, so
 shared host-store containers are not sufficient.
 
-The full proof runs a seed node, a fetch node, the fetch node's raw ELF
-`guix-daemon`, and the client `guix build`. It runs the raw daemon binary
-directly, not the Guile wrapper. It sets:
+The deployment proof is:
+
+```sh
+cargo run -p guix-p2p-e2e -- vm channel-proof
+```
+
+It runs a seed node, a fetch node, the fetch node's raw ELF `guix-daemon`, and
+the client `guix build`. It copies the local Guix channel modules into the
+fetch VM, imports `(guix-p2p services)`, calls
+`guix-p2p-enable-guix-daemon-extension`, and starts the raw daemon with the
+resulting environment. It sets:
 
 - `GUIX_STATE_DIRECTORY` to an isolated state tree.
 - `GUIX_CONFIGURATION_DIRECTORY` to an isolated config tree.
-- `GUIX` to a generated wrapper that forwards substitute protocol calls to
-  the fetch node's `guix-p2p` socket.
+- `GUIX_EXTENSIONS_PATH` to include the copied `guix-p2p` substitute extension.
+- `GUIX_P2P_SOCKET` to the fetch node's `guix-p2p` socket.
 - `GUIX_DAEMON_SOCKET` for the client `guix build`.
 
 This forces a real `guix build <package>` through the substitute protocol

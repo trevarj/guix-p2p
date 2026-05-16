@@ -7,7 +7,7 @@ developing `guix-p2p`.
 |------|---------|
 | [architecture.md](architecture.md) | Architecture, crate map, data flow, dashboard surfaces |
 | [configuration.md](configuration.md) | TOML keys, defaults, CLI overrides |
-| [deployment.md](deployment.md) | Daemon, relay, wrapper, and isolated Guix flow |
+| [deployment.md](deployment.md) | Guix channel setup, daemon, relay, extension, and isolated Guix flow |
 | [scripts.md](scripts.md) | Script inventory and Rust migration status |
 | [bootstrap-node.md](bootstrap-node.md) | Shepherd-first bootstrap node operation |
 | [e2e.md](e2e.md) | Strict two-node VM proof |

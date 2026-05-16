@@ -58,11 +58,14 @@ The detailed benchmark method lives in [benchmarks.md](benchmarks.md).
 
 Before a broader release:
 
-- Keep `guix-p2p-wrapper` as the documented `guix-daemon` `GUIX` wrapper.
+- Keep the Guix substitute extension as the documented `guix-daemon`
+  integration path. Keep `guix-p2p-wrapper` only as a compatibility fallback
+  for older setups.
 - Continue migrating developer-only shell helpers listed in
   [scripts.md](scripts.md) when they become part of normal setup.
-- Add a Guix channel package definition.
-- Document Guix channel installation once packaging exists.
+- Add channel introduction/signing metadata before broader release.
+- Decide whether release packages should build from tagged source snapshots
+  instead of the current channel checkout.
 - Decide whether release binaries are supported or source builds remain the
   only documented path.
 - Tag `v0.1.0` only after packaging, bootstrap, and benchmark claims are
