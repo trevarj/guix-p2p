@@ -1125,19 +1125,10 @@ async fn handshake_with_providers(
                     blocks_available.len()
                 );
 
-                let hashes: Vec<[u8; 32]> = block_hashes
-                    .into_iter()
-                    .map(|h| {
-                        let mut arr = [0u8; 32];
-                        arr.copy_from_slice(&h[..32.min(h.len())]);
-                        arr
-                    })
-                    .collect();
-
                 results.push(PeerHandshake {
                     peer,
                     blocks_available,
-                    block_hashes: hashes,
+                    block_hashes: normalize_block_hashes(block_hashes),
                     block_count,
                 });
                 pending.remove(&peer);
@@ -1177,6 +1168,21 @@ async fn handshake_with_providers(
     }
 
     results
+}
+
+/// Convert wire-format hashes into fixed-size SHA-256 arrays.
+///
+/// Older or malformed peers may send a short hash vector; padding preserves the
+/// current rejection behavior because such hashes will not match real blocks.
+fn normalize_block_hashes(block_hashes: Vec<Vec<u8>>) -> Vec<[u8; 32]> {
+    block_hashes.into_iter().map(|hash| block_hash_array(&hash)).collect()
+}
+
+fn block_hash_array(hash: &[u8]) -> [u8; 32] {
+    let mut arr = [0u8; 32];
+    let len = 32.min(hash.len());
+    arr[..len].copy_from_slice(&hash[..len]);
+    arr
 }
 
 /// Orchestrate block downloads from peers.
@@ -1275,57 +1281,15 @@ async fn download_blocks_from_peers(
                 peer,
                 response: BlockResponse::Blocks { data },
             })) => {
-                let blocks: Vec<(u32, Vec<u8>)> =
-                    data.into_iter().map(|bd: BlockData| (bd.index, bd.data)).collect();
-                let accepted = download.record_blocks(peer, &blocks);
-                let newly_accepted = accepted.len();
-                let accepted_set: HashSet<u32> = accepted.iter().copied().collect();
-
-                if let Some(peer_state) = peer_states.get_mut(&peer) {
-                    let bytes_received =
-                        blocks.iter().map(|(_, data)| data.len() as u64).sum::<u64>();
-                    peer_state.bytes_received += bytes_received;
-
-                    for (idx, _) in &blocks {
-                        peer_state.in_flight.remove(idx);
-                    }
-                }
-
-                if newly_accepted > 0 {
-                    let bytes = blocks
-                        .iter()
-                        .filter(|(idx, _)| accepted_set.contains(idx))
-                        .map(|(_, data)| data.len() as u64)
-                        .sum();
-                    let _ = ctx.event_tx.send(DashboardEvent::BlockReceived {
-                        nar_hash: nar_hash.to_string(),
-                        peer_id: peer.to_string(),
-                        indices: accepted.clone(),
-                        bytes,
-                    });
-                }
-
-                for idx in accepted {
-                    if let Some(state) = block_states.get_mut(idx as usize)
-                        && !matches!(state, BlockFetchState::Complete)
-                    {
-                        *state = BlockFetchState::Complete;
-                    }
-                }
-
-                for (idx, _) in &blocks {
-                    if !accepted_set.contains(idx)
-                        && let Some(state) = block_states.get_mut(*idx as usize)
-                    {
-                        let should_retry = matches!(
-                            state,
-                            BlockFetchState::InFlight { peer: state_peer, .. } if *state_peer == peer
-                        );
-                        if should_retry {
-                            *state = BlockFetchState::Pending;
-                        }
-                    }
-                }
+                let newly_accepted = record_block_response(
+                    &mut download,
+                    &mut peer_states,
+                    &mut block_states,
+                    peer,
+                    data,
+                    nar_hash,
+                    ctx.event_tx,
+                );
 
                 if newly_accepted > 0 {
                     stall_deadline = tokio::time::Instant::now()
@@ -1352,6 +1316,104 @@ async fn download_blocks_from_peers(
     let hash_hex = format!("sha256:{:x}", hash);
 
     Ok((nar, hash_hex))
+}
+
+fn record_block_response(
+    download: &mut ActiveDownload,
+    peer_states: &mut HashMap<PeerId, PeerFetchState>,
+    block_states: &mut [BlockFetchState],
+    peer: PeerId,
+    data: Vec<BlockData>,
+    nar_hash: &str,
+    event_tx: &dashboard::EventBus,
+) -> usize {
+    let blocks = decode_block_data(data);
+    let accepted = download.record_blocks(peer, &blocks);
+    let accepted_set: HashSet<u32> = accepted.iter().copied().collect();
+
+    update_peer_after_block_response(peer_states, peer, &blocks);
+    emit_blocks_received(event_tx, nar_hash, peer, &blocks, &accepted, &accepted_set);
+    mark_accepted_blocks(block_states, &accepted);
+    requeue_rejected_blocks(block_states, peer, &blocks, &accepted_set);
+
+    accepted.len()
+}
+
+fn decode_block_data(data: Vec<BlockData>) -> Vec<(u32, Vec<u8>)> {
+    data.into_iter().map(|bd| (bd.index, bd.data)).collect()
+}
+
+fn update_peer_after_block_response(
+    peer_states: &mut HashMap<PeerId, PeerFetchState>,
+    peer: PeerId,
+    blocks: &[(u32, Vec<u8>)],
+) {
+    if let Some(peer_state) = peer_states.get_mut(&peer) {
+        peer_state.bytes_received += blocks.iter().map(|(_, data)| data.len() as u64).sum::<u64>();
+
+        for (idx, _) in blocks {
+            peer_state.in_flight.remove(idx);
+        }
+    }
+}
+
+fn emit_blocks_received(
+    event_tx: &dashboard::EventBus,
+    nar_hash: &str,
+    peer: PeerId,
+    blocks: &[(u32, Vec<u8>)],
+    accepted: &[u32],
+    accepted_set: &HashSet<u32>,
+) {
+    if accepted.is_empty() {
+        return;
+    }
+
+    let bytes = blocks
+        .iter()
+        .filter(|(idx, _)| accepted_set.contains(idx))
+        .map(|(_, data)| data.len() as u64)
+        .sum();
+
+    let _ = event_tx.send(DashboardEvent::BlockReceived {
+        nar_hash: nar_hash.to_string(),
+        peer_id: peer.to_string(),
+        indices: accepted.to_vec(),
+        bytes,
+    });
+}
+
+fn mark_accepted_blocks(block_states: &mut [BlockFetchState], accepted: &[u32]) {
+    for idx in accepted {
+        if let Some(state) = block_states.get_mut(*idx as usize)
+            && !matches!(state, BlockFetchState::Complete)
+        {
+            *state = BlockFetchState::Complete;
+        }
+    }
+}
+
+fn requeue_rejected_blocks(
+    block_states: &mut [BlockFetchState],
+    peer: PeerId,
+    blocks: &[(u32, Vec<u8>)],
+    accepted_set: &HashSet<u32>,
+) {
+    for (idx, _) in blocks {
+        if accepted_set.contains(idx) {
+            continue;
+        }
+
+        if let Some(state) = block_states.get_mut(*idx as usize) {
+            let should_retry = matches!(
+                state,
+                BlockFetchState::InFlight { peer: state_peer, .. } if *state_peer == peer
+            );
+            if should_retry {
+                *state = BlockFetchState::Pending;
+            }
+        }
+    }
 }
 
 fn requeue_expired_blocks(
@@ -1944,5 +2006,81 @@ mod tests {
         let merged = merge_provider_lists(&[first, second], &[second, third]);
 
         assert_eq!(merged, vec![first, second, third]);
+    }
+
+    #[test]
+    fn normalize_block_hashes_pads_short_wire_hashes() {
+        let hashes = normalize_block_hashes(vec![vec![1, 2, 3], vec![9; 32]]);
+
+        assert_eq!(&hashes[0][..4], &[1, 2, 3, 0]);
+        assert_eq!(hashes[1], [9; 32]);
+    }
+
+    #[test]
+    fn record_block_response_marks_accepts_and_requeues_rejects() {
+        let peer = PeerId::random();
+        let nar_bytes = b"abcdefgh";
+        let nar_hash = format!("{:x}", Sha256::digest(nar_bytes));
+        let mut block_info = BlockInfo::from_file_size(nar_bytes.len() as u64, 4);
+        block_info.set_hashes(vec![test_block_hash(b"abcd"), test_block_hash(b"efgh")]);
+
+        let mut download = ActiveDownload::new(
+            nar_hash.clone(),
+            nar_bytes.len() as u64,
+            block_info,
+            PathBuf::new(),
+            String::new(),
+        );
+        download.add_peer(peer);
+
+        let mut peer_state = PeerFetchState {
+            available: HashSet::from([0, 1]),
+            in_flight: HashSet::from([0, 1]),
+            failures: 0,
+            bytes_received: 0,
+        };
+        let mut peer_states = HashMap::from([(peer, peer_state)]);
+        let requested_at = tokio::time::Instant::now();
+        let mut block_states = vec![
+            BlockFetchState::InFlight { peer, requested_at },
+            BlockFetchState::InFlight { peer, requested_at },
+        ];
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(4);
+
+        let accepted = record_block_response(
+            &mut download,
+            &mut peer_states,
+            &mut block_states,
+            peer,
+            vec![
+                BlockData { index: 0, data: b"abcd".to_vec() },
+                BlockData { index: 1, data: b"wxyz".to_vec() },
+            ],
+            &nar_hash,
+            &event_tx,
+        );
+
+        assert_eq!(accepted, 1);
+        assert!(matches!(block_states[0], BlockFetchState::Complete));
+        assert!(matches!(block_states[1], BlockFetchState::Pending));
+
+        peer_state = peer_states.remove(&peer).unwrap();
+        assert!(peer_state.in_flight.is_empty());
+        assert_eq!(peer_state.bytes_received, 8);
+
+        match event_rx.try_recv().unwrap() {
+            DashboardEvent::BlockReceived { nar_hash: event_hash, indices, bytes, .. } => {
+                assert_eq!(event_hash, nar_hash);
+                assert_eq!(indices, vec![0]);
+                assert_eq!(bytes, 4);
+            },
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    fn test_block_hash(block: &[u8]) -> [u8; 32] {
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&Sha256::digest(block));
+        hash
     }
 }

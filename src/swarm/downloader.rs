@@ -15,6 +15,12 @@ pub enum DownloadError {
     Io(#[from] std::io::Error),
 }
 
+/// Tracks verified blocks for one active NAR download.
+///
+/// The scheduler in `daemon.rs` decides which peer should serve each block.
+/// `ActiveDownload` owns integrity checks and final assembly: every accepted
+/// block must match the per-block hash learned during handshake, and the joined
+/// byte stream must match the narinfo hash before it is returned.
 pub struct ActiveDownload {
     pub nar_hash_hex: String,
     pub nar_size: u64,
@@ -25,6 +31,10 @@ pub struct ActiveDownload {
     pub started: Instant,
 }
 
+/// Verified blocks received from one peer.
+///
+/// Blocks are stored per peer so duplicate or malicious data from one peer does
+/// not overwrite already accepted data from another peer.
 pub struct DownloadResult {
     pub blocks: Vec<Option<Vec<u8>>>,
 }
@@ -55,6 +65,11 @@ impl ActiveDownload {
         );
     }
 
+    /// Verify and store newly received blocks from a peer.
+    ///
+    /// Returns only the indices accepted by this call. Duplicate blocks and
+    /// blocks with a bad SHA-256 digest are ignored so the scheduler can retry
+    /// them with another provider.
     pub fn record_blocks(&mut self, peer: PeerId, blocks: &[(u32, Vec<u8>)]) -> Vec<u32> {
         let mut accepted = Vec::new();
 

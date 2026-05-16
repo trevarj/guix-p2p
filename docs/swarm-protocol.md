@@ -51,30 +51,40 @@ narinfo signature verification (SPKI/libgcrypt against ACL), the trust chain is:
 
 Protocol name: `"/guix/substitute/0.1.0"`
 
-All messages use libp2p `request-response` with a single codec. Each message
-is a typed enum serialized with serde.
+All messages use libp2p `request-response` with the built-in CBOR codec. Each
+request and response is a serde enum.
 
 ### Message Types
 
 ```rust
-enum SwarmMessage {
+enum BlockRequest {
     Handshake {
-        nar_hash: [u8; 32],
-        blocks_available: BitVec,  // which blocks this peer has
+        nar_hash: Vec<u8>,
     },
+    GetBlocks {
+        nar_hash: Vec<u8>,
+        indices: Vec<u32>,
+    },
+}
+
+enum BlockResponse {
     HandshakeReply {
-        blocks_available: BitVec,  // which blocks this peer has
+        blocks_available: Vec<u32>,  // indices this peer can serve
         block_count: u32,
         block_size: u32,
-        block_hashes: Vec<[u8; 32]>,  // SHA-256 of each block
-    },
-    Request {
-        nar_hash: [u8; 32],
-        indices: Vec<u32>,  // 1..8 block indices
+        block_hashes: Vec<Vec<u8>>,  // SHA-256 of each block
     },
     Blocks {
-        data: Vec<(u32, Vec<u8>)>,  // (index, raw bytes) for each block
+        data: Vec<BlockData>,
     },
+    Error {
+        message: String,
+    },
+}
+
+struct BlockData {
+    index: u32,
+    data: Vec<u8>,
 }
 ```
 
@@ -96,7 +106,7 @@ Downloader                        Peer
   │  }                              │
   │ <────────────────────────────── │
   │                                 │
-  │  REQUEST { nar_hash, indices: [17, 42] }
+  │  GET_BLOCKS { nar_hash, indices: [17, 42] }
   │                                 │  "Send me blocks 17 and 42"
   │ ──────────────────────────────> │
   │                                 │
@@ -111,12 +121,12 @@ Downloader                        Peer
 A peer serving blocks MUST:
 - Respond to HANDSHAKE within 10 seconds
 - Serve at least the blocks claimed in HANDSHAKE_REPLY
-- Use the `nar_hash` carried by each REQUEST to select the correct local nar
-- Respond to each REQUEST within 30 seconds
+- Use the `nar_hash` carried by each GET_BLOCKS request to select the correct local nar
+- Respond to each GET_BLOCKS request within 30 seconds
 - Not require choking/unchoking (free seeding model)
 
 A peer downloading SHOULD:
-- Not request more than 8 blocks per REQUEST
+- Not request more than 8 blocks per GET_BLOCKS request
 - Not send more than 4 concurrent requests per peer
 - Verify SHA-256 of each received block before requesting more
 
@@ -131,7 +141,7 @@ struct NarDownloader {
     block_count: u32,
     block_size: u32,
     block_hashes: Vec<[u8; 32]>,           // from handshake, verified by final check
-    needed_blocks: BitVec,                   // blocks still to download
+    block_states: Vec<BlockFetchState>,       // pending, in-flight, or complete
     peers: HashMap<PeerId, PeerState>,       // connected peers
     received_blocks: HashMap<u32, Vec<u8>>,  // downloaded blocks awaiting final verify
 }
@@ -145,7 +155,7 @@ struct NarDownloader {
    `PeerId`s for the matching NAR hash
 3. **Connect**: dial each provider, establish request-response channel
 4. **Handshake**: send HANDSHAKE to each peer. Collect:
-   - `blocks_available` bitfield per peer
+   - `blocks_available` indices per peer
    - `block_hashes` from first peer (verify all peers match or fall back to HTTP)
 5. **Schedule**: dynamic multi-peer block selection
    - Track each block as pending, in-flight, or complete
@@ -154,10 +164,10 @@ struct NarDownloader {
 6. **Download loop**:
    - For each peer, if peer has blocks we need AND peer has < 4 outstanding requests:
      - Select pending blocks this peer has
-     - Send REQUEST with `nar_hash` and block indices
+     - Send GET_BLOCKS with `nar_hash` and block indices
    - When BLOCKS response arrives:
      - Verify each block: SHA-256(block) == block_hash[index]
-     - On success: store block, mark as received in needed_blocks
+     - On success: store block and mark it complete
      - On failure or timeout: penalize the peer and re-queue blocks
    - Pipe new requests immediately (don't wait for batch completion)
 7. **Completion**: when needed_blocks is empty
@@ -172,8 +182,8 @@ struct NarDownloader {
 | Operation | Timeout | Retries | Description |
 |-----------|---------|---------|-------------|
 | Dial peer | 10s | 2 | Connect to peer for block exchange |
-| HANDSHAKE | 10s | 1 | Initial handshake with peer |
-| REQUEST | 30s | 2 | Download specific blocks |
+| HANDSHAKE | 15s | 2 retries | Initial handshake with peer |
+| GET_BLOCKS | stall timeout | until overall timeout | Download specific blocks |
 | Overall download | configurable | 0 | Stall detection triggers HTTP fallback |
 
 Retry strategy:
@@ -197,46 +207,13 @@ Score = `completed / (completed + failed + 1)` with time-decay exponential weigh
 
 Used for:
 - Provider selection: prefer peers with high reputation
-- Block assignment: assign critical (rarest) blocks to highest-reputation peers
 - Blacklisting: automatic exclusion after repeated failures
 
 ## Message Serialization
 
-Using serde with CBOR for compact binary format (alternative: prost/protobuf).
-
-```rust
-impl RequestResponseCodec for BlockExchangeCodec {
-    type Protocol = StreamProtocol;
-    type Request = SwarmRequest;   // HANDSHAKE or REQUEST
-    type Response = SwarmResponse; // HANDSHAKE_REPLY or BLOCKS
-
-    fn read_request<T>(&mut self, protocol: &Self::Protocol, io: &mut T) 
-        -> io::Result<Self::Request>;
-
-    fn read_response<T>(&mut self, protocol: &Self::Protocol, io: &mut T)
-        -> io::Result<Self::Response>;
-
-    fn write_request<T>(&mut self, protocol: &Self::Protocol, io: &mut T,
-                        req: Self::Request) -> io::Result<()>;
-
-    fn write_response<T>(&mut self, protocol: &Self::Protocol, io: &mut T,
-                         res: Self::Response) -> io::Result<()>;
-}
-```
-
-Wire format per message:
-```
-[4 bytes: total_message_length]
-[varint: protocol_version = 1]
-[1 byte: message_type]
-   0 = HANDSHAKE
-   1 = HANDSHAKE_REPLY
-   2 = REQUEST
-   3 = BLOCKS
-[cbor_encoded_payload]
-```
-
-BitVec serialization: length-prefixed raw bytes (ceil(bits/8) bytes).
+Using libp2p's `request_response::cbor::Behaviour<BlockRequest,
+BlockResponse>`. `BlockData.data` uses `serde_bytes` so raw block bytes are
+encoded as a CBOR byte string.
 
 ## Performance Expectations
 

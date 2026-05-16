@@ -62,9 +62,9 @@ guix-p2p (Rust, libp2p)
   │     Bootstrap from community-maintained seed nodes
   │
   ├─► Swarm Downloader (libp2p request-response streams)
-  │     Handshake: nar_hash + block availability bitfield
+  │     Handshake: nar_hash + advertised block indices
   │     Request: nar_hash + up to 8 block indices per batch
-  │     Round-robin block assignment across connected peers
+  │     Dynamic block assignment to the least-loaded peer advertising each block
   │     Per-block SHA-256 verification
   │     Final nar-SHA-256 verification against narinfo
   │     Peer reputation scoring (time-decay, ban threshold)
@@ -231,10 +231,10 @@ Block hash = SHA-256(block_data)
 Block count = ceil(nar_size / 256KiB)
 
 ```
-Client → Peer: HANDSHAKE { nar_hash: [u8; 32], blocks_available: BitVec }
-Peer → Client: HANDSHAKE_REPLY { blocks_available: BitVec, block_count: u32, block_size: u32 }
-Client → Peer: REQUEST { nar_hash: [u8; 32], indices: [u32; 1..8] }
-Peer → Client: BLOCKS { data: [(u32, Vec<u8>); 1..8] }
+Client → Peer: Handshake { nar_hash: Vec<u8> }
+Peer → Client: HandshakeReply { blocks_available: Vec<u32>, block_count: u32, block_size: u32 }
+Client → Peer: GetBlocks { nar_hash: Vec<u8>, indices: Vec<u32> }
+Peer → Client: Blocks { data: Vec<BlockData> }
 ```
 
 ### Verification
