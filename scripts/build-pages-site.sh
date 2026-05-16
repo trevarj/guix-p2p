@@ -4,6 +4,7 @@ set -eu
 site_dir="${SITE_DIR:-site}"
 report_src="${BENCHMARK_RESULTS_MD:-docs/benchmark-results.md}"
 csv_src="${BENCHMARK_RESULTS_CSV:-target/guix-p2p-bench/results.csv}"
+asset_version="$(git rev-parse --short HEAD 2>/dev/null || date +%s)"
 
 mkdir -p "$site_dir"
 mkdir -p "$site_dir/assets"
@@ -1083,8 +1084,8 @@ cat > "$site_dir/configuration.html" <<'HTML'
     </section>
   </main>
 
-  <script src="markdown.js"></script>
-  <script src="doc-page.js"></script>
+  <script src="markdown.js?v=__SITE_ASSET_VERSION__"></script>
+  <script src="doc-page.js?v=__SITE_ASSET_VERSION__"></script>
   <script>
     loadMarkdownDocument("configuration.md", "Configuration Reference");
   </script>
@@ -1126,8 +1127,8 @@ cat > "$site_dir/deployment.html" <<'HTML'
     </section>
   </main>
 
-  <script src="markdown.js"></script>
-  <script src="doc-page.js"></script>
+  <script src="markdown.js?v=__SITE_ASSET_VERSION__"></script>
+  <script src="doc-page.js?v=__SITE_ASSET_VERSION__"></script>
   <script>
     loadMarkdownDocument("deployment.md", "Deployment Guide");
   </script>
@@ -1207,8 +1208,8 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
     </section>
   </main>
 
-  <script src="markdown.js"></script>
-  <script src="charts.js"></script>
+  <script src="markdown.js?v=__SITE_ASSET_VERSION__"></script>
+  <script src="charts.js?v=__SITE_ASSET_VERSION__"></script>
   <script>
     async function loadReport() {
       const report = document.getElementById("report");
@@ -1251,3 +1252,7 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
 </body>
 </html>
 HTML
+
+for html_file in "$site_dir/configuration.html" "$site_dir/deployment.html" "$site_dir/benchmarks.html"; do
+  sed -i "s/__SITE_ASSET_VERSION__/$asset_version/g" "$html_file"
+done

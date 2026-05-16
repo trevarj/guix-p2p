@@ -319,6 +319,8 @@ when it is available, with larger labels and a markdown table fallback for
 docs-only deploys.
 The static renderer keeps the site dependency-free while adding language labels
 and lightweight syntax highlighting for Scheme, shell, and TOML code blocks.
+Generated HTML references JavaScript assets with a commit-derived query string
+so browsers do not reuse stale renderers after Pages deployments.
 
 Pages deployment runs only when the GitHub mirror supports Pages and the Pages
 site is configured for GitHub Actions. If the repository plan or visibility
