@@ -2159,7 +2159,27 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                                 phases: outcome.phases,
                             }),
                             Err(e) => {
-                                let message = e.to_string();
+                                let mut message = format_error_chain(&e);
+                                let failure_run_dir = match write_benchmark_failure_log(
+                                    &base,
+                                    &package.name,
+                                    *condition,
+                                    *mode,
+                                    seed_count,
+                                    iteration,
+                                    &message,
+                                ) {
+                                    Ok(log_path) => log_path
+                                        .parent()
+                                        .map(std::path::Path::to_path_buf)
+                                        .unwrap_or_else(|| run_dir.clone()),
+                                    Err(log_err) => {
+                                        message.push_str(&format!(
+                                            "\nfailed to write benchmark failure log: {log_err}"
+                                        ));
+                                        run_dir.clone()
+                                    },
+                                };
                                 failures.push(format!(
                                     "{} {} {} seed {} iteration {}: {}",
                                     package.name, condition, mode, seed_count, iteration, message
@@ -2180,7 +2200,7 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                                     p2p_evidence: false,
                                     http_evidence: false,
                                     provider_count: None,
-                                    run_dir: run_dir.clone(),
+                                    run_dir: failure_run_dir,
                                     error: Some(message),
                                     skip_reason: None,
                                     phases: BenchmarkPhaseTimings::default(),
@@ -2537,7 +2557,32 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                             phases: outcome.phases,
                         }),
                         Err(e) => {
-                            let message = e.to_string();
+                            let mut message = format_error_chain(&e);
+                            let seed_count = if *mode == BenchmarkMode::Http {
+                                0
+                            } else {
+                                opts.seed_nodes.len()
+                            };
+                            let failure_run_dir = match write_benchmark_failure_log(
+                                &output_dir,
+                                &package.name,
+                                *condition,
+                                *mode,
+                                seed_count,
+                                iteration,
+                                &message,
+                            ) {
+                                Ok(log_path) => log_path
+                                    .parent()
+                                    .map(std::path::Path::to_path_buf)
+                                    .unwrap_or_else(|| output_dir.clone()),
+                                Err(log_err) => {
+                                    message.push_str(&format!(
+                                        "\nfailed to write benchmark failure log: {log_err}"
+                                    ));
+                                    output_dir.clone()
+                                },
+                            };
                             failures.push(format!(
                                 "{} {} {} iteration {}: {}",
                                 package.name, condition, mode, iteration, message
@@ -2550,11 +2595,7 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                                 nar_size: None,
                                 mode: *mode,
                                 http_condition: *condition,
-                                seed_count: if *mode == BenchmarkMode::Http {
-                                    0
-                                } else {
-                                    opts.seed_nodes.len()
-                                },
+                                seed_count,
                                 iteration,
                                 elapsed_ms: None,
                                 success: false,
@@ -2562,7 +2603,7 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                                 p2p_evidence: false,
                                 http_evidence: false,
                                 provider_count: None,
-                                run_dir: output_dir.clone(),
+                                run_dir: failure_run_dir,
                                 error: Some(message),
                                 skip_reason: None,
                                 phases: BenchmarkPhaseTimings::default(),
@@ -4051,6 +4092,40 @@ fn write_benchmark_csv(path: &std::path::Path, records: &[BenchmarkRecord]) -> a
     Ok(())
 }
 
+fn format_error_chain(error: &anyhow::Error) -> String {
+    let mut message = String::new();
+    for (idx, cause) in error.chain().enumerate() {
+        if idx > 0 {
+            message.push_str("\ncaused by: ");
+        }
+        message.push_str(&cause.to_string());
+    }
+    message
+}
+
+fn write_benchmark_failure_log(
+    output_dir: &std::path::Path,
+    package: &str,
+    condition: HttpCondition,
+    mode: BenchmarkMode,
+    seed_count: usize,
+    iteration: usize,
+    message: &str,
+) -> anyhow::Result<PathBuf> {
+    let run_dir = output_dir.join("logs").join(format!(
+        "{}-{}-{}-seed{}-iteration{}",
+        slugify_node_name(package),
+        condition,
+        mode,
+        seed_count,
+        iteration
+    ));
+    std::fs::create_dir_all(&run_dir)?;
+    let log_path = run_dir.join("error.log");
+    std::fs::write(&log_path, message)?;
+    Ok(log_path)
+}
+
 fn write_benchmark_report(
     path: &std::path::Path,
     records: &[BenchmarkRecord],
@@ -4237,14 +4312,23 @@ fn write_benchmark_report(
     if !failures.is_empty() {
         report.push_str("\n## Failed Runs\n\n");
         for failure in failures {
+            let summary = failure
+                .error
+                .as_deref()
+                .unwrap_or("unknown error")
+                .lines()
+                .next()
+                .unwrap_or("unknown error");
+            let log_path = failure.run_dir.join("error.log");
             report.push_str(&format!(
-                "- {} {} {} seed {} iteration {}: {}\n",
+                "- {} {} {} seed {} iteration {}: {} (log: `{}`)\n",
                 failure.package,
                 failure.http_condition,
                 failure.mode,
                 failure.seed_count,
                 failure.iteration,
-                failure.error.as_deref().unwrap_or("unknown error")
+                summary,
+                log_path.display()
             ));
         }
     }
@@ -5225,6 +5309,13 @@ mod tests {
                 .substitute_urls()
                 .contains("bordeaux-singapore-mirror.cbaines.net")
         );
+    }
+
+    #[test]
+    fn formats_full_error_chain() {
+        let error = anyhow::anyhow!("ssh stderr").context("fetch failed");
+
+        assert_eq!(format_error_chain(&error), "fetch failed\ncaused by: ssh stderr");
     }
 
     #[test]

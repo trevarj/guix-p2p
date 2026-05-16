@@ -143,6 +143,7 @@ cargo run -p guix-p2p-e2e -- vm benchmark \
 The VM benchmark writes:
 
 - `target/guix-p2p-e2e/benchmarks/results.csv`
+- `target/guix-p2p-e2e/benchmarks/logs/*/error.log` for failed runs
 - `docs/benchmark-results.md`
 
 The CSV keeps the original result columns and appends phase timings:
@@ -154,6 +155,10 @@ The CSV keeps the original result columns and appends phase timings:
 - `daemon_start_ms`: start the wrapped `guix-daemon`.
 - `import_ms`: run the final `guix build` import.
 - `total_ms`: total measured mode time.
+
+Failure records keep the full error chain in `results.csv` and write the same
+details to `error.log`. The Markdown report keeps the failed-run table concise
+and points at the per-run log path.
 
 The VM benchmark now writes local narinfo metadata for the VM-observed target
 into the fetch node before p2p modes. The substitute daemon only advertises
