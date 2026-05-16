@@ -1,6 +1,6 @@
 #!/bin/sh
-# Compatibility shim for older setup docs. Prefer installing
-# `guix-p2p-wrapper` as `guix` early in guix-daemon's PATH.
+# Compatibility shim for older setup docs. Prefer configuring guix-daemon's
+# GUIX environment variable to point at the Rust `guix-p2p-wrapper` binary.
 
 set -eu
 

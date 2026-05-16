@@ -28,8 +28,8 @@ guix-daemon
   │ stdin: "have /gnu/store/...", "info /gnu/store/...", "substitute /gnu/store/... /tmp/dest"
   │ fd 4:  reads "success sha256:... 12345" or "not-found" or "hash-mismatch ..."
   ▼
-guix substitute (Guile, 4-line patch) or PATH wrapper
-  │ if $GUIX_USE_P2P=1 or wrapper detects "substitute" → exec guix-p2p
+guix-p2p-wrapper selected by guix-daemon's GUIX environment
+  │ if wrapper detects "substitute" and socket exists → exec guix-p2p
   ▼
 guix-p2p (Rust, libp2p)
   │
@@ -84,7 +84,7 @@ guix-p2p (Rust, libp2p)
 | Swarm | Custom nar block protocol | BTv2 infohash is mathematically incompatible with nar-SHA-256 |
 | Transport | QUIC (libp2p-quic) + TCP fallback | QUIC is the default listen address; TCP is enabled for restricted containers and networks where UDP is unavailable |
 | NAT traversal | Built into libp2p (autonat/relay/dcutr), deferred post-MVP | Significant complexity; initial users need open ports or IPv6 |
-| Daemon integration | Unix socket relay + PATH wrapper | Zero daemon C++ changes; relay gives <1ms startup |
+| Daemon integration | Unix socket relay + `GUIX` wrapper | Zero daemon C++ changes; relay gives <1ms startup |
 | Narinfos | HTTP fetch from official substitute URLs, optional local metadata file for offline harnesses | Tiny (<500 bytes); existing trust chain unchanged for HTTP, while local metadata lets seeded p2p-only tests avoid network lookup |
 | Nars | DHT + swarm; not-found replies let guix-daemon chain to HTTP substituters | Heavy payload; distributed across peers for P2P |
 | Distribution | External project, crates.io for development, Guix channel for packaging | Not targeting upstream Guix inclusion (would need pure Guile) |
@@ -410,11 +410,11 @@ Each relay connection sends a mode header and then streams daemon protocol
 commands. The daemon processes each connection independently, subscribing to
 the swarm's broadcast notification channel for that connection.
 
-### PATH Wrapper (`guix-p2p-wrapper`)
+### Guix Daemon Wrapper (`guix-p2p-wrapper`)
 
-A small Rust binary placed earlier in `$PATH` than the real `guix` binary.
-Detects whether the daemon's socket is available and uses relay mode when
-possible, falling back to direct invocation otherwise. The legacy
+A small Rust binary selected by the `guix-daemon` service's `GUIX` environment
+variable. It detects whether the daemon's socket is available and uses relay
+mode when possible, falling back to direct invocation otherwise. The legacy
 `scripts/guix-wrapper.sh` file only execs this binary for compatibility:
 
 ```

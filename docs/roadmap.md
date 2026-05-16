@@ -58,7 +58,7 @@ The detailed benchmark method lives in [benchmarks.md](benchmarks.md).
 
 Before a broader release:
 
-- Keep `guix-p2p-wrapper` as the documented user-facing PATH wrapper.
+- Keep `guix-p2p-wrapper` as the documented `guix-daemon` `GUIX` wrapper.
 - Continue migrating developer-only shell helpers listed in
   [scripts.md](scripts.md) when they become part of normal setup.
 - Add a Guix channel package definition.

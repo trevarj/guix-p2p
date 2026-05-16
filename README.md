@@ -32,7 +32,7 @@ guix-daemon
       |
       | spawns: guix substitute --query / --substitute
       v
-guix-p2p-wrapper installed as guix in PATH
+guix-p2p-wrapper selected by guix-daemon's GUIX environment
       |
       | forwards stdin/fd 4 over Unix socket
       v
@@ -67,11 +67,24 @@ guix-p2p --daemon \
     --dashboard-port 3030
 ```
 
-Install `guix-p2p-wrapper` as the `guix` command earlier in the `guix-daemon`
-service `PATH` than the real Guix binary. The wrapper passes ordinary Guix
-commands through unchanged, but intercepts the substitute protocol calls that
-`guix-daemon` makes during a build or reconfigure. With the daemon configured
-for that wrapper path, keep using normal Guix commands:
+For a persistent Guix System setup, load `guix.scm` in your
+`operating-system` configuration and add the service to its `services` field:
+
+```scheme
+(load "/path/to/guix-p2p/guix.scm")
+
+(services
+ (modify-services
+  (cons (service guix-p2p-service-type) %base-services)
+  (guix-service-type config =>
+    (guix-p2p-enable-guix-daemon-wrapper config))))
+```
+
+The service starts `guix-p2p --daemon` and configures `guix-daemon` to invoke
+`guix-p2p-wrapper` through its `GUIX` environment variable. The wrapper passes
+ordinary Guix commands through unchanged, but intercepts the substitute protocol
+calls that `guix-daemon` makes during a build or reconfigure. After
+reconfiguring, keep using normal Guix commands:
 
 ```sh
 guix build hello
@@ -84,8 +97,8 @@ The wrapper defaults to:
 - `guix-p2p` binary: `guix-p2p` from `PATH`
 - real Guix binary: `/run/current-system/profile/bin/guix`
 
-See [docs/deployment.md](docs/deployment.md) for persistent service and wrapper
-installation options. To add the local package to a Guix profile, use:
+See [docs/deployment.md](docs/deployment.md) for persistent service details.
+To add the local package to a Guix profile, use:
 
 ```sh
 guix package -f guix.scm

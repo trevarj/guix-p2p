@@ -32,9 +32,27 @@ The daemon owns:
 ## Wrapper Flow
 
 `guix-daemon` invokes `guix substitute --query` and
-`guix substitute --substitute`. Install `guix-p2p-wrapper` as `guix`
-early in the daemon's `PATH` to intercept only those substitute invocations.
-Other `guix` commands pass through to the real Guix binary.
+`guix substitute --substitute`. The recommended Guix System setup sets the
+daemon's `GUIX` environment variable to `guix-p2p-wrapper`, avoiding `PATH`
+shadowing and fake `guix` symlinks. Other `guix` commands pass through to the
+real Guix binary.
+
+Put this in the `services` field of your `operating-system` configuration:
+
+```scheme
+(load "/path/to/guix-p2p/guix.scm")
+
+(services
+ (modify-services
+  (cons (service guix-p2p-service-type) %base-services)
+  (guix-service-type config =>
+    (guix-p2p-enable-guix-daemon-wrapper config))))
+```
+
+`guix-p2p-service-type` starts `guix-p2p --daemon`, adds the package to the
+system profile, and creates the default cache directory. Guix Home can run user
+services and set login-shell environment, but it cannot directly configure the
+system `guix-daemon` service environment.
 
 Default wrapper behavior:
 
@@ -44,6 +62,8 @@ Default wrapper behavior:
 
 Optional environment overrides:
 
+- `GUIX`: Guix program used by `guix-daemon`. The helper sets this to
+  `/run/current-system/profile/bin/guix-p2p-wrapper`.
 - `GUIX_P2P_SOCKET`: relay socket path.
 - `GUIX_P2P_BIN`: `guix-p2p` binary path. Defaults to `guix-p2p` on `PATH`.
 - `REAL_GUIX`: real Guix binary. Defaults to `/run/current-system/profile/bin/guix`.
