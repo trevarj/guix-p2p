@@ -13,6 +13,9 @@ All other tuning belongs in TOML.
 ```toml
 listen_addr = "/ip4/0.0.0.0/udp/6881/quic-v1"
 bootstrap_peers = "/ip4/bootstrap.example.org/udp/6881/quic-v1/p2p/12D3KooW..."
+enable_default_bootstrap_peers = true
+peer_store_enabled = true
+peer_store_max_entries = 100
 external_addresses = "/dns4/node.example.org/udp/6881/quic-v1"
 cache_dir = "/var/cache/guix-p2p"
 socket_path = "/var/cache/guix-p2p/guix-p2p.sock"
@@ -30,7 +33,10 @@ seed_paths = ["/gnu/store/...-hello"]
 
 | Key | Default | CLI override | Purpose |
 |-----|---------|--------------|---------|
-| `bootstrap_peers` | empty | `--bootstrap-peers` | Comma-separated peer multiaddrs used for initial DHT connectivity. |
+| `bootstrap_peers` | empty | `--bootstrap-peers` | Comma-separated community or private peer multiaddrs used for initial DHT connectivity. |
+| `enable_default_bootstrap_peers` | `true` | none | Include built-in project bootstrap peers when they are available. The current built-in list is empty. |
+| `peer_store_enabled` | `true` | none | Persist reachable peers under `cache_dir` and reuse them on later starts. |
+| `peer_store_max_entries` | `100` | none | Maximum persisted peer address entries. |
 | `external_addresses` | empty | `--external-addresses` | Comma-separated listener addresses advertised to peers and provider records when autodetection is insufficient. |
 | `listen_addr` | `/ip4/0.0.0.0/udp/6881/quic-v1` | `--listen-addr` | libp2p listen multiaddr. TCP and QUIC are both supported by the binary. |
 | `cache_dir` | `$XDG_CACHE_HOME/guix-p2p` or `~/.cache/guix-p2p` | `--cache-dir` | Identity, nar cache, and reputation storage. |
@@ -56,13 +62,14 @@ seed_paths = ["/gnu/store/...-hello"]
 | `socket_path` | `<cache_dir>/guix-p2p.sock` | `--socket` | Unix socket used by relay mode and the Guix wrapper. |
 | `seed_paths` | empty | `--seed` | Store paths serialized as raw single-item NARs and announced in the DHT. |
 
-`bootstrap_peers` is the persisted known-peer mechanism today. Peers learned
-through mDNS, identify, or normal DHT operation are added to the in-memory
-routing table but are not written back to config.
+Startup bootstrap peers are merged from the built-in project list, configured
+`bootstrap_peers`, CLI `--bootstrap-peers`, and the persisted peer store. The
+peer store is written under `cache_dir`; user config is never rewritten.
 
 Use `external_addresses` when the listen address seen locally is not the
 address other peers should dial, such as port-forwarded VMs, NAT rules, or a
-public DNS name.
+public DNS name. The dashboard appends `/p2p/<peer-id>` to these addresses and
+shows the shareable multiaddr for other users.
 
 ## Policies
 

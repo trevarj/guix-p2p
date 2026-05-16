@@ -141,6 +141,22 @@ multiaddr and pass it as `bootstrap_peers` in `~/.config/guix-p2p/config.toml`:
 bootstrap_peers = "/ip4/203.0.113.10/udp/6881/quic-v1/p2p/12D3KooW..."
 ```
 
+The dashboard shows the shareable multiaddr for this node when
+`external_addresses` is configured. Set it to the address other peers can dial:
+
+```toml
+external_addresses = "/dns4/node.example.org/udp/6881/quic-v1"
+```
+
+Then open the dashboard and use the copy control next to the PeerId. The value
+has this form:
+
+```text
+/dns4/node.example.org/udp/6881/quic-v1/p2p/12D3KooW...
+```
+
+Do not share `/ip4/0.0.0.0/...`; that is only a local bind address.
+
 ## Validation
 
 Run the Rust test suite:

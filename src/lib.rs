@@ -12,6 +12,7 @@ pub mod nar_hash;
 pub mod nar_restore;
 pub mod nar_store;
 pub mod narinfo;
+pub mod peer_store;
 pub mod relay;
 pub mod reputation;
 pub mod runtime;

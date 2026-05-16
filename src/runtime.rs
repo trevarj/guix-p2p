@@ -10,6 +10,7 @@ use crate::{
     connection::ConnectionManager,
     dashboard, dht,
     nar_store::NarStore,
+    peer_store::PeerStore,
     reputation::ReputationTracker,
     swarm::codec::{BlockRequest, BlockResponse},
 };
@@ -26,6 +27,7 @@ pub async fn run_swarm_task(
     event_tx: dashboard::EventBus,
     nar_store: Arc<std::sync::Mutex<NarStore>>,
     bandwidth_limiter: Arc<BandwidthLimiter>,
+    peer_store: Option<Arc<std::sync::Mutex<PeerStore>>>,
 ) {
     let mut prune_tick = tokio::time::interval(Duration::from_secs(300));
     let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -58,6 +60,7 @@ pub async fn run_swarm_task(
                     SwarmEvent::Behaviour(GuixP2PEvent::Mdns(libp2p::mdns::Event::Discovered(list))) => {
                         for (peer_id, addr) in list {
                             tracing::info!("Discovered LAN peer {} at {}", peer_id, addr);
+                            record_peer_address(&peer_store, peer_id, &addr);
                             swarm.behaviour_mut().kad.add_address(&peer_id, addr);
                         }
                     },
@@ -66,6 +69,7 @@ pub async fn run_swarm_task(
                             for addr in info.listen_addrs {
                                 tracing::debug!("Identify learned peer {} at {}", peer_id, addr);
                                 conn_mgr.lock().unwrap().add_address(peer_id, addr.to_string());
+                                record_peer_address(&peer_store, peer_id, &addr);
                                 swarm.behaviour_mut().kad.add_address(&peer_id, addr);
                             }
                         }
@@ -79,6 +83,7 @@ pub async fn run_swarm_task(
                             .lock()
                             .unwrap()
                             .on_connected_with_addresses(peer_id, vec![address.to_string()]);
+                        record_peer_address(&peer_store, peer_id, &address);
                         let _ = event_tx.send(dashboard::DashboardEvent::PeerConnected {
                             peer_id: peer_id.to_string(),
                             addresses: vec![address.to_string()],
@@ -121,6 +126,16 @@ pub async fn run_swarm_task(
                 tracing::debug!("DHT get_providers for hash={}", hash);
             }
         }
+    }
+}
+
+fn record_peer_address(
+    peer_store: &Option<Arc<std::sync::Mutex<PeerStore>>>,
+    peer_id: libp2p::PeerId,
+    address: &libp2p::Multiaddr,
+) {
+    if let Some(store) = peer_store {
+        store.lock().unwrap().record_address(peer_id, address);
     }
 }
 

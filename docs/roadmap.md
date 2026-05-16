@@ -9,6 +9,7 @@ are archived under [archive/](archive/).
 - Strict VM proof validates separate writable stores and real `guix build`
   import.
 - Nodes can use a manually shared bootstrap multiaddr.
+- Nodes persist recently reachable peers and reuse them on later starts.
 - Dashboard package seeding, seed removal, live transfer path, catalog, peers,
   builds, and events are implemented.
 - Successful downloads are cached and re-announced for re-seeding.
@@ -18,8 +19,9 @@ are archived under [archive/](archive/).
 
 ## Known Tester Readiness
 
-The known-tester setup path is usable with a manually shared bootstrap peer and
-local dashboard access. Remaining work is mostly operational:
+The known-tester setup path is usable with a manually shared bootstrap peer,
+persisted learned peers, and local dashboard access. Remaining work is mostly
+operational:
 
 - Keep setup docs aligned with the current `guix shell -m manifest.scm` plus
   Cargo build flow.

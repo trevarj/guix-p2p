@@ -24,6 +24,7 @@ use crate::{
     connection::{ConnectionManager, PeerConnectionSnapshot},
     dht::ProviderCache,
     nar_store::NarStore,
+    peer_store,
     reputation::{PeerScore, ReputationTracker},
 };
 
@@ -161,6 +162,9 @@ struct ApiPeer {
 #[derive(Debug, Clone, Serialize)]
 struct ApiStatus {
     peer_id: String,
+    listen_addr: String,
+    external_addresses: Vec<String>,
+    shareable_addresses: Vec<String>,
     uptime_secs: u64,
     connected_peers: usize,
     dht_entries: usize,
@@ -255,6 +259,8 @@ pub struct DashboardState {
     pub event_history: EventHistoryRegistry,
     pub started: Instant,
     pub peer_id: String,
+    pub listen_addr: String,
+    pub external_addresses: Vec<String>,
     pub event_bus: EventBus,
     pub nar_store: Arc<Mutex<NarStore>>,
     pub catalog: Arc<Mutex<HashMap<String, CatalogItem>>>,
@@ -324,6 +330,12 @@ async fn api_status(State(state): State<DashboardState>) -> Json<ApiStatus> {
 
     let status = ApiStatus {
         peer_id: state.peer_id.clone(),
+        listen_addr: state.listen_addr.clone(),
+        external_addresses: state.external_addresses.clone(),
+        shareable_addresses: peer_store::shareable_addresses(
+            &state.external_addresses,
+            &state.peer_id,
+        ),
         uptime_secs: now,
         connected_peers: connected,
         dht_entries: dht,
@@ -828,6 +840,8 @@ mod tests {
             event_history: Arc::new(Mutex::new(EventHistory::default())),
             started: Instant::now(),
             peer_id: "local-peer".to_string(),
+            listen_addr: "/ip4/0.0.0.0/udp/6881/quic-v1".to_string(),
+            external_addresses: vec!["/dns4/node.example.org/udp/6881/quic-v1".to_string()],
             event_bus,
             nar_store: Arc::new(Mutex::new(NarStore::new(tmp.path(), 262_144))),
             catalog: Arc::new(Mutex::new(HashMap::new())),
@@ -881,6 +895,22 @@ mod tests {
         assert_eq!(peers[0].bytes_served, 4096);
         assert!(!peers[0].connected);
         assert_eq!(peers[0].address_count, 0);
+    }
+
+    #[tokio::test]
+    async fn status_api_returns_shareable_addresses() {
+        let (mut state, _tmp) = dashboard_state();
+        let peer = libp2p::PeerId::random();
+        state.peer_id = peer.to_string();
+
+        let status = api_status(State(state)).await.0;
+
+        assert_eq!(status.listen_addr, "/ip4/0.0.0.0/udp/6881/quic-v1");
+        assert_eq!(status.external_addresses, vec!["/dns4/node.example.org/udp/6881/quic-v1"]);
+        assert_eq!(
+            status.shareable_addresses,
+            vec![format!("/dns4/node.example.org/udp/6881/quic-v1/p2p/{peer}")]
+        );
     }
 
     #[tokio::test]

@@ -70,13 +70,23 @@ operator-controlled reverse proxy or tunnel.
 
 ## Publish Peer Info
 
-Start the service and read the PeerId:
+Set `external_addresses` to the address clients should dial. The dashboard will
+show the full shareable multiaddr after it appends the local PeerId:
+
+```toml
+external_addresses = "/dns4/bootstrap.example.org/udp/6881/quic-v1"
+```
+
+Start the service and read the PeerId if you need to build the address
+manually:
 
 ```sh
 curl -s http://127.0.0.1:3030/api/status
 ```
 
-The response includes `peer_id`. Combine it with the public listen address:
+The response includes `peer_id`, `external_addresses`, and
+`shareable_addresses`. Publish the first `shareable_addresses` value, or combine
+`peer_id` with the public listen address:
 
 ```text
 /ip4/203.0.113.10/udp/6881/quic-v1/p2p/12D3KooW...

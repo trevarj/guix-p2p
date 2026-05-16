@@ -43,6 +43,9 @@ impl std::str::FromStr for SubstitutePolicy {
 #[serde(default)]
 struct ConfigFile {
     bootstrap_peers: Option<String>,
+    enable_default_bootstrap_peers: Option<bool>,
+    peer_store_enabled: Option<bool>,
+    peer_store_max_entries: Option<usize>,
     external_addresses: Option<String>,
     listen_addr: Option<String>,
     cache_dir: Option<String>,
@@ -74,6 +77,9 @@ struct ConfigFile {
 #[allow(dead_code)]
 pub struct Config {
     pub bootstrap_peers: Vec<String>,
+    pub enable_default_bootstrap_peers: bool,
+    pub peer_store_enabled: bool,
+    pub peer_store_max_entries: usize,
     pub external_addresses: Vec<String>,
     pub listen_addr: String,
     pub cache_dir: PathBuf,
@@ -121,22 +127,27 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(dirs_cache_dir);
 
+        let enable_default_bootstrap_peers = file.enable_default_bootstrap_peers.unwrap_or(true);
+        let mut bootstrap_peers = Vec::new();
+        if enable_default_bootstrap_peers {
+            bootstrap_peers.extend(default_bootstrap_peers());
+        }
+        if let Some(peers) = file.bootstrap_peers.as_ref() {
+            bootstrap_peers.extend(split_csv(peers));
+        }
+        if let Some(peers) = cli_bootstrap.as_ref() {
+            bootstrap_peers.extend(split_csv(peers));
+        }
+        bootstrap_peers = dedup_strings(bootstrap_peers);
+
         Self {
-            bootstrap_peers: cli_bootstrap
-                .map(|s| s.split(',').map(str::to_string).collect())
-                .or_else(|| {
-                    file.bootstrap_peers
-                        .as_ref()
-                        .map(|s| s.split(',').map(str::to_string).collect())
-                })
-                .unwrap_or_else(default_bootstrap_peers),
+            bootstrap_peers,
+            enable_default_bootstrap_peers,
+            peer_store_enabled: file.peer_store_enabled.unwrap_or(true),
+            peer_store_max_entries: file.peer_store_max_entries.unwrap_or(100),
             external_addresses: cli_external_addresses
-                .map(|s| s.split(',').map(str::to_string).collect())
-                .or_else(|| {
-                    file.external_addresses
-                        .as_ref()
-                        .map(|s| s.split(',').map(str::to_string).collect())
-                })
+                .map(|s| split_csv(&s))
+                .or_else(|| file.external_addresses.as_ref().map(|s| split_csv(s)))
                 .unwrap_or_default(),
             listen_addr: cli_listen
                 .or(file.listen_addr)
@@ -149,12 +160,8 @@ impl Config {
             max_in_flight_blocks_per_peer: file.max_in_flight_blocks_per_peer.unwrap_or(4),
             max_upload_rate_kbps: file.max_upload_rate_kbps,
             substitute_urls: cli_substitute_urls
-                .map(|s| s.split(',').map(str::to_string).collect())
-                .or_else(|| {
-                    file.substitute_urls
-                        .as_ref()
-                        .map(|s| s.split(',').map(str::to_string).collect())
-                })
+                .map(|s| split_csv(&s))
+                .or_else(|| file.substitute_urls.as_ref().map(|s| split_csv(s)))
                 .unwrap_or_else(default_substitute_urls),
             substitute_policy: cli_policy.or(file.substitute_policy).unwrap_or_default(),
             min_providers: file.min_providers.unwrap_or(3),
@@ -220,6 +227,20 @@ fn default_bootstrap_peers() -> Vec<String> {
     vec![]
 }
 
+fn split_csv(value: &str) -> Vec<String> {
+    value.split(',').map(str::trim).filter(|part| !part.is_empty()).map(str::to_string).collect()
+}
+
+pub fn dedup_strings(values: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for value in values {
+        if !out.contains(&value) {
+            out.push(value);
+        }
+    }
+    out
+}
+
 fn default_substitute_urls() -> Vec<String> {
     vec!["https://bordeaux.guix.gnu.org".into(), "https://ci.guix.gnu.org".into()]
 }
@@ -233,6 +254,9 @@ mod tests {
         let config = Config::load(None, None, None, Some("/tmp/guix-p2p-test".into()), None, None);
         assert_eq!(config.block_size, 262144);
         assert!(config.bootstrap_peers.is_empty());
+        assert!(config.enable_default_bootstrap_peers);
+        assert!(config.peer_store_enabled);
+        assert_eq!(config.peer_store_max_entries, 100);
         assert!(config.external_addresses.is_empty());
         assert_eq!(config.max_peers_per_download, 8);
         assert_eq!(config.max_in_flight_blocks_per_peer, 4);
@@ -261,5 +285,16 @@ mod tests {
             let s = policy.to_string();
             assert_eq!(s.parse::<SubstitutePolicy>().unwrap(), policy);
         }
+    }
+
+    #[test]
+    fn test_bootstrap_peers_merge_and_deduplicate() {
+        let peers = dedup_strings(split_csv(
+            "/ip4/127.0.0.1/tcp/1/p2p/a, /ip4/127.0.0.1/tcp/1/p2p/a,/ip4/127.0.0.1/tcp/2/p2p/b",
+        ));
+
+        assert_eq!(peers.len(), 2);
+        assert_eq!(peers[0], "/ip4/127.0.0.1/tcp/1/p2p/a");
+        assert_eq!(peers[1], "/ip4/127.0.0.1/tcp/2/p2p/b");
     }
 }

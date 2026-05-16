@@ -123,6 +123,11 @@ pub fn bootstrap(
             failed
         );
     } else {
+        if connected > 0
+            && let Err(e) = swarm.behaviour_mut().kad.bootstrap()
+        {
+            tracing::warn!("Failed to start Kad bootstrap query: {}", e);
+        }
         tracing::info!("Bootstrap complete: {} connected, {} failed", connected, failed);
     }
 

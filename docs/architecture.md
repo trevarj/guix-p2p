@@ -486,6 +486,8 @@ and CLI override.
 ```toml
 substitute_policy = "p2p-first"
 bootstrap_peers = "/ip4/1.2.3.4/udp/6881/quic-v1/p2p/QmPeer1,/ip4/5.6.7.8/udp/6881/quic-v1/p2p/QmPeer2"
+peer_store_enabled = true
+peer_store_max_entries = 100
 external_addresses = "/dns4/node.example.org/udp/6881/quic-v1"
 substitute_urls = "https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org"
 min_providers = 3
@@ -685,8 +687,9 @@ whether P2P providers are available.
 
 Dashboard API endpoints:
 
-- `/api/status` returns the local peer id, uptime, currently connected peer
-  count, DHT entry count, observed build count, and seed count.
+- `/api/status` returns the local peer id, listen address, configured external
+  addresses, shareable multiaddrs, uptime, currently connected peer count, DHT
+  entry count, observed build count, and seed count.
 - `/api/peers` returns full peer ids, connection state, known addresses,
   address count, last-active age, and reputation counters.
 - `/api/builds` returns observed builds with a `lookup_key` for detail links.

@@ -45,7 +45,8 @@ for addr in &config.bootstrap_peers {
 ```
 
 Bootstraps:
-1. Connect to configured seed nodes (community volunteers initially, official Guix servers long-term)
+1. Connect to built-in project nodes, configured community/private nodes, and
+   recently persisted reachable peers.
 2. Perform iterative `FIND_NODE` toward own PeerId to populate k-buckets
 3. After bootstrap, routing table maintains itself via periodic refresh
 
@@ -65,13 +66,22 @@ bootstrap_peers = "/ip4/p2p1.guix.example.org/udp/6881/quic-v1/p2p/12D3KooW...,/
 external_addresses = "/dns4/node.example.org/udp/6881/quic-v1"
 ```
 
-There are no default bootstrap peers yet. Users configure known peers via the
+There are no built-in default bootstrap peers yet. The code path is enabled by
+`enable_default_bootstrap_peers = true` so project-operated bootnodes can be
+added later without changing user config. Users can add known peers via the
 `--bootstrap-peers` CLI flag or `bootstrap_peers` in the config file.
+
+Reachable peers learned from successful dials, identify, and mDNS are persisted
+under `cache_dir` when `peer_store_enabled = true`. Persisted peers are merged
+into the next startup bootstrap set and do not rewrite the user's TOML config.
 
 Nodes can also set `external_addresses` or `--external-addresses` when the
 dialable address differs from the local listen address. Those addresses are
 advertised through identify and included in provider records, which lets peers
 found through the DHT dial the provider.
+
+The dashboard uses `external_addresses` plus the local PeerId to show the exact
+multiaddr a user can share with another peer.
 
 ## Kademlia Parameters
 

@@ -123,7 +123,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if let Some(ref seed) = cli.seed {
-        config.seed_paths = seed.split(',').map(str::to_string).collect();
+        config.seed_paths = seed
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(str::to_string)
+            .collect();
     }
     if let Some(ref path) = cli.local_narinfo {
         config.local_narinfo_path = Some(path.clone());
@@ -167,7 +172,19 @@ async fn main() -> anyhow::Result<()> {
         swarm.add_external_address(addr);
     }
 
-    dht::bootstrap(&mut swarm, &config.bootstrap_peers)?;
+    let peer_store = if config.peer_store_enabled {
+        let store =
+            guix_p2p::peer_store::PeerStore::load(&config.cache_dir, config.peer_store_max_entries);
+        Some(Arc::new(std::sync::Mutex::new(store)))
+    } else {
+        None
+    };
+    let mut bootstrap_peers = config.bootstrap_peers.clone();
+    if let Some(store) = &peer_store {
+        bootstrap_peers.extend(store.lock().unwrap().bootstrap_peers());
+        bootstrap_peers = config::dedup_strings(bootstrap_peers);
+    }
+    dht::bootstrap(&mut swarm, &bootstrap_peers)?;
 
     let provider_cache = dht::create_provider_cache();
     let narinfo_cache = std::sync::Mutex::new(narinfo::NarinfoCache::new(60));
@@ -257,6 +274,7 @@ async fn main() -> anyhow::Result<()> {
     let evt_for_swarm = event_tx.clone();
     let nar_store_for_swarm = nar_store.clone();
     let limiter_for_swarm = bandwidth_limiter.clone();
+    let peer_store_for_swarm = peer_store.clone();
 
     tokio::spawn(async move {
         guix_p2p::runtime::run_swarm_task(
@@ -270,6 +288,7 @@ async fn main() -> anyhow::Result<()> {
             evt_for_swarm,
             nar_store_for_swarm,
             limiter_for_swarm,
+            peer_store_for_swarm,
         )
         .await;
     });

@@ -48,6 +48,12 @@ header .brand-logo .brand-main{fill:var(--fg)}
 header .brand-logo .brand-accent{fill:var(--acc)}
 header .brand-logo .brand-link{stroke:var(--acc)}
 header .id{font-size:11px;opacity:.6}
+.share-peer{margin-top:4px;display:flex;gap:4px;align-items:center;max-width:280px}
+.share-peer .share-value{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--muted);font-size:10px
+}
+.share-peer button{padding:3px 6px;font-size:10px;flex:0 0 auto}
 header .stats{display:grid;grid-template-columns:repeat(7,auto);gap:8px;font-size:11px}
 header .stats div{border:1px solid var(--line);background:var(--panel);padding:4px 7px;min-width:74px}
 header .stats span{display:block;color:var(--acc);font-weight:bold;font-size:14px;line-height:1.1}
@@ -332,6 +338,10 @@ main{
       <path class="brand-link" d="M92.3 44H118M122 44H147.7" fill="none" stroke-width="1.7" stroke-linecap="round"/>
     </svg>
     <br><span class="id" id="peer-id" data-tip="Full libp2p peer id for this node.">--</span>
+    <div class="share-peer" data-tip="Full multiaddr to share with other peers. Configure external_addresses when empty.">
+      <span class="share-value" id="share-address">set external_addresses to share</span>
+      <button type="button" id="copy-share" data-tip="Copy shareable peer multiaddr.">copy</button>
+    </div>
   </div>
   <div class="stats">
     <div data-tip="Currently connected swarm peers.">CONN <span id="connected">0</span></div>
@@ -558,6 +568,13 @@ function applyTheme(themeId){
   var select=document.getElementById('theme-select');
   if(select)select.value=themeId;
   localStorage.setItem('guix-p2p-theme',themeId);
+}
+
+function copyText(text){
+  if(!text)return;
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).catch(function(){})
+  }
 }
 
 function eventCategory(cls){
@@ -1332,6 +1349,13 @@ document.addEventListener('click',function(ev){
   if(pop&&!pop.classList.contains('hidden')&&!pop.contains(ev.target)&&!ev.target.closest('.help-btn')){
     closeHelp()
   }
+  var copy=ev.target.closest('#copy-share');
+  if(copy){
+    var value=copy.dataset.value||'';
+    copyText(value);
+    copy.textContent=value?'copied':'copy';
+    setTimeout(function(){copy.textContent='copy'},900)
+  }
 });
 document.addEventListener('keydown',function(ev){
   if(ev.key==='Escape'){
@@ -1358,6 +1382,12 @@ document.addEventListener('keydown',function(ev){
       var peerEl=document.getElementById('peer-id');
       peerEl.textContent=s.peer_id+(DEMO_MODE?' [demo]':'');
       peerEl.dataset.tip=s.peer_id;
+      var share=(s.shareable_addresses&&s.shareable_addresses[0])||'';
+      var shareEl=document.getElementById('share-address');
+      var copyEl=document.getElementById('copy-share');
+      shareEl.textContent=share||'set external_addresses to share';
+      shareEl.dataset.tip=share||'Set external_addresses to the address other peers can dial.';
+      copyEl.dataset.value=share;
       document.getElementById('connected').textContent=s.connected_peers;
       document.getElementById('dht-entries').textContent=s.dht_entries;
       if(s.uptime_secs!=null){
