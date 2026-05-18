@@ -262,6 +262,10 @@ HTTP conditions:
 - `flaky`: reserved for real-network traffic shaping; skipped when shaping is
   unavailable.
 
+Container HTTP mode builds the resolved benchmark store path, not the package
+name, so it measures substitute import for the target item without pulling
+unrelated package dependencies into the isolated daemon database.
+
 The preferred mirror order for benchmark defaults is:
 
 - `https://ci.guix.trop.in`
@@ -386,7 +390,8 @@ write `/gnu/store`, because raw `guix-daemon` imports substituted nars into
 the store even with `--max-jobs=0`. If the host exposes `/gnu/store` read-only,
 the harness fails at preflight before starting nodes. Some local container
 setups can create new store entries but cannot rewrite metadata on existing
-host store paths; HTTP-only imports may then fail after substitutes are found.
+host store paths; HTTP-only imports are reported as skipped when substitutes
+are found but the isolated daemon cannot make an existing store path writable.
 The disposable VM proof is the authoritative full-store-isolation check; the
 benchmark harness remains the faster controlled timing tool.
 

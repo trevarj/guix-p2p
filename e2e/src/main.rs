@@ -2236,7 +2236,7 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                         let result = match mode {
                             BenchmarkMode::Http => run_http_benchmark(
                                 &run_dir,
-                                &package.name,
+                                &package.store_path,
                                 &tools,
                                 condition.substitute_urls(),
                             )
@@ -2307,6 +2307,34 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                             }),
                             Err(e) => {
                                 let mut message = format_error_chain(&e);
+                                if *mode == BenchmarkMode::Http
+                                    && is_read_only_store_import_error(&message)
+                                {
+                                    records.push(BenchmarkRecord {
+                                        tier: package.tier,
+                                        package: package.name.clone(),
+                                        store_path: package.store_path.clone(),
+                                        nar_hash: package.nar_hash.clone(),
+                                        nar_size: None,
+                                        mode: *mode,
+                                        http_condition: *condition,
+                                        seed_count,
+                                        iteration,
+                                        elapsed_ms: None,
+                                        success: false,
+                                        skipped: true,
+                                        p2p_evidence: false,
+                                        http_evidence: false,
+                                        provider_count: None,
+                                        run_dir: run_dir.clone(),
+                                        error: None,
+                                        skip_reason: Some(read_only_store_import_skip_reason(
+                                            &message,
+                                        )),
+                                        phases: BenchmarkPhaseTimings::default(),
+                                    });
+                                    continue;
+                                }
                                 let failure_run_dir = match write_benchmark_failure_log(
                                     &base,
                                     &package.name,
@@ -2467,6 +2495,22 @@ fn write_read_only_store_skip_report(
     tracing::info!("benchmark CSV: {}", csv_path.display());
     tracing::info!("benchmark report: docs/benchmark-results.md");
     Ok(())
+}
+
+fn is_read_only_store_import_error(message: &str) -> bool {
+    message.contains("Read-only file system")
+        && message.contains("making `/gnu/store/")
+        && message.contains("writable")
+}
+
+fn read_only_store_import_skip_reason(message: &str) -> String {
+    let detail = message
+        .lines()
+        .find(|line| is_read_only_store_import_error(line))
+        .unwrap_or("isolated guix-daemon could not import into the local /gnu/store");
+    format!(
+        "local container store isolation is incomplete; HTTP substitutes were found, but {detail}"
+    )
 }
 
 fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
@@ -5537,6 +5581,19 @@ mod tests {
                 "/gnu/store/c".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn detects_read_only_store_import_errors() {
+        let message = "guix build failed\nguix build: error: making \
+                       `/gnu/store/example-bash-static' writable: Read-only file system";
+
+        assert!(is_read_only_store_import_error(message));
+        assert!(
+            read_only_store_import_skip_reason(message)
+                .contains("local container store isolation is incomplete")
+        );
+        assert!(!is_read_only_store_import_error("network unreachable"));
     }
 
     #[test]
