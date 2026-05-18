@@ -244,6 +244,13 @@ Modes:
 - `p2p-first`: seed nodes provide the NAR, fetch node tries P2P before HTTP.
 - `http-first`: seed nodes provide the NAR, fetch node tries HTTP before P2P.
 
+The local container harness starts isolated raw `guix-daemon` processes. Those
+daemon containers expose both the raw daemon closure and the exact `guix`
+command closure exported through `GUIX`, so Guix can spawn its built-in
+`substitute` command inside the container namespace. Extension-enabled daemon
+containers also export the release binary runtime library path before Guix
+execs the `guix-p2p` relay.
+
 HTTP conditions:
 
 - `normal`: preferred substitute mirrors first, then the broader fallback list.
@@ -377,9 +384,11 @@ If a kept temp directory contains container-owned files, rerun with a fresh
 The smoke and benchmark harnesses require the test container to be able to
 write `/gnu/store`, because raw `guix-daemon` imports substituted nars into
 the store even with `--max-jobs=0`. If the host exposes `/gnu/store` read-only,
-the harness fails at preflight before starting nodes. The disposable VM proof
-is the authoritative full-store-isolation check; the benchmark harness remains
-the faster controlled timing tool.
+the harness fails at preflight before starting nodes. Some local container
+setups can create new store entries but cannot rewrite metadata on existing
+host store paths; HTTP-only imports may then fail after substitutes are found.
+The disposable VM proof is the authoritative full-store-isolation check; the
+benchmark harness remains the faster controlled timing tool.
 
 ## Future Benchmark Work
 

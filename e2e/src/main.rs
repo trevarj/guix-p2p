@@ -2993,6 +2993,10 @@ fn guix_container_command_with_packages(
     guix_container_command_with_packages_and_exposes(tools, base, vm_direct, packages, &[])
 }
 
+fn combined_exposes(left: &[String], right: &[String]) -> Vec<String> {
+    left.iter().chain(right.iter()).cloned().collect::<BTreeSet<_>>().into_iter().collect()
+}
+
 fn guix_container_command_with_packages_and_exposes(
     tools: &HarnessTools,
     base: &std::path::Path,
@@ -3268,12 +3272,14 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
     wait_unix_socket(&node_b_socket, "node B relay socket")?;
 
     let guix_state = prepare_guix_daemon_state(&node_b_dir)?;
+    let daemon_exposes =
+        combined_exposes(&spec.tools.guix_daemon_closure, &spec.tools.real_guix_closure);
     let mut daemon_cmd = guix_container_command_with_packages_and_exposes(
         spec.tools,
         spec.base,
         spec.vm_direct,
         &["libgcrypt", "gcc-toolchain"],
-        &spec.tools.guix_daemon_closure,
+        &daemon_exposes,
     );
     daemon_cmd
         .arg("/bin/sh")
@@ -3281,14 +3287,16 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         .arg(format!(
             "export HOME={}; export GUIX={}; export GUIX_STATE_DIRECTORY={}; export \
              GUIX_CONFIGURATION_DIRECTORY={}; export GUIX_EXTENSIONS_PATH={}${{GUIX_EXTENSIONS_PATH:+:$GUIX_EXTENSIONS_PATH}}; export \
-             GUIX_P2P_SOCKET={}; export GUIX_P2P_BIN={}; exec \"$@\"",
+             GUIX_P2P_SOCKET={}; export GUIX_P2P_BIN={}; export \
+             LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}; exec \"$@\"",
             shell_quote(&node_b_dir.display().to_string()),
             shell_quote(&spec.tools.real_guix.display().to_string()),
             shell_quote(&guix_state.state_dir.display().to_string()),
             shell_quote(&guix_state.config_dir.display().to_string()),
             shell_quote(&extension_path.parent().unwrap().display().to_string()),
             shell_quote(&node_b_socket.display().to_string()),
-            shell_quote(&spec.tools.guix_p2p.display().to_string())
+            shell_quote(&spec.tools.guix_p2p.display().to_string()),
+            shell_quote(&spec.tools.guix_p2p_library_path)
         ))
         .arg("guix-daemon-wrapper")
         .arg(&spec.tools.guix_daemon)
@@ -3422,11 +3430,12 @@ fn run_http_benchmark(
     let guix_state = prepare_guix_daemon_state(run_dir)?;
     let mut processes = ProcessSet::default();
 
-    let mut daemon_cmd = guix_container_command_with_packages(
+    let mut daemon_cmd = guix_container_command_with_packages_and_exposes(
         tools,
         run_dir,
         false,
         &["guix", "libgcrypt", "gcc-toolchain"],
+        &tools.real_guix_closure,
     );
     daemon_cmd
         .arg("/bin/sh")
@@ -5513,6 +5522,21 @@ mod tests {
             Some("/gnu/store/raw-guix-daemon/bin/guix-daemon")
         );
         assert_eq!(parse_guix_daemon_launcher_exec("#!/bin/sh\nexec guix-daemon"), None);
+    }
+
+    #[test]
+    fn combined_exposes_deduplicates_paths() {
+        let left = vec!["/gnu/store/a".to_string(), "/gnu/store/b".to_string()];
+        let right = vec!["/gnu/store/b".to_string(), "/gnu/store/c".to_string()];
+
+        assert_eq!(
+            combined_exposes(&left, &right),
+            vec![
+                "/gnu/store/a".to_string(),
+                "/gnu/store/b".to_string(),
+                "/gnu/store/c".to_string()
+            ]
+        );
     }
 
     #[test]
