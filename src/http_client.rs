@@ -193,8 +193,30 @@ fn decompress_zstd(data: &[u8]) -> Result<Vec<u8>, HttpClientError> {
     Ok(output)
 }
 
-fn decompress_lzip(_data: &[u8]) -> Result<Vec<u8>, HttpClientError> {
-    Err(HttpClientError::Decompression(
-        "lzip decompression not yet supported; use gzip or zstd".into(),
-    ))
+fn decompress_lzip(data: &[u8]) -> Result<Vec<u8>, HttpClientError> {
+    use std::io::Read;
+    let mut decoder = lzma_rust2::LzipReader::new(data);
+    let mut output = Vec::with_capacity(data.len() * 4);
+    decoder
+        .read_to_end(&mut output)
+        .map_err(|e| HttpClientError::Decompression(format!("lzip: {}", e)))?;
+    Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decompresses_lzip_data() {
+        let compressed = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            "TFpJUAEMADOdSVdY8uL3xFsdz3xwxWYVvPpg1Ka6hh+L//++hUAAMU+W7hYAAAAAAAAAOwAAAAAAAAA=",
+        )
+        .unwrap();
+
+        let decompressed = decompress_lzip(&compressed).unwrap();
+
+        assert_eq!(decompressed, b"guix-p2p lzip fixture\n");
+    }
 }

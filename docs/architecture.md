@@ -297,8 +297,8 @@ The policy also affects the `have` query:
 ### HTTP Nar Download
 
 When the policy allows HTTP fallback, nars are downloaded from the substitute
-server URLs in the narinfo. Decompression supports gzip and zstd; lzip is not
-yet supported. The preference order is: zstd > gzip > none.
+server URLs in the narinfo. Decompression supports zstd, gzip, lzip, and
+uncompressed NARs. The preference order is: zstd > gzip > lzip > none.
 
 ### Safety thresholds:
 - DHT returns < `min_providers` peers → skip swarm, reply not-found. The
@@ -333,6 +333,8 @@ Narinfo flow:
 | `toml` | TOML config file parsing |
 | `flate2` | Gzip decompression for HTTP nar downloads |
 | `zstd` | Zstd decompression for HTTP nar downloads |
+| `lzma-rust2` | Lzip decompression for HTTP nar downloads |
+| `leaky-bucket` | Shared async upload/download rate limiting |
 | `serde_bytes` | Efficient byte slice serialization for protocol messages |
 | `clap` | CLI argument parsing |
 | `tracing` / `tracing-subscriber` | Structured logging with env-filter |

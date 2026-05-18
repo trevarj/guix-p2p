@@ -35,8 +35,9 @@ toml = "0.8"
 toml_edit = "0.22"
 flate2 = "1"
 zstd = "0.13"
-async-compression = { version = "0.4", features = ["tokio", "gzip", "zstd"] }
 tokio-util = { version = "0.7", features = ["io"] }
+lzma-rust2 = { version = "0.16", default-features = false, features = ["std", "lzip"] }
+leaky-bucket = "1.1"
 
 [dev-dependencies]
 tempfile = "3"

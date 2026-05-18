@@ -1,6 +1,6 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use tokio::sync::Mutex;
+use leaky_bucket::RateLimiter;
 
 #[derive(Debug, Clone, Default)]
 pub struct BandwidthConfig {
@@ -10,90 +10,62 @@ pub struct BandwidthConfig {
 
 #[derive(Debug)]
 pub struct BandwidthLimiter {
-    config: BandwidthConfig,
-    state: Mutex<LimiterState>,
-}
-
-#[derive(Debug)]
-struct LimiterState {
-    upload_tokens: f64,
-    download_tokens: f64,
-    last_refill: Instant,
+    upload: Option<RateLimiter>,
+    download: Option<RateLimiter>,
 }
 
 impl BandwidthLimiter {
     pub fn new(config: BandwidthConfig) -> Self {
-        let caps = (
-            config.upload_limit_bytes_per_sec.unwrap_or(u64::MAX) as f64,
-            config.download_limit_bytes_per_sec.unwrap_or(u64::MAX) as f64,
-        );
-
         BandwidthLimiter {
-            config,
-            state: Mutex::new(LimiterState {
-                upload_tokens: caps.0,
-                download_tokens: caps.1,
-                last_refill: Instant::now(),
-            }),
+            upload: rate_limiter(config.upload_limit_bytes_per_sec),
+            download: rate_limiter(config.download_limit_bytes_per_sec),
         }
     }
 
     pub async fn wait_for_upload(&self, bytes: u64) {
-        self.consume(bytes, Direction::Upload).await;
+        consume(&self.upload, bytes).await;
     }
 
     pub async fn wait_for_download(&self, bytes: u64) {
-        self.consume(bytes, Direction::Download).await;
-    }
-
-    async fn consume(&self, bytes: u64, direction: Direction) {
-        let cap = match direction {
-            Direction::Upload => self.config.upload_limit_bytes_per_sec,
-            Direction::Download => self.config.download_limit_bytes_per_sec,
-        };
-
-        if cap.is_none() || cap == Some(0) {
-            return;
-        }
-
-        let rate = cap.unwrap() as f64;
-        let mut state = self.state.lock().await;
-        let now = Instant::now();
-        let elapsed = now.duration_since(state.last_refill).as_secs_f64();
-
-        state.upload_tokens = (state.upload_tokens + elapsed * rate).min(rate);
-        state.download_tokens = (state.download_tokens + elapsed * rate).min(rate);
-        state.last_refill = now;
-
-        let tokens = match direction {
-            Direction::Upload => &mut state.upload_tokens,
-            Direction::Download => &mut state.download_tokens,
-        };
-
-        let needed = bytes as f64;
-        if *tokens >= needed {
-            *tokens -= needed;
-            return;
-        }
-
-        let deficit = needed - *tokens;
-        *tokens = 0.0;
-        drop(state);
-
-        let wait = Duration::from_secs_f64(deficit / rate);
-        tokio::time::sleep(wait).await;
+        consume(&self.download, bytes).await;
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum Direction {
-    Upload,
-    Download,
+fn rate_limiter(bytes_per_sec: Option<u64>) -> Option<RateLimiter> {
+    let rate = bytes_per_sec?;
+    if rate == 0 {
+        return None;
+    }
+
+    let rate = usize::try_from(rate).unwrap_or(usize::MAX);
+    Some(
+        RateLimiter::builder()
+            .max(rate)
+            .initial(rate)
+            .refill(rate)
+            .interval(Duration::from_secs(1))
+            .build(),
+    )
+}
+
+async fn consume(limiter: &Option<RateLimiter>, bytes: u64) {
+    let Some(limiter) = limiter else {
+        return;
+    };
+
+    let mut remaining = usize::try_from(bytes).unwrap_or(usize::MAX);
+    let max = limiter.max().max(1);
+    while remaining > 0 {
+        let chunk = remaining.min(max);
+        limiter.acquire(chunk).await;
+        remaining -= chunk;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[tokio::test]
     async fn test_no_limit_is_noop() {
@@ -129,5 +101,29 @@ mod tests {
 
         assert!(elapsed >= Duration::from_millis(9_000));
         assert!(elapsed < Duration::from_millis(12_000));
+    }
+
+    #[tokio::test]
+    async fn concurrent_uploads_share_one_limit() {
+        let config =
+            BandwidthConfig { upload_limit_bytes_per_sec: Some(100_000), ..Default::default() };
+        let limiter = std::sync::Arc::new(BandwidthLimiter::new(config));
+
+        let start = Instant::now();
+        let first = tokio::spawn({
+            let limiter = limiter.clone();
+            async move { limiter.wait_for_upload(100_000).await }
+        });
+        let second = tokio::spawn({
+            let limiter = limiter.clone();
+            async move { limiter.wait_for_upload(100_000).await }
+        });
+
+        first.await.unwrap();
+        second.await.unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(elapsed >= Duration::from_millis(900));
+        assert!(elapsed < Duration::from_millis(1_500));
     }
 }
