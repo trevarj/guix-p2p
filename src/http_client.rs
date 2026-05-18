@@ -382,6 +382,10 @@ mod tests {
         NarUrl { url: url.into(), compression: compression.into(), file_size }
     }
 
+    fn narinfo_with_hash_and_urls(nar_hash: String, urls: Vec<NarUrl>) -> Narinfo {
+        Narinfo { nar_hash, ..narinfo_with_urls(urls) }
+    }
+
     #[test]
     fn download_urls_expands_relative_url_across_substitute_bases() {
         let base_urls = vec![
@@ -490,6 +494,43 @@ mod tests {
 
         assert!(nar_hash_matches(hash, b"raw nar bytes").unwrap());
         assert!(!nar_hash_matches(hash, b"different nar bytes").unwrap());
+    }
+
+    #[tokio::test]
+    async fn download_nar_http_skips_mismatched_candidate() {
+        use axum::{Router, routing::get};
+        use sha2::{Digest, Sha256};
+
+        let app = Router::new()
+            .route("/bad", get(|| async { "bad nar" }))
+            .route("/good", get(|| async { "good nar" }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let good_hash = format!("sha256:{}", hex::encode(Sha256::digest(b"good nar")));
+        let narinfo = narinfo_with_hash_and_urls(
+            good_hash,
+            vec![nar_url("bad", "none", 7), nar_url("good", "none", 8)],
+        );
+        let mut config = crate::config::Config::load(
+            None,
+            None,
+            None,
+            Some("/tmp/guix-p2p-test".into()),
+            Some(base_url.clone()),
+            None,
+        );
+        config.request_timeout_secs = 5;
+        let client = create_http_client(&config).unwrap();
+
+        let download = download_nar_http(&config, &narinfo, &client, None).await.unwrap();
+
+        server.abort();
+        assert_eq!(download.data, b"good nar");
+        assert_eq!(download.source_url, format!("{}/good", base_url));
     }
 
     #[test]
