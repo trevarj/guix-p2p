@@ -301,6 +301,8 @@ server URLs in the narinfo. Decompression supports zstd, gzip, lzip, and
 uncompressed NARs. The preference order is: zstd > gzip > lzip > none.
 Unsupported compression entries are skipped when a supported URL is available;
 otherwise the download fails before hash verification.
+Relative narinfo URLs are tried against each configured substitute base URL in
+order. Absolute narinfo URLs are fetched directly.
 
 ### Safety thresholds:
 - DHT returns < `min_providers` peers → skip swarm, reply not-found. The

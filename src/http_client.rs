@@ -122,34 +122,58 @@ pub async fn download_nar_http(
         None => return Err(HttpClientError::NotFound),
     };
 
-    let full_url = format!(
-        "{}/{}",
-        config
-            .substitute_urls
-            .first()
-            .map(|s| s.trim_end_matches('/'))
-            .unwrap_or("https://bordeaux.guix.gnu.org"),
-        download.url
-    );
+    let mut last_error = None;
+    for full_url in download_urls(config, &download.url) {
+        tracing::info!(
+            "Downloading nar via HTTP: {} ({})",
+            full_url,
+            download.compression.as_str()
+        );
 
-    tracing::info!("Downloading nar via HTTP: {} ({})", full_url, download.compression.as_str());
+        let response = match client.get(&full_url).send().await {
+            Ok(response) => response,
+            Err(err) => {
+                last_error = Some(HttpClientError::Http(err));
+                continue;
+            },
+        };
 
-    let response = client.get(&full_url).send().await?;
-    if !response.status().is_success() {
-        return Err(HttpClientError::Http(response.error_for_status().unwrap_err()));
+        if !response.status().is_success() {
+            let err = response.error_for_status().unwrap_err();
+            last_error = Some(HttpClientError::Http(err));
+            continue;
+        }
+
+        let compressed = response.bytes().await?;
+        let nar_data = download.compression.decompress(&compressed)?;
+
+        tracing::info!(
+            "HTTP nar download complete: {} bytes (compressed {} bytes)",
+            nar_data.len(),
+            compressed.len()
+        );
+
+        return Ok(nar_data);
     }
 
-    let compressed = response.bytes().await?;
+    Err(last_error.unwrap_or(HttpClientError::NotFound))
+}
 
-    let nar_data = download.compression.decompress(&compressed)?;
+fn download_urls(config: &Config, nar_url: &str) -> Vec<String> {
+    download_urls_from_bases(&config.substitute_urls, nar_url)
+}
 
-    tracing::info!(
-        "HTTP nar download complete: {} bytes (compressed {} bytes)",
-        nar_data.len(),
-        compressed.len()
-    );
+fn download_urls_from_bases(base_urls: &[String], nar_url: &str) -> Vec<String> {
+    if nar_url.starts_with("http://") || nar_url.starts_with("https://") {
+        return vec![nar_url.to_string()];
+    }
 
-    Ok(nar_data)
+    base_urls
+        .iter()
+        .map(|base_url| {
+            format!("{}/{}", base_url.trim_end_matches('/'), nar_url.trim_start_matches('/'))
+        })
+        .collect()
 }
 
 /// Choose the best nar URL based on compression and file size.
@@ -282,6 +306,33 @@ mod tests {
 
     fn nar_url(url: &str, compression: &str, file_size: u64) -> NarUrl {
         NarUrl { url: url.into(), compression: compression.into(), file_size }
+    }
+
+    #[test]
+    fn download_urls_expands_relative_url_across_substitute_bases() {
+        let base_urls = vec![
+            "https://bordeaux.guix.gnu.org/".to_string(),
+            "https://ci.guix.gnu.org".to_string(),
+        ];
+
+        let urls = download_urls_from_bases(&base_urls, "/nar/zstd/example");
+
+        assert_eq!(
+            urls,
+            vec![
+                "https://bordeaux.guix.gnu.org/nar/zstd/example",
+                "https://ci.guix.gnu.org/nar/zstd/example",
+            ]
+        );
+    }
+
+    #[test]
+    fn download_urls_keeps_absolute_url_as_single_candidate() {
+        let base_urls = vec!["https://bordeaux.guix.gnu.org".to_string()];
+
+        let urls = download_urls_from_bases(&base_urls, "https://mirror.example/nar/gzip/example");
+
+        assert_eq!(urls, vec!["https://mirror.example/nar/gzip/example"]);
     }
 
     #[test]
