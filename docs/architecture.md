@@ -302,7 +302,9 @@ uncompressed NARs. The preference order is: zstd > gzip > lzip > none.
 Unsupported compression entries are skipped when a supported URL is available;
 otherwise the download fails before hash verification.
 Relative narinfo URLs are tried against each configured substitute base URL in
-order. Absolute narinfo URLs are fetched directly.
+order. Absolute narinfo URLs are fetched directly. If a preferred compression
+URL fails, lower-preference URLs from the same narinfo are tried before HTTP
+fallback gives up.
 
 ### Safety thresholds:
 - DHT returns < `min_providers` peers → skip swarm, reply not-found. The

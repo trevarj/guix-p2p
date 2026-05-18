@@ -116,44 +116,51 @@ pub async fn download_nar_http(
     narinfo: &Narinfo,
     client: &reqwest::Client,
 ) -> Result<Vec<u8>, HttpClientError> {
-    let best = choose_best_url(narinfo)?;
-    let download = match best {
-        Some(download) => download,
-        None => return Err(HttpClientError::NotFound),
-    };
+    let downloads = download_candidates(narinfo)?;
+    if downloads.is_empty() {
+        return Err(HttpClientError::NotFound);
+    }
 
     let mut last_error = None;
-    for full_url in download_urls(config, &download.url) {
-        tracing::info!(
-            "Downloading nar via HTTP: {} ({})",
-            full_url,
-            download.compression.as_str()
-        );
+    for download in downloads {
+        for full_url in download_urls(config, &download.url) {
+            tracing::info!(
+                "Downloading nar via HTTP: {} ({})",
+                full_url,
+                download.compression.as_str()
+            );
 
-        let response = match client.get(&full_url).send().await {
-            Ok(response) => response,
-            Err(err) => {
+            let response = match client.get(&full_url).send().await {
+                Ok(response) => response,
+                Err(err) => {
+                    last_error = Some(HttpClientError::Http(err));
+                    continue;
+                },
+            };
+
+            if !response.status().is_success() {
+                let err = response.error_for_status().unwrap_err();
                 last_error = Some(HttpClientError::Http(err));
                 continue;
-            },
-        };
+            }
 
-        if !response.status().is_success() {
-            let err = response.error_for_status().unwrap_err();
-            last_error = Some(HttpClientError::Http(err));
-            continue;
+            let compressed = response.bytes().await?;
+            let nar_data = match download.compression.decompress(&compressed) {
+                Ok(nar_data) => nar_data,
+                Err(err) => {
+                    last_error = Some(err);
+                    continue;
+                },
+            };
+
+            tracing::info!(
+                "HTTP nar download complete: {} bytes (compressed {} bytes)",
+                nar_data.len(),
+                compressed.len()
+            );
+
+            return Ok(nar_data);
         }
-
-        let compressed = response.bytes().await?;
-        let nar_data = download.compression.decompress(&compressed)?;
-
-        tracing::info!(
-            "HTTP nar download complete: {} bytes (compressed {} bytes)",
-            nar_data.len(),
-            compressed.len()
-        );
-
-        return Ok(nar_data);
     }
 
     Err(last_error.unwrap_or(HttpClientError::NotFound))
@@ -176,16 +183,17 @@ fn download_urls_from_bases(base_urls: &[String], nar_url: &str) -> Vec<String> 
         .collect()
 }
 
-/// Choose the best nar URL based on compression and file size.
+/// Build nar download candidates based on compression preference.
 /// Preference: zstd (best ratio + speed) > gzip (widely available) > lzip > none.
-fn choose_best_url(narinfo: &Narinfo) -> Result<Option<NarDownload>, HttpClientError> {
+fn download_candidates(narinfo: &Narinfo) -> Result<Vec<NarDownload>, HttpClientError> {
+    let mut candidates = Vec::new();
     let mut unsupported_compression = None;
 
     for pref in NarCompression::preference() {
         for url_entry in &narinfo.urls {
             match NarCompression::from_nar_url(url_entry) {
                 Ok(compression) if compression == pref => {
-                    return Ok(Some(NarDownload { url: url_entry.url.clone(), compression }));
+                    candidates.push(NarDownload { url: url_entry.url.clone(), compression });
                 },
                 Ok(_) => {},
                 Err(err) => {
@@ -195,10 +203,13 @@ fn choose_best_url(narinfo: &Narinfo) -> Result<Option<NarDownload>, HttpClientE
         }
     }
 
-    match unsupported_compression {
-        Some(err) => Err(err),
-        None => Ok(None),
+    if candidates.is_empty()
+        && let Some(err) = unsupported_compression
+    {
+        return Err(err);
     }
+
+    Ok(candidates)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -336,37 +347,45 @@ mod tests {
     }
 
     #[test]
-    fn choose_best_url_uses_compression_preference() {
+    fn download_candidates_use_compression_preference() {
         let narinfo = narinfo_with_urls(vec![
             nar_url("nar/lzip/example", "lzip", 10),
             nar_url("nar/gzip/example", "gzip", 20),
             nar_url("nar/zstd/example", "zstd", 30),
         ]);
 
-        let selected = choose_best_url(&narinfo).unwrap().unwrap();
+        let candidates = download_candidates(&narinfo).unwrap();
 
-        assert_eq!(selected.url, "nar/zstd/example");
-        assert_eq!(selected.compression, NarCompression::Zstd);
+        assert_eq!(
+            candidates,
+            vec![
+                NarDownload { url: "nar/zstd/example".into(), compression: NarCompression::Zstd },
+                NarDownload { url: "nar/gzip/example".into(), compression: NarCompression::Gzip },
+                NarDownload { url: "nar/lzip/example".into(), compression: NarCompression::Lzip },
+            ]
+        );
     }
 
     #[test]
-    fn choose_best_url_skips_unknown_when_supported_url_exists() {
+    fn download_candidates_skip_unknown_when_supported_url_exists() {
         let narinfo = narinfo_with_urls(vec![
             nar_url("nar/br/example", "br", 10),
             nar_url("nar/gzip/example", "gzip", 20),
         ]);
 
-        let selected = choose_best_url(&narinfo).unwrap().unwrap();
+        let candidates = download_candidates(&narinfo).unwrap();
 
-        assert_eq!(selected.url, "nar/gzip/example");
-        assert_eq!(selected.compression, NarCompression::Gzip);
+        assert_eq!(
+            candidates,
+            vec![NarDownload { url: "nar/gzip/example".into(), compression: NarCompression::Gzip }]
+        );
     }
 
     #[test]
-    fn choose_best_url_rejects_all_unknown_compressions() {
+    fn download_candidates_reject_all_unknown_compressions() {
         let narinfo = narinfo_with_urls(vec![nar_url("nar/br/example", "br", 10)]);
 
-        let err = choose_best_url(&narinfo).unwrap_err();
+        let err = download_candidates(&narinfo).unwrap_err();
 
         assert!(err.to_string().contains("unsupported compression: br"));
     }
