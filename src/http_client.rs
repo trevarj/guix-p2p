@@ -553,6 +553,49 @@ mod tests {
         assert!(progress_events.contains(&(format!("{}/good", base_url), 8, 8)));
     }
 
+    #[tokio::test]
+    async fn download_nar_http_tries_next_substitute_base() {
+        use axum::{Router, http::StatusCode, routing::get};
+        use sha2::{Digest, Sha256};
+
+        let missing_app =
+            Router::new().route("/nar/example", get(|| async { StatusCode::NOT_FOUND }));
+        let missing_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let missing_base = format!("http://{}", missing_listener.local_addr().unwrap());
+        let missing_server = tokio::spawn(async move {
+            axum::serve(missing_listener, missing_app).await.unwrap();
+        });
+
+        let good_app = Router::new().route("/nar/example", get(|| async { "good nar" }));
+        let good_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let good_base = format!("http://{}", good_listener.local_addr().unwrap());
+        let good_server = tokio::spawn(async move {
+            axum::serve(good_listener, good_app).await.unwrap();
+        });
+
+        let good_hash = format!("sha256:{}", hex::encode(Sha256::digest(b"good nar")));
+        let narinfo =
+            narinfo_with_hash_and_urls(good_hash, vec![nar_url("nar/example", "none", 8)]);
+        let mut config = crate::config::Config::load(
+            None,
+            None,
+            None,
+            Some("/tmp/guix-p2p-test".into()),
+            None,
+            None,
+        );
+        config.substitute_urls = vec![missing_base, good_base.clone()];
+        config.request_timeout_secs = 5;
+        let client = create_http_client(&config).unwrap();
+
+        let download = download_nar_http(&config, &narinfo, &client, None, None).await.unwrap();
+
+        missing_server.abort();
+        good_server.abort();
+        assert_eq!(download.data, b"good nar");
+        assert_eq!(download.source_url, format!("{}/nar/example", good_base));
+    }
+
     #[test]
     fn malformed_lzip_returns_decompression_error() {
         let err = NarCompression::Lzip.decompress(b"not lzip").unwrap_err();
