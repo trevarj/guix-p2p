@@ -313,7 +313,9 @@ URL, response length when known, and compressed bytes transferred.
 Each HTTP candidate is decompressed and checked against the narinfo `NarHash`.
 Hash mismatches fall through to the next HTTP candidate when one is available;
 if every candidate fails integrity, the substituter still reports
-`hash-mismatch`.
+`hash-mismatch`. If every candidate fails before integrity can be checked, the
+HTTP client reports that all candidates failed and includes the last underlying
+error.
 
 ### Safety thresholds:
 - DHT returns < `min_providers` peers → skip swarm, reply not-found. The

@@ -17,6 +17,8 @@ pub enum HttpClientError {
     BadSignature,
     #[error("decompression error: {0}")]
     Decompression(String),
+    #[error("all HTTP nar candidates failed: {0}")]
+    CandidatesFailed(String),
     #[error("{0}")]
     Other(String),
 }
@@ -26,9 +28,11 @@ pub struct TorConfig {
     pub only: bool,
 }
 
+#[derive(Debug)]
 pub struct HttpNarDownload {
     pub data: Vec<u8>,
     pub source_url: String,
+    pub verified: bool,
 }
 
 pub type HttpProgress<'a> = dyn FnMut(&str, u64, u64) + Send + 'a;
@@ -184,7 +188,7 @@ pub async fn download_nar_http(
                     full_url
                 );
                 last_mismatched_download =
-                    Some(HttpNarDownload { data: nar_data, source_url: full_url });
+                    Some(HttpNarDownload { data: nar_data, source_url: full_url, verified: false });
                 continue;
             }
 
@@ -194,7 +198,7 @@ pub async fn download_nar_http(
                 compressed.len()
             );
 
-            return Ok(HttpNarDownload { data: nar_data, source_url: full_url });
+            return Ok(HttpNarDownload { data: nar_data, source_url: full_url, verified: true });
         }
     }
 
@@ -202,7 +206,10 @@ pub async fn download_nar_http(
         return Ok(download);
     }
 
-    Err(last_error.unwrap_or(HttpClientError::NotFound))
+    match last_error {
+        Some(err) => Err(HttpClientError::CandidatesFailed(err.to_string())),
+        None => Err(HttpClientError::NotFound),
+    }
 }
 
 fn nar_hash_matches(expected_nar_hash: &str, nar_data: &[u8]) -> Result<bool, HttpClientError> {
@@ -550,6 +557,7 @@ mod tests {
         server.abort();
         assert_eq!(download.data, b"good nar");
         assert_eq!(download.source_url, format!("{}/good", base_url));
+        assert!(download.verified);
         assert!(progress_events.contains(&(format!("{}/good", base_url), 8, 8)));
     }
 
@@ -594,6 +602,7 @@ mod tests {
         good_server.abort();
         assert_eq!(download.data, b"good nar");
         assert_eq!(download.source_url, format!("{}/nar/example", good_base));
+        assert!(download.verified);
     }
 
     #[tokio::test]
@@ -637,6 +646,72 @@ mod tests {
         server.abort();
         assert_eq!(download.data, b"good nar");
         assert_eq!(download.source_url, format!("{}/good-gzip", base_url));
+        assert!(download.verified);
+    }
+
+    #[tokio::test]
+    async fn download_nar_http_returns_unverified_last_mismatch() {
+        use axum::{Router, routing::get};
+        use sha2::{Digest, Sha256};
+
+        let app = Router::new().route("/bad", get(|| async { "bad nar" }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let good_hash = format!("sha256:{}", hex::encode(Sha256::digest(b"good nar")));
+        let narinfo = narinfo_with_hash_and_urls(good_hash, vec![nar_url("bad", "none", 7)]);
+        let mut config = crate::config::Config::load(
+            None,
+            None,
+            None,
+            Some("/tmp/guix-p2p-test".into()),
+            Some(base_url.clone()),
+            None,
+        );
+        config.request_timeout_secs = 5;
+        let client = create_http_client(&config).unwrap();
+
+        let download = download_nar_http(&config, &narinfo, &client, None, None).await.unwrap();
+
+        server.abort();
+        assert_eq!(download.data, b"bad nar");
+        assert_eq!(download.source_url, format!("{}/bad", base_url));
+        assert!(!download.verified);
+    }
+
+    #[tokio::test]
+    async fn download_nar_http_reports_all_candidates_failed() {
+        use axum::{Router, routing::get};
+
+        let app = Router::new().route("/bad-zstd", get(|| async { "not zstd" }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let narinfo = narinfo_with_hash_and_urls(
+            "sha256:4f78d3e7187277986632b4e63f366dae5812a000529278dd03f93f713517b394".into(),
+            vec![nar_url("bad-zstd", "zstd", 8)],
+        );
+        let mut config = crate::config::Config::load(
+            None,
+            None,
+            None,
+            Some("/tmp/guix-p2p-test".into()),
+            Some(base_url),
+            None,
+        );
+        config.request_timeout_secs = 5;
+        let client = create_http_client(&config).unwrap();
+
+        let err = download_nar_http(&config, &narinfo, &client, None, None).await.unwrap_err();
+
+        server.abort();
+        assert!(matches!(err, HttpClientError::CandidatesFailed(_)));
     }
 
     #[test]
