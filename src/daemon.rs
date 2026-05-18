@@ -561,6 +561,7 @@ async fn try_swarm_substitute(
                         &narinfo,
                         client,
                         event_tx,
+                        reply,
                         &store_path,
                         bandwidth_limiter,
                     )
@@ -579,6 +580,7 @@ async fn try_swarm_substitute(
                 &narinfo,
                 client,
                 event_tx,
+                reply,
                 &store_path,
                 bandwidth_limiter,
             )
@@ -908,16 +910,23 @@ async fn try_http_download(
     narinfo: &crate::narinfo::Narinfo,
     client: &reqwest::Client,
     _event_tx: &dashboard::EventBus,
+    reply: &mut ReplyWriter,
     store_path: &str,
     bandwidth_limiter: &Arc<BandwidthLimiter>,
 ) -> Result<DownloadedNar, String> {
     tracing::info!(store = %store_path, "Attempting HTTP nar download");
+
+    let mut progress = |source_url: &str, total: u64, transferred: u64| {
+        let _ =
+            reply.write_trace(&format_trace_progress(store_path, source_url, total, transferred));
+    };
 
     match crate::http_client::download_nar_http(
         config,
         narinfo,
         client,
         Some(bandwidth_limiter.as_ref()),
+        Some(&mut progress),
     )
     .await
     {

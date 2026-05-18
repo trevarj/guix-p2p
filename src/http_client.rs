@@ -31,6 +31,8 @@ pub struct HttpNarDownload {
     pub source_url: String,
 }
 
+pub type HttpProgress<'a> = dyn FnMut(&str, u64, u64) + Send + 'a;
+
 pub fn create_http_client(config: &Config) -> Result<reqwest::Client, HttpClientError> {
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(config.request_timeout_secs));
@@ -134,6 +136,7 @@ pub async fn download_nar_http(
     narinfo: &Narinfo,
     client: &reqwest::Client,
     bandwidth_limiter: Option<&BandwidthLimiter>,
+    mut progress: Option<&mut HttpProgress<'_>>,
 ) -> Result<HttpNarDownload, HttpClientError> {
     let downloads = download_candidates(narinfo)?;
     if downloads.is_empty() {
@@ -164,7 +167,9 @@ pub async fn download_nar_http(
                 continue;
             }
 
-            let compressed = read_response_body(response, bandwidth_limiter).await?;
+            let compressed =
+                read_response_body(response, bandwidth_limiter, progress.as_deref_mut(), &full_url)
+                    .await?;
             let nar_data = match download.compression.decompress(&compressed) {
                 Ok(nar_data) => nar_data,
                 Err(err) => {
@@ -214,15 +219,23 @@ fn nar_hash_matches(expected_nar_hash: &str, nar_data: &[u8]) -> Result<bool, Ht
 async fn read_response_body(
     response: reqwest::Response,
     bandwidth_limiter: Option<&BandwidthLimiter>,
+    mut progress: Option<&mut HttpProgress<'_>>,
+    source_url: &str,
 ) -> Result<Vec<u8>, HttpClientError> {
     use futures::StreamExt;
 
+    let total = response.content_length().unwrap_or(0);
+    let mut transferred = 0;
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         if let Some(limiter) = bandwidth_limiter {
             limiter.wait_for_download(chunk.len() as u64).await;
+        }
+        transferred += chunk.len() as u64;
+        if let Some(progress) = progress.as_mut() {
+            progress(source_url, total, transferred);
         }
         body.extend_from_slice(&chunk);
     }
@@ -526,11 +539,18 @@ mod tests {
         config.request_timeout_secs = 5;
         let client = create_http_client(&config).unwrap();
 
-        let download = download_nar_http(&config, &narinfo, &client, None).await.unwrap();
+        let mut progress_events = Vec::new();
+        let mut progress = |source_url: &str, total: u64, transferred: u64| {
+            progress_events.push((source_url.to_string(), total, transferred));
+        };
+
+        let download =
+            download_nar_http(&config, &narinfo, &client, None, Some(&mut progress)).await.unwrap();
 
         server.abort();
         assert_eq!(download.data, b"good nar");
         assert_eq!(download.source_url, format!("{}/good", base_url));
+        assert!(progress_events.contains(&(format!("{}/good", base_url), 8, 8)));
     }
 
     #[test]

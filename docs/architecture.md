@@ -308,6 +308,8 @@ URL fails, lower-preference URLs from the same narinfo are tried before HTTP
 fallback gives up.
 HTTP response chunks pass through `BandwidthLimiter` when
 `max_download_rate_kbps` is set.
+The same chunk stream emits `@ download-progress` traces with the HTTP source
+URL, response length when known, and compressed bytes transferred.
 Each HTTP candidate is decompressed and checked against the narinfo `NarHash`.
 Hash mismatches fall through to the next HTTP candidate when one is available;
 if every candidate fails integrity, the substituter still reports
