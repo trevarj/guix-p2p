@@ -25,6 +25,11 @@ pub struct TorConfig {
     pub only: bool,
 }
 
+pub struct HttpNarDownload {
+    pub data: Vec<u8>,
+    pub source_url: String,
+}
+
 pub fn create_http_client(config: &Config) -> Result<reqwest::Client, HttpClientError> {
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(config.request_timeout_secs));
@@ -109,15 +114,26 @@ async fn fetch_narinfo_from_url(
     Ok(crate::narinfo::parse_narinfo(&body)?)
 }
 
+pub fn first_nar_download_url(
+    config: &Config,
+    narinfo: &Narinfo,
+) -> Result<Option<String>, HttpClientError> {
+    let Some(download) = download_candidates(narinfo)?.into_iter().next() else {
+        return Ok(None);
+    };
+
+    Ok(download_urls(config, &download.url).into_iter().next())
+}
+
 /// Download a compressed nar from a substitute server and decompress it.
-/// Returns the raw (uncompressed) nar bytes.
+/// Returns the raw (uncompressed) nar bytes and the source URL used.
 /// Tries URLs in preference order: zstd > gzip > lzip > none.
 pub async fn download_nar_http(
     config: &Config,
     narinfo: &Narinfo,
     client: &reqwest::Client,
     bandwidth_limiter: Option<&BandwidthLimiter>,
-) -> Result<Vec<u8>, HttpClientError> {
+) -> Result<HttpNarDownload, HttpClientError> {
     let downloads = download_candidates(narinfo)?;
     if downloads.is_empty() {
         return Err(HttpClientError::NotFound);
@@ -161,7 +177,7 @@ pub async fn download_nar_http(
                 compressed.len()
             );
 
-            return Ok(nar_data);
+            return Ok(HttpNarDownload { data: nar_data, source_url: full_url });
         }
     }
 
@@ -364,6 +380,28 @@ mod tests {
         let urls = download_urls_from_bases(&base_urls, "https://mirror.example/nar/gzip/example");
 
         assert_eq!(urls, vec!["https://mirror.example/nar/gzip/example"]);
+    }
+
+    #[test]
+    fn first_nar_download_url_reports_first_candidate_url() {
+        let mut config = crate::config::Config::load(
+            None,
+            None,
+            None,
+            Some("/tmp/guix-p2p-test".into()),
+            None,
+            None,
+        );
+        config.substitute_urls =
+            vec!["https://bordeaux.guix.gnu.org".into(), "https://ci.guix.gnu.org".into()];
+        let narinfo = narinfo_with_urls(vec![
+            nar_url("nar/gzip/example", "gzip", 10),
+            nar_url("nar/zstd/example", "zstd", 20),
+        ]);
+
+        let url = first_nar_download_url(&config, &narinfo).unwrap().unwrap();
+
+        assert_eq!(url, "https://bordeaux.guix.gnu.org/nar/zstd/example");
     }
 
     #[test]

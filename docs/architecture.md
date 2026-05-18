@@ -183,7 +183,8 @@ the provider handshake and still verify the final NAR hash.
 
 Before the download, `@ download-started <path> <url> <size>` is written to
 the trace channel. After success, `@ download-succeeded <path> <url> <size>`
-is written. These match the guix-daemon build trace protocol.
+is written. P2P traces use a `p2p://<hash-part>` URL; HTTP traces use the
+selected substitute URL. These match the guix-daemon build trace protocol.
 
 ### Nar hash verification
 

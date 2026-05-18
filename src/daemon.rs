@@ -30,6 +30,11 @@ use crate::{
     },
 };
 
+struct DownloadedNar {
+    data: Vec<u8>,
+    trace_url: String,
+}
+
 mod protocol;
 
 pub use protocol::{
@@ -496,14 +501,11 @@ async fn try_swarm_substitute(
         p2p_available: false,
     });
 
+    let p2p_trace_url = format!("p2p://{}", hash_part);
     let result = match config.substitute_policy {
         SubstitutePolicy::P2pOnly => {
             tracing::info!("p2p-only policy active; HTTP nar fallback disabled");
-            let _ = reply.write_trace(&format_trace_started(
-                &store_path,
-                &format!("p2p://{}", hash_part),
-                nar_size,
-            ));
+            let _ = reply.write_trace(&format_trace_started(&store_path, &p2p_trace_url, nar_size));
             try_p2p_download(
                 config,
                 cache,
@@ -521,13 +523,10 @@ async fn try_swarm_substitute(
                 narinfo_cache,
             )
             .await
+            .map(|data| DownloadedNar { data, trace_url: p2p_trace_url.clone() })
         },
         SubstitutePolicy::P2pFirst => {
-            let _ = reply.write_trace(&format_trace_started(
-                &store_path,
-                &format!("p2p://{}", hash_part),
-                nar_size,
-            ));
+            let _ = reply.write_trace(&format_trace_started(&store_path, &p2p_trace_url, nar_size));
             match try_p2p_download(
                 config,
                 cache,
@@ -546,7 +545,7 @@ async fn try_swarm_substitute(
             )
             .await
             {
-                Ok(nar_data) => Ok(nar_data),
+                Ok(data) => Ok(DownloadedNar { data, trace_url: p2p_trace_url.clone() }),
                 Err(_) => {
                     tracing::info!(
                         hash = %nar_hash_hex,
@@ -554,7 +553,7 @@ async fn try_swarm_substitute(
                     );
                     let _ = reply.write_trace(&format_trace_started(
                         &store_path,
-                        "https://fallback",
+                        &http_trace_url(config, &narinfo),
                         nar_size,
                     ));
                     try_http_download(
@@ -570,8 +569,11 @@ async fn try_swarm_substitute(
             }
         },
         SubstitutePolicy::HttpFirst => {
-            let _ =
-                reply.write_trace(&format_trace_started(&store_path, "https://fallback", nar_size));
+            let _ = reply.write_trace(&format_trace_started(
+                &store_path,
+                &http_trace_url(config, &narinfo),
+                nar_size,
+            ));
             match try_http_download(
                 config,
                 &narinfo,
@@ -591,7 +593,7 @@ async fn try_swarm_substitute(
                     );
                     let _ = reply.write_trace(&format_trace_started(
                         &store_path,
-                        &format!("p2p://{}", hash_part),
+                        &p2p_trace_url,
                         nar_size,
                     ));
                     try_p2p_download(
@@ -611,14 +613,16 @@ async fn try_swarm_substitute(
                         narinfo_cache,
                     )
                     .await
+                    .map(|data| DownloadedNar { data, trace_url: p2p_trace_url.clone() })
                 },
             }
         },
     };
 
     match result {
-        Ok(nar_data) => {
+        Ok(download) => {
             let dest_path = PathBuf::from(dest);
+            let nar_data = download.data;
             let size = nar_data.len() as u64;
 
             // Verify nar hash against narinfo's expected hash
@@ -738,11 +742,8 @@ async fn try_swarm_substitute(
                 elapsed_ms: 0,
             });
 
-            let _ = reply.write_trace(&format_trace_succeeded(
-                &store_path,
-                &format!("p2p://{}", hash_part),
-                size,
-            ));
+            let _ =
+                reply.write_trace(&format_trace_succeeded(&store_path, &download.trace_url, size));
 
             let _ = reply.write_line(&format!("success sha256:{} {}", nar_hash_hex, size));
             tracing::info!("Substitute download succeeded for {}", store_path);
@@ -909,7 +910,7 @@ async fn try_http_download(
     _event_tx: &dashboard::EventBus,
     store_path: &str,
     bandwidth_limiter: &Arc<BandwidthLimiter>,
-) -> Result<Vec<u8>, String> {
+) -> Result<DownloadedNar, String> {
     tracing::info!(store = %store_path, "Attempting HTTP nar download");
 
     match crate::http_client::download_nar_http(
@@ -920,18 +921,26 @@ async fn try_http_download(
     )
     .await
     {
-        Ok(nar_data) => {
+        Ok(download) => {
             tracing::info!(
-                "HTTP nar download succeeded for {} ({} bytes)",
+                "HTTP nar download succeeded for {} ({} bytes from {})",
                 store_path,
-                nar_data.len()
+                download.data.len(),
+                download.source_url
             );
-            Ok(nar_data)
+            Ok(DownloadedNar { data: download.data, trace_url: download.source_url })
         },
         Err(HttpClientError::NotFound) => Err("HTTP nar not found on any substitute server".into()),
         Err(HttpClientError::BadSignature) => Err("narinfo signature verification failed".into()),
         Err(e) => Err(format!("HTTP nar download failed: {}", e)),
     }
+}
+
+fn http_trace_url(config: &Config, narinfo: &crate::narinfo::Narinfo) -> String {
+    crate::http_client::first_nar_download_url(config, narinfo)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "https://fallback".into())
 }
 
 /// Wait for provider notifications for the given DHT key, with a timeout.
