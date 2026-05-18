@@ -1,6 +1,7 @@
 use crate::{
     bandwidth::BandwidthLimiter,
     config::Config,
+    nar_hash,
     narinfo::{NarUrl, Narinfo, NarinfoCache, ParseError, load_acl_keys, verify_narinfo_signature},
 };
 
@@ -140,6 +141,7 @@ pub async fn download_nar_http(
     }
 
     let mut last_error = None;
+    let mut last_mismatched_download = None;
     for download in downloads {
         for full_url in download_urls(config, &download.url) {
             tracing::info!(
@@ -171,6 +173,16 @@ pub async fn download_nar_http(
                 },
             };
 
+            if !nar_hash_matches(&narinfo.nar_hash, &nar_data)? {
+                tracing::warn!(
+                    "HTTP nar hash mismatch for {}; trying next candidate if available",
+                    full_url
+                );
+                last_mismatched_download =
+                    Some(HttpNarDownload { data: nar_data, source_url: full_url });
+                continue;
+            }
+
             tracing::info!(
                 "HTTP nar download complete: {} bytes (compressed {} bytes)",
                 nar_data.len(),
@@ -181,7 +193,22 @@ pub async fn download_nar_http(
         }
     }
 
+    if let Some(download) = last_mismatched_download {
+        return Ok(download);
+    }
+
     Err(last_error.unwrap_or(HttpClientError::NotFound))
+}
+
+fn nar_hash_matches(expected_nar_hash: &str, nar_data: &[u8]) -> Result<bool, HttpClientError> {
+    use sha2::{Digest, Sha256};
+
+    let Some(expected) = nar_hash::sha256_bytes(expected_nar_hash) else {
+        return Err(HttpClientError::Other(format!("invalid nar hash: {}", expected_nar_hash)));
+    };
+
+    let actual = Sha256::digest(nar_data);
+    Ok(actual.as_slice() == expected)
 }
 
 async fn read_response_body(
@@ -455,6 +482,14 @@ mod tests {
         let decompressed = NarCompression::None.decompress(data).unwrap();
 
         assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn nar_hash_matches_expected_sha256() {
+        let hash = "sha256:4f78d3e7187277986632b4e63f366dae5812a000529278dd03f93f713517b394";
+
+        assert!(nar_hash_matches(hash, b"raw nar bytes").unwrap());
+        assert!(!nar_hash_matches(hash, b"different nar bytes").unwrap());
     }
 
     #[test]
