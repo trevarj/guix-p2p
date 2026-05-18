@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
+    bandwidth::BandwidthLimiter,
     channel::{NotifyRx, NotifyTx, SwarmCommand, SwarmNotification},
     config::{Config, SubstitutePolicy},
     connection::ConnectionManager,
@@ -344,6 +345,7 @@ pub async fn run_substitute_mode(
     conn_mgr: &Arc<Mutex<ConnectionManager>>,
     client: &reqwest::Client,
     nar_store: &Arc<Mutex<NarStore>>,
+    bandwidth_limiter: &Arc<BandwidthLimiter>,
 ) -> anyhow::Result<()> {
     let mut reply = ReplyWriter::new();
 
@@ -376,6 +378,7 @@ pub async fn run_substitute_mode(
                 &dummy_tx,
                 client,
                 nar_store,
+                bandwidth_limiter,
             )
             .await;
         }
@@ -404,6 +407,7 @@ async fn try_swarm_substitute(
     event_tx: &dashboard::EventBus,
     client: &reqwest::Client,
     nar_store: &Arc<Mutex<NarStore>>,
+    bandwidth_limiter: &Arc<BandwidthLimiter>,
 ) {
     let hash_part = match extract_hash_part(path) {
         Ok(h) => h,
@@ -553,14 +557,31 @@ async fn try_swarm_substitute(
                         "https://fallback",
                         nar_size,
                     ));
-                    try_http_download(config, &narinfo, client, event_tx, &store_path).await
+                    try_http_download(
+                        config,
+                        &narinfo,
+                        client,
+                        event_tx,
+                        &store_path,
+                        bandwidth_limiter,
+                    )
+                    .await
                 },
             }
         },
         SubstitutePolicy::HttpFirst => {
             let _ =
                 reply.write_trace(&format_trace_started(&store_path, "https://fallback", nar_size));
-            match try_http_download(config, &narinfo, client, event_tx, &store_path).await {
+            match try_http_download(
+                config,
+                &narinfo,
+                client,
+                event_tx,
+                &store_path,
+                bandwidth_limiter,
+            )
+            .await
+            {
                 Ok(nar_data) => Ok(nar_data),
                 Err(e) => {
                     tracing::info!(
@@ -887,10 +908,18 @@ async fn try_http_download(
     client: &reqwest::Client,
     _event_tx: &dashboard::EventBus,
     store_path: &str,
+    bandwidth_limiter: &Arc<BandwidthLimiter>,
 ) -> Result<Vec<u8>, String> {
     tracing::info!(store = %store_path, "Attempting HTTP nar download");
 
-    match crate::http_client::download_nar_http(config, narinfo, client).await {
+    match crate::http_client::download_nar_http(
+        config,
+        narinfo,
+        client,
+        Some(bandwidth_limiter.as_ref()),
+    )
+    .await
+    {
         Ok(nar_data) => {
             tracing::info!(
                 "HTTP nar download succeeded for {} ({} bytes)",
@@ -1511,6 +1540,7 @@ pub async fn run_daemon_mode(
     client: &reqwest::Client,
     nar_store: &Arc<Mutex<NarStore>>,
     local_peer_id: &str,
+    bandwidth_limiter: &Arc<BandwidthLimiter>,
 ) -> anyhow::Result<()> {
     if config.dashboard_enabled {
         let state = dashboard::DashboardState {
@@ -1565,6 +1595,7 @@ pub async fn run_daemon_mode(
         event_tx,
         client,
         nar_store,
+        bandwidth_limiter,
     )
     .await?;
 
@@ -1633,6 +1664,7 @@ async fn start_socket_listener(
     event_tx: &dashboard::EventBus,
     client: &reqwest::Client,
     nar_store: &Arc<Mutex<NarStore>>,
+    bandwidth_limiter: &Arc<BandwidthLimiter>,
 ) -> anyhow::Result<()> {
     // Remove stale socket file if present
     let _ = std::fs::remove_file(socket_path);
@@ -1657,6 +1689,7 @@ async fn start_socket_listener(
                 let event_tx = event_tx.clone();
                 let client = client.clone();
                 let nar_store = nar_store.clone();
+                let bandwidth_limiter = bandwidth_limiter.clone();
 
                 tokio::spawn(async move {
                     if let Err(e) = handle_socket_connection(
@@ -1673,6 +1706,7 @@ async fn start_socket_listener(
                         &event_tx,
                         &client,
                         &nar_store,
+                        &bandwidth_limiter,
                     )
                     .await
                     {
@@ -1703,6 +1737,7 @@ async fn handle_socket_connection(
     event_tx: &dashboard::EventBus,
     client: &reqwest::Client,
     nar_store: &Arc<Mutex<NarStore>>,
+    bandwidth_limiter: &Arc<BandwidthLimiter>,
 ) -> anyhow::Result<()> {
     use tokio::io::AsyncBufReadExt;
 
@@ -1801,6 +1836,7 @@ async fn handle_socket_connection(
                         event_tx,
                         client,
                         nar_store,
+                        bandwidth_limiter,
                     )
                     .await;
 

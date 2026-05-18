@@ -244,7 +244,9 @@ async fn main() -> anyhow::Result<()> {
         upload_limit_bytes_per_sec: config
             .max_upload_rate_kbps
             .map(|kbps| kbps.saturating_mul(1024)),
-        download_limit_bytes_per_sec: None,
+        download_limit_bytes_per_sec: config
+            .max_download_rate_kbps
+            .map(|kbps| kbps.saturating_mul(1024)),
     }));
 
     // Emit SeedAdded events for pre-seeded nars
@@ -320,6 +322,7 @@ async fn main() -> anyhow::Result<()> {
             &conn_mgr,
             &http_client,
             &nar_store,
+            &bandwidth_limiter,
         )
         .await?
     } else if cli.daemon {
@@ -337,6 +340,7 @@ async fn main() -> anyhow::Result<()> {
             &http_client,
             &nar_store,
             &peer_id.to_string(),
+            &bandwidth_limiter,
         )
         .await?
     } else {

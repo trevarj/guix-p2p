@@ -57,6 +57,7 @@ struct ConfigFile {
     max_peers_per_download: Option<usize>,
     max_in_flight_blocks_per_peer: Option<usize>,
     max_upload_rate_kbps: Option<u64>,
+    max_download_rate_kbps: Option<u64>,
     min_providers: Option<usize>,
     max_total_peers: Option<usize>,
     connection_retries: Option<u32>,
@@ -90,6 +91,8 @@ pub struct Config {
     pub max_in_flight_blocks_per_peer: usize,
     /// Optional upload cap for serving P2P blocks, in KiB/s.
     pub max_upload_rate_kbps: Option<u64>,
+    /// Optional download cap for HTTP fallback responses, in KiB/s.
+    pub max_download_rate_kbps: Option<u64>,
     pub substitute_urls: Vec<String>,
     pub substitute_policy: SubstitutePolicy,
     pub min_providers: usize,
@@ -159,6 +162,7 @@ impl Config {
             max_peers_per_download: file.max_peers_per_download.unwrap_or(8),
             max_in_flight_blocks_per_peer: file.max_in_flight_blocks_per_peer.unwrap_or(4),
             max_upload_rate_kbps: file.max_upload_rate_kbps,
+            max_download_rate_kbps: file.max_download_rate_kbps,
             substitute_urls: cli_substitute_urls
                 .map(|s| split_csv(&s))
                 .or_else(|| file.substitute_urls.as_ref().map(|s| split_csv(s)))
@@ -261,6 +265,7 @@ mod tests {
         assert_eq!(config.max_peers_per_download, 8);
         assert_eq!(config.max_in_flight_blocks_per_peer, 4);
         assert_eq!(config.max_upload_rate_kbps, None);
+        assert_eq!(config.max_download_rate_kbps, None);
         assert_eq!(config.substitute_urls.len(), 2);
         assert_eq!(config.min_providers, 3);
         assert_eq!(config.stall_timeout_secs, 30);
@@ -285,6 +290,20 @@ mod tests {
             let s = policy.to_string();
             assert_eq!(s.parse::<SubstitutePolicy>().unwrap(), policy);
         }
+    }
+
+    #[test]
+    fn test_rate_limit_config_deserializes() {
+        let file: ConfigFile = toml::from_str(
+            r#"
+            max_upload_rate_kbps = 512
+            max_download_rate_kbps = 1024
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(file.max_upload_rate_kbps, Some(512));
+        assert_eq!(file.max_download_rate_kbps, Some(1024));
     }
 
     #[test]

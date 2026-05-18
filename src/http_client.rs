@@ -1,4 +1,5 @@
 use crate::{
+    bandwidth::BandwidthLimiter,
     config::Config,
     narinfo::{NarUrl, Narinfo, NarinfoCache, ParseError, load_acl_keys, verify_narinfo_signature},
 };
@@ -115,6 +116,7 @@ pub async fn download_nar_http(
     config: &Config,
     narinfo: &Narinfo,
     client: &reqwest::Client,
+    bandwidth_limiter: Option<&BandwidthLimiter>,
 ) -> Result<Vec<u8>, HttpClientError> {
     let downloads = download_candidates(narinfo)?;
     if downloads.is_empty() {
@@ -144,7 +146,7 @@ pub async fn download_nar_http(
                 continue;
             }
 
-            let compressed = response.bytes().await?;
+            let compressed = read_response_body(response, bandwidth_limiter).await?;
             let nar_data = match download.compression.decompress(&compressed) {
                 Ok(nar_data) => nar_data,
                 Err(err) => {
@@ -164,6 +166,24 @@ pub async fn download_nar_http(
     }
 
     Err(last_error.unwrap_or(HttpClientError::NotFound))
+}
+
+async fn read_response_body(
+    response: reqwest::Response,
+    bandwidth_limiter: Option<&BandwidthLimiter>,
+) -> Result<Vec<u8>, HttpClientError> {
+    use futures::StreamExt;
+
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if let Some(limiter) = bandwidth_limiter {
+            limiter.wait_for_download(chunk.len() as u64).await;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 fn download_urls(config: &Config, nar_url: &str) -> Vec<String> {

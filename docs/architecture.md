@@ -305,6 +305,8 @@ Relative narinfo URLs are tried against each configured substitute base URL in
 order. Absolute narinfo URLs are fetched directly. If a preferred compression
 URL fails, lower-preference URLs from the same narinfo are tried before HTTP
 fallback gives up.
+HTTP response chunks pass through `BandwidthLimiter` when
+`max_download_rate_kbps` is set.
 
 ### Safety thresholds:
 - DHT returns < `min_providers` peers → skip swarm, reply not-found. The
@@ -511,6 +513,7 @@ block_size = 262144
 max_peers_per_download = 8
 max_in_flight_blocks_per_peer = 4
 max_upload_rate_kbps = 0
+max_download_rate_kbps = 0
 max_total_peers = 50
 acl_path = "/etc/guix/acl"
 seed_paths = ["/gnu/store/abc-foo", "/gnu/store/def-bar"]
