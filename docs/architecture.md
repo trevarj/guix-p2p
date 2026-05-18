@@ -70,7 +70,7 @@ guix-p2p (Rust, libp2p)
   │     Peer reputation scoring (time-decay, ban threshold)
   │     Connection management (retry/backoff, dead peer pruning)
   │
-  ├─► Bandwidth Limiter (token-bucket, configurable caps)
+  ├─► Bandwidth Limiter (leaky-bucket, configurable caps)
   │
   └─► HTTP Narinfo Client (reqwest)
        Narinfo fetch from official substitute URLs
@@ -122,7 +122,7 @@ as separate modules outside the behaviour:
 ```rust
 struct ReputationTracker { .. }     // src/reputation.rs: transport reliability scoring
 struct ConnectionManager { .. }     // src/connection.rs: dial state, retry/backoff, pruning
-struct BandwidthLimiter { .. }     // src/bandwidth.rs: token-bucket rate limiting
+struct BandwidthLimiter { .. }     // src/bandwidth.rs: shared leaky-bucket rate limiting
 ```
 
 Reputation is deliberately transport-only. It ranks peers for block download
@@ -299,6 +299,8 @@ The policy also affects the `have` query:
 When the policy allows HTTP fallback, nars are downloaded from the substitute
 server URLs in the narinfo. Decompression supports zstd, gzip, lzip, and
 uncompressed NARs. The preference order is: zstd > gzip > lzip > none.
+Unsupported compression entries are skipped when a supported URL is available;
+otherwise the download fails before hash verification.
 
 ### Safety thresholds:
 - DHT returns < `min_providers` peers → skip swarm, reply not-found. The
@@ -371,7 +373,7 @@ src/
 ├── relay.rs                 # Unix socket relay client (stdin → socket → fd 4)
 ├── dht.rs                   # Kad wrapper, handle_kad_event → notifications, get_providers, bootstrap
 ├── reputation.rs            # ReputationTracker (time-decay scoring, ban threshold, JSON persistence)
-├── bandwidth.rs             # BandwidthLimiter (token-bucket, configurable caps)
+├── bandwidth.rs             # BandwidthLimiter (leaky-bucket, configurable caps)
 ├── dashboard.rs             # Dashboard HTTP/WebSocket routing and state
 ├── dashboard/
 │   ├── catalog.rs           # Catalog state and event upsert logic

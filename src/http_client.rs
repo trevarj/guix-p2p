@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    narinfo::{Narinfo, NarinfoCache, ParseError, load_acl_keys, verify_narinfo_signature},
+    narinfo::{NarUrl, Narinfo, NarinfoCache, ParseError, load_acl_keys, verify_narinfo_signature},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -116,9 +116,9 @@ pub async fn download_nar_http(
     narinfo: &Narinfo,
     client: &reqwest::Client,
 ) -> Result<Vec<u8>, HttpClientError> {
-    let best = choose_best_url(narinfo);
-    let (url, compression) = match best {
-        Some(u) => u,
+    let best = choose_best_url(narinfo)?;
+    let download = match best {
+        Some(download) => download,
         None => return Err(HttpClientError::NotFound),
     };
 
@@ -129,10 +129,10 @@ pub async fn download_nar_http(
             .first()
             .map(|s| s.trim_end_matches('/'))
             .unwrap_or("https://bordeaux.guix.gnu.org"),
-        url
+        download.url
     );
 
-    tracing::info!("Downloading nar via HTTP: {} ({})", full_url, compression);
+    tracing::info!("Downloading nar via HTTP: {} ({})", full_url, download.compression.as_str());
 
     let response = client.get(&full_url).send().await?;
     if !response.status().is_success() {
@@ -141,12 +141,7 @@ pub async fn download_nar_http(
 
     let compressed = response.bytes().await?;
 
-    let nar_data = match compression.as_str() {
-        "gzip" => decompress_gzip(&compressed)?,
-        "zstd" => decompress_zstd(&compressed)?,
-        "lzip" => decompress_lzip(&compressed)?,
-        _ => compressed.to_vec(),
-    };
+    let nar_data = download.compression.decompress(&compressed)?;
 
     tracing::info!(
         "HTTP nar download complete: {} bytes (compressed {} bytes)",
@@ -159,19 +154,81 @@ pub async fn download_nar_http(
 
 /// Choose the best nar URL based on compression and file size.
 /// Preference: zstd (best ratio + speed) > gzip (widely available) > lzip > none.
-/// Falls back to smallest file size if preferred compressions are unavailable.
-fn choose_best_url(narinfo: &Narinfo) -> Option<(String, String)> {
-    let preference = ["zstd", "gzip", "lzip", "none"];
+fn choose_best_url(narinfo: &Narinfo) -> Result<Option<NarDownload>, HttpClientError> {
+    let mut unsupported_compression = None;
 
-    for pref in &preference {
+    for pref in NarCompression::preference() {
         for url_entry in &narinfo.urls {
-            if url_entry.compression == *pref {
-                return Some((url_entry.url.clone(), url_entry.compression.clone()));
+            match NarCompression::from_nar_url(url_entry) {
+                Ok(compression) if compression == pref => {
+                    return Ok(Some(NarDownload { url: url_entry.url.clone(), compression }));
+                },
+                Ok(_) => {},
+                Err(err) => {
+                    unsupported_compression.get_or_insert(err);
+                },
             }
         }
     }
 
-    narinfo.urls.first().map(|u| (u.url.clone(), u.compression.clone()))
+    match unsupported_compression {
+        Some(err) => Err(err),
+        None => Ok(None),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NarDownload {
+    url: String,
+    compression: NarCompression,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NarCompression {
+    Zstd,
+    Gzip,
+    Lzip,
+    None,
+}
+
+impl NarCompression {
+    fn preference() -> [Self; 4] {
+        [Self::Zstd, Self::Gzip, Self::Lzip, Self::None]
+    }
+
+    fn from_nar_url(url: &NarUrl) -> Result<Self, HttpClientError> {
+        Self::from_str(&url.compression)
+    }
+
+    fn from_str(value: &str) -> Result<Self, HttpClientError> {
+        match value {
+            "zstd" => Ok(Self::Zstd),
+            "gzip" => Ok(Self::Gzip),
+            "lzip" => Ok(Self::Lzip),
+            "none" | "" => Ok(Self::None),
+            other => {
+                Err(HttpClientError::Decompression(format!("unsupported compression: {}", other)))
+            },
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Zstd => "zstd",
+            Self::Gzip => "gzip",
+            Self::Lzip => "lzip",
+            Self::None => "none",
+        }
+    }
+
+    fn decompress(self, data: &[u8]) -> Result<Vec<u8>, HttpClientError> {
+        match self {
+            Self::Zstd => decompress_zstd(data),
+            Self::Gzip => decompress_gzip(data),
+            Self::Lzip => decompress_lzip(data),
+            Self::None => Ok(data.to_vec()),
+        }
+    }
 }
 
 fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, HttpClientError> {
@@ -195,6 +252,9 @@ fn decompress_zstd(data: &[u8]) -> Result<Vec<u8>, HttpClientError> {
 
 fn decompress_lzip(data: &[u8]) -> Result<Vec<u8>, HttpClientError> {
     use std::io::Read;
+    if !data.starts_with(b"LZIP") {
+        return Err(HttpClientError::Decompression("lzip: bad magic".into()));
+    }
     let mut decoder = lzma_rust2::LzipReader::new(data);
     let mut output = Vec::with_capacity(data.len() * 4);
     decoder
@@ -206,6 +266,75 @@ fn decompress_lzip(data: &[u8]) -> Result<Vec<u8>, HttpClientError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn narinfo_with_urls(urls: Vec<NarUrl>) -> Narinfo {
+        Narinfo {
+            store_path: "/gnu/store/example".into(),
+            nar_hash: "sha256:example".into(),
+            nar_size: 0,
+            references: vec![],
+            deriver: None,
+            urls,
+            signed_portion: String::new(),
+            signature: None,
+        }
+    }
+
+    fn nar_url(url: &str, compression: &str, file_size: u64) -> NarUrl {
+        NarUrl { url: url.into(), compression: compression.into(), file_size }
+    }
+
+    #[test]
+    fn choose_best_url_uses_compression_preference() {
+        let narinfo = narinfo_with_urls(vec![
+            nar_url("nar/lzip/example", "lzip", 10),
+            nar_url("nar/gzip/example", "gzip", 20),
+            nar_url("nar/zstd/example", "zstd", 30),
+        ]);
+
+        let selected = choose_best_url(&narinfo).unwrap().unwrap();
+
+        assert_eq!(selected.url, "nar/zstd/example");
+        assert_eq!(selected.compression, NarCompression::Zstd);
+    }
+
+    #[test]
+    fn choose_best_url_skips_unknown_when_supported_url_exists() {
+        let narinfo = narinfo_with_urls(vec![
+            nar_url("nar/br/example", "br", 10),
+            nar_url("nar/gzip/example", "gzip", 20),
+        ]);
+
+        let selected = choose_best_url(&narinfo).unwrap().unwrap();
+
+        assert_eq!(selected.url, "nar/gzip/example");
+        assert_eq!(selected.compression, NarCompression::Gzip);
+    }
+
+    #[test]
+    fn choose_best_url_rejects_all_unknown_compressions() {
+        let narinfo = narinfo_with_urls(vec![nar_url("nar/br/example", "br", 10)]);
+
+        let err = choose_best_url(&narinfo).unwrap_err();
+
+        assert!(err.to_string().contains("unsupported compression: br"));
+    }
+
+    #[test]
+    fn compression_none_returns_original_data() {
+        let data = b"raw nar bytes";
+
+        let decompressed = NarCompression::None.decompress(data).unwrap();
+
+        assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn malformed_lzip_returns_decompression_error() {
+        let err = NarCompression::Lzip.decompress(b"not lzip").unwrap_err();
+
+        assert!(err.to_string().contains("lzip"));
+    }
 
     #[test]
     fn decompresses_lzip_data() {
