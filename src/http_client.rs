@@ -596,6 +596,49 @@ mod tests {
         assert_eq!(download.source_url, format!("{}/nar/example", good_base));
     }
 
+    #[tokio::test]
+    async fn download_nar_http_tries_next_compression_entry() {
+        use axum::{Router, routing::get};
+        use flate2::{Compression, write::GzEncoder};
+        use sha2::{Digest, Sha256};
+        use std::io::Write;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(b"good nar").unwrap();
+        let gzip_bytes = encoder.finish().unwrap();
+
+        let app = Router::new()
+            .route("/bad-zstd", get(|| async { "not zstd" }))
+            .route("/good-gzip", get(move || async move { gzip_bytes }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let good_hash = format!("sha256:{}", hex::encode(Sha256::digest(b"good nar")));
+        let narinfo = narinfo_with_hash_and_urls(
+            good_hash,
+            vec![nar_url("bad-zstd", "zstd", 8), nar_url("good-gzip", "gzip", 8)],
+        );
+        let mut config = crate::config::Config::load(
+            None,
+            None,
+            None,
+            Some("/tmp/guix-p2p-test".into()),
+            Some(base_url.clone()),
+            None,
+        );
+        config.request_timeout_secs = 5;
+        let client = create_http_client(&config).unwrap();
+
+        let download = download_nar_http(&config, &narinfo, &client, None, None).await.unwrap();
+
+        server.abort();
+        assert_eq!(download.data, b"good nar");
+        assert_eq!(download.source_url, format!("{}/good-gzip", base_url));
+    }
+
     #[test]
     fn malformed_lzip_returns_decompression_error() {
         let err = NarCompression::Lzip.decompress(b"not lzip").unwrap_err();
