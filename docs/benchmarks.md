@@ -161,22 +161,21 @@ Failure records keep the full error chain in `results.csv` and write the same
 details to `error.log`. The Markdown report keeps the failed-run table concise
 and points at the per-run log path.
 
-The VM benchmark now writes local narinfo metadata for the VM-observed target
-into the fetch node before p2p modes. The substitute daemon only advertises
-paths with usable narinfo, so p2p-first and http-first runs do not claim
-unavailable dependency paths during standard benchmarks. When VM p2p modes
-provide local narinfo metadata, info and substitute lookups stay local instead
-of falling through to remote substitute servers for unrelated Guix queries. This
-keeps p2p-only query handling from blocking on substitute-server narinfo
-timeouts for the target. The VM `push-binary` command installs the substitute
-extension and loader wrappers for copied Rust binaries so they can find their
-Guix runtime libraries inside the guest. The latest two-seeder
-`hello` run completed successfully, found multiple providers, and imported the
-NAR through P2P. Provider selection now filters candidates through peer
-reputation and connection backoff, so stale provider records should be
-penalized after handshake timeouts instead of being retried first on later
-downloads. Remaining benchmark work should focus on larger packages, repeated
-runs, and HTTP comparison modes before making performance claims.
+For public package/profile VM benchmarks, p2p modes do not preload local narinfo
+metadata into the fetch node. The fetch-node `guix-p2p` daemon performs the
+normal remote narinfo lookup, so `p2p-only` means "no HTTP NAR fallback" rather
+than "metadata is already local." The synthetic `system-build` suite is the
+exception: its exact VM system output is not expected to have public substitute
+narinfo, so the harness still writes local metadata for that target before p2p
+modes. This keeps the system-build proof runnable, but its timing should not be
+read as a fair HTTP-vs-P2P metadata comparison. The VM `push-binary` command
+installs the substitute extension and loader wrappers for copied Rust binaries
+so they can find their Guix runtime libraries inside the guest. Provider
+selection now filters candidates through peer reputation and connection backoff,
+so stale provider records should be penalized after handshake timeouts instead
+of being retried first on later downloads. Remaining benchmark work should focus
+on larger packages, repeated runs, and HTTP comparison modes before making
+performance claims.
 
 The older top-level `benchmark` command remains a fast container harness, but
 VM benchmarks are the publishable path because each node has its own writable

@@ -170,8 +170,10 @@ remote substitute servers. The file has a top-level `narinfos` array with
 `store_path`, `nar_hash`, `nar_size`, `references`, optional `deriver`, and
 optional `download_size` fields. This is intended for offline/local benchmark
 harnesses that pre-seed store paths and already know the corresponding NAR
-hashes. VM benchmarks copy target metadata into the fetch node before p2p modes
-so the target lookup does not depend on live substitute server narinfo latency.
+hashes. VM benchmarks use remote substitute-server narinfo lookups for public
+package and profile p2p modes. Only the synthetic `system-build` suite copies
+local metadata into the fetch node because that exact VM system output is not
+expected to have public substitute narinfo.
 If local metadata has `nar_size = 0`, p2p downloads derive the block count from
 the provider handshake and still verify the final NAR hash.
 
