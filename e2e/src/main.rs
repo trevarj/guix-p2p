@@ -405,6 +405,7 @@ const BENCHMARK_ADDITIONAL_SUBSTITUTE_URLS_COMMA: &str = "https://cache-sg.guix.
 const BENCHMARK_SUBSTITUTE_URLS_SPACE: &str = "https://ci.guix.trop.in https://cache-cdn.guix.moe https://cache-fi.guix.moe https://guix.bordeaux.inria.fr https://nonguix-proxy.ditigal.xyz https://ci.guix.gnu.org https://bordeaux.guix.gnu.org https://cache-sg.guix.moe https://mirror.yandex.ru/mirrors/guix https://substitutes.nonguix.org";
 const SYSTEM_BUILD_BENCHMARK_NAME: &str = "system-build";
 const SYSTEM_BUILD_CONFIG_PATH: &str = "/tmp/guix-p2p-system-benchmark.scm";
+const BENCHMARK_REPORT_FILENAME: &str = "benchmark-results.md";
 
 impl HttpCondition {
     fn substitute_urls(self) -> String {
@@ -2407,17 +2408,12 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
     }
 
     let csv_path = base.join("results.csv");
+    let report_path = base.join(BENCHMARK_REPORT_FILENAME);
     write_benchmark_csv(&csv_path, &records)?;
-    write_benchmark_report(
-        &project_root().join("docs/benchmark-results.md"),
-        &records,
-        &packages,
-        opts.transport,
-        opts.iterations,
-    )?;
+    write_benchmark_report(&report_path, &records, &packages, opts.transport, opts.iterations)?;
 
     tracing::info!("benchmark CSV: {}", csv_path.display());
-    tracing::info!("benchmark report: docs/benchmark-results.md");
+    tracing::info!("benchmark report: {}", report_path.display());
 
     if !opts.keep_temp {
         let _ = std::fs::remove_dir_all(&tmp_root);
@@ -2427,8 +2423,9 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
         Ok(())
     } else {
         anyhow::bail!(
-            "benchmark completed with {} failed run(s); see docs/benchmark-results.md",
-            failures.len()
+            "benchmark completed with {} failed run(s); see {}",
+            failures.len(),
+            report_path.display()
         );
     }
 }
@@ -2497,17 +2494,12 @@ fn write_read_only_store_skip_report(
     }
 
     let csv_path = base.join("results.csv");
+    let report_path = base.join(BENCHMARK_REPORT_FILENAME);
     write_benchmark_csv(&csv_path, &records)?;
-    write_benchmark_report(
-        &project_root().join("docs/benchmark-results.md"),
-        &records,
-        &packages,
-        opts.transport,
-        opts.iterations,
-    )?;
+    write_benchmark_report(&report_path, &records, &packages, opts.transport, opts.iterations)?;
     tracing::warn!("{skip_reason}");
     tracing::info!("benchmark CSV: {}", csv_path.display());
-    tracing::info!("benchmark report: docs/benchmark-results.md");
+    tracing::info!("benchmark report: {}", report_path.display());
     Ok(())
 }
 
@@ -2822,23 +2814,25 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
     }
 
     let csv_path = output_dir.join("results.csv");
+    let report_path = output_dir.join(BENCHMARK_REPORT_FILENAME);
     write_benchmark_csv(&csv_path, &records)?;
     write_benchmark_report(
-        &project_root().join("docs/benchmark-results.md"),
+        &report_path,
         &records,
         &packages,
         HarnessTransport::Tcp,
         opts.iterations,
     )?;
     tracing::info!("VM benchmark CSV: {}", csv_path.display());
-    tracing::info!("VM benchmark report: docs/benchmark-results.md");
+    tracing::info!("VM benchmark report: {}", report_path.display());
 
     if failures.is_empty() {
         Ok(())
     } else {
         anyhow::bail!(
-            "VM benchmark completed with {} failed run(s); see docs/benchmark-results.md",
-            failures.len()
+            "VM benchmark completed with {} failed run(s); see {}",
+            failures.len(),
+            report_path.display()
         );
     }
 }

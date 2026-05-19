@@ -112,7 +112,7 @@ jobs:
             sudo "$guix_cmd" shell -m manifest-ci.scm -- \
               cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e stop --all \
               2>/dev/null || true
-            sudo chown -R "$USER:$USER" target docs/benchmark-results.md 2>/dev/null || true
+            sudo chown -R "$USER:$USER" target 2>/dev/null || true
           }
           trap cleanup EXIT
           guix_cmd="$(command -v guix)"
@@ -152,6 +152,6 @@ jobs:
           if-no-files-found: ignore
           path: |
             target/guix-p2p-bench/results.csv
+            target/guix-p2p-bench/benchmark-results.md
             target/guix-p2p-bench/logs/**/*.log
             target/guix-p2p-e2e/logs/*.log
-            docs/benchmark-results.md

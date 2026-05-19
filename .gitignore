@@ -3,3 +3,4 @@
 /.cache
 .direnv
 e2e/target/
+docs/benchmark-results.md

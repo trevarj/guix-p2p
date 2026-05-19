@@ -143,8 +143,8 @@ cargo run -p guix-p2p-e2e -- vm benchmark \
 The VM benchmark writes:
 
 - `target/guix-p2p-e2e/benchmarks/results.csv`
+- `target/guix-p2p-e2e/benchmarks/benchmark-results.md`
 - `target/guix-p2p-e2e/benchmarks/logs/*/error.log` for failed runs
-- `docs/benchmark-results.md`
 
 The CSV keeps the original result columns and appends phase timings:
 
@@ -289,7 +289,7 @@ Additional mirrors:
 Outputs:
 
 - `target/guix-p2p-bench/results.csv`
-- `docs/benchmark-results.md`
+- `target/guix-p2p-bench/benchmark-results.md`
 
 ### GitHub Benchmark Workflow
 
@@ -373,7 +373,8 @@ Before the first Pages deploy, configure the GitHub mirror's Pages source to
 `GitHub Actions` under `Settings > Pages`.
 
 The workflow does not commit generated benchmark output back to either GitHub
-or Codeberg.
+or Codeberg. Generated benchmark reports are written under `target/`, not
+`docs/`, so they do not create routine repository churn.
 
 The report includes host and Rust summary, tier, package store paths, nar
 hashes, nar sizes when observed from dashboard seed data, HTTP condition, seed

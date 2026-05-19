@@ -117,8 +117,9 @@ To run it:
 - Download the `guix-p2p-benchmark-*` artifact from the completed run.
 
 The workflow runs the VM benchmark harness and uploads
-`target/guix-p2p-bench/results.csv` plus `docs/benchmark-results.md`. It does
-not commit generated benchmark output back to the repository.
+`target/guix-p2p-bench/results.csv` plus
+`target/guix-p2p-bench/benchmark-results.md`. It does not commit generated
+benchmark output back to the repository.
 
 Before running `guix shell`, the workflow restarts `guix-daemon.service` with a
 systemd drop-in that sets the benchmark substitute URL list. This keeps Guix

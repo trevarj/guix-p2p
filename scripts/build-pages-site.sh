@@ -2,7 +2,7 @@
 set -eu
 
 site_dir="${SITE_DIR:-site}"
-report_src="${BENCHMARK_RESULTS_MD:-docs/benchmark-results.md}"
+report_src="${BENCHMARK_RESULTS_MD:-target/guix-p2p-bench/benchmark-results.md}"
 csv_src="${BENCHMARK_RESULTS_CSV:-target/guix-p2p-bench/results.csv}"
 asset_version="$(git rev-parse --short HEAD 2>/dev/null || date +%s)"
 

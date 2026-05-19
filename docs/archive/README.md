@@ -10,7 +10,6 @@ Current status lives in:
 - [../roadmap.md](../roadmap.md)
 - [../architecture.md](../architecture.md)
 - [../benchmarks.md](../benchmarks.md)
-- [../benchmark-results.md](../benchmark-results.md)
 
 Archived material:
 

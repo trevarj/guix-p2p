@@ -31,13 +31,13 @@ VMs are already built, running, SSH-ready, binary-pushed, and bootstrapped.
   - run HTTP `guix build` import
 - Seed once per package and HTTP condition when P2P modes are requested.
 - Use VM seed dashboard metadata for store path, NAR hash, and NAR size.
-- Update `docs/benchmark-results.md` with phase columns and phase summaries.
+- Update the generated benchmark report with phase columns and phase summaries.
 
 ## Acceptance
 
 - `vm benchmark --suite smoke --modes http,p2p-only --http-conditions normal`
   passes with non-empty phase timing columns.
-- `docs/benchmark-results.md` includes total timing plus phase timing.
+- The generated benchmark report includes total timing plus phase timing.
 - Existing top-level `benchmark` output remains compatible.
 
 ## Verification

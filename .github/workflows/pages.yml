@@ -52,7 +52,9 @@ jobs:
         if: github.event_name == 'workflow_run'
         run: |
           mkdir -p latest-benchmark-selected
-          if [ -r latest-benchmark/docs/benchmark-results.md ]; then
+          if [ -r latest-benchmark/target/guix-p2p-bench/benchmark-results.md ]; then
+            cp latest-benchmark/target/guix-p2p-bench/benchmark-results.md latest-benchmark-selected/benchmark-results.md
+          elif [ -r latest-benchmark/docs/benchmark-results.md ]; then
             cp latest-benchmark/docs/benchmark-results.md latest-benchmark-selected/benchmark-results.md
           elif [ -r latest-benchmark/benchmark-results.md ]; then
             cp latest-benchmark/benchmark-results.md latest-benchmark-selected/benchmark-results.md
