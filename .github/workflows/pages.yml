@@ -83,21 +83,32 @@ jobs:
         run: |
           mkdir -p latest-benchmark-selected
           found=false
-          if [ -r latest-benchmark/target/guix-p2p-bench/benchmark-results.md ]; then
-            cp latest-benchmark/target/guix-p2p-bench/benchmark-results.md latest-benchmark-selected/benchmark-results.md
-          elif [ -r latest-benchmark/docs/benchmark-results.md ]; then
-            cp latest-benchmark/docs/benchmark-results.md latest-benchmark-selected/benchmark-results.md
-          elif [ -r latest-benchmark/benchmark-results.md ]; then
-            cp latest-benchmark/benchmark-results.md latest-benchmark-selected/benchmark-results.md
-          fi
+          for report in \
+            latest-benchmark/target/guix-p2p-bench/benchmark-results.md \
+            latest-benchmark/guix-p2p-bench/benchmark-results.md \
+            latest-benchmark/*/guix-p2p-bench/benchmark-results.md \
+            latest-benchmark/docs/benchmark-results.md \
+            latest-benchmark/benchmark-results.md
+          do
+            if [ -r "$report" ]; then
+              cp "$report" latest-benchmark-selected/benchmark-results.md
+              break
+            fi
+          done
           if [ -r latest-benchmark-selected/benchmark-results.md ]; then
             found=true
           fi
-          if [ -r latest-benchmark/target/guix-p2p-bench/results.csv ]; then
-            cp latest-benchmark/target/guix-p2p-bench/results.csv latest-benchmark-selected/results.csv
-          elif [ -r latest-benchmark/results.csv ]; then
-            cp latest-benchmark/results.csv latest-benchmark-selected/results.csv
-          fi
+          for csv in \
+            latest-benchmark/target/guix-p2p-bench/results.csv \
+            latest-benchmark/guix-p2p-bench/results.csv \
+            latest-benchmark/*/guix-p2p-bench/results.csv \
+            latest-benchmark/results.csv
+          do
+            if [ -r "$csv" ]; then
+              cp "$csv" latest-benchmark-selected/results.csv
+              break
+            fi
+          done
           if [ -r latest-benchmark-selected/results.csv ]; then
             found=true
           fi
