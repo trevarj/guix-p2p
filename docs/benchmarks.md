@@ -94,8 +94,8 @@ Then run the VM benchmark:
 
 ```sh
 cargo run -p guix-p2p-e2e -- vm benchmark \
-  --suite smoke \
-  --modes http,p2p-only,p2p-first \
+  --suite system-build \
+  --modes http,p2p-only,p2p-first,http-first \
   --http-conditions normal \
   --seed-nodes Alice \
   --fetch-node Bob \
@@ -110,7 +110,8 @@ The available suites are:
 - `system-profile`: package set from the E2E Guix System profile: `bash`,
   `curl`, `gcc-toolchain`, `guix`, `openssh-sans-x`, and `openssl`.
 - `system-build`: full `guix system build` of a controlled E2E operating
-  system configuration.
+  system configuration. This is the preferred benchmark suite for performance
+  evidence; `smoke` is primarily a workflow sanity check.
 
 `system-profile` is a reconfigure-like workload: it compares the same
 HTTP-only, p2p-only, and p2p-first substitute paths against the packages that
@@ -425,6 +426,8 @@ Package tiers:
 - `hello`: small correctness and harness sanity check.
 - `git`: medium package with non-trivial closure and transfer size.
 - `linux-libre`: large binary package for bandwidth and multi-peer behavior.
+- `system-build`: full system generation for reconfigure-like substitute
+  behavior and the default CI benchmark target.
 
 Multi-peer P2P comparison:
 

@@ -6,7 +6,7 @@ on:
       suite:
         description: Benchmark suite
         required: true
-        default: smoke
+        default: system-build
         type: choice
         options:
           - smoke

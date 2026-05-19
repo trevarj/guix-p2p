@@ -13,8 +13,8 @@ are archived under [archive/](archive/).
 - Dashboard package seeding, seed removal, live transfer path, catalog, peers,
   builds, and events are implemented.
 - Successful downloads are cached and re-announced for re-seeding.
-- Local benchmark evidence exists for a minimal p2p-only `hello` substitute
-  path.
+- VM smoke benchmark evidence exists for `hello`; the benchmark workflow now
+  defaults to the full `system-build` suite for reconfigure-like evidence.
 - Public network readiness is not claimed yet.
 
 ## Known Tester Readiness
@@ -38,8 +38,11 @@ over HTTP. Long VM benchmark suites should run through the GitHub Actions
 benchmark workflow, not on developer workstations. Before making performance
 claims:
 
-- Compare `http`, `p2p-only`, `p2p-first`, and `http-first` for the same
-  package tiers.
+- Use `system-build` as the primary benchmark target because it exercises a
+  complete Guix System generation download. Keep `hello` smoke runs as workflow
+  sanity checks.
+- Compare `http`, `p2p-only`, `p2p-first`, and `http-first` for the same full
+  system target and package tiers.
 - Use repeated runs and report medians plus p95 values.
 - Test small, medium, and large packages: `hello`, `git`, and `linux-libre`.
 - Add multi-seeder runs with 1, 3, 5, and 8 seed nodes serving the same NAR.
