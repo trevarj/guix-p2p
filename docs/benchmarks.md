@@ -266,16 +266,25 @@ Container HTTP mode builds the resolved benchmark store path, not the package
 name, so it measures substitute import for the target item without pulling
 unrelated package dependencies into the isolated daemon database.
 
-The preferred mirror order for benchmark defaults is:
+The preferred mirror order for benchmark defaults is grouped by trust source.
+The third-party set comes first for benchmark availability, followed by the
+official Guix substitute servers, then additional mirrors:
 
+Third-party preferred:
 - `https://ci.guix.trop.in`
 - `https://cache-cdn.guix.moe`
 - `https://cache-fi.guix.moe`
 - `https://guix.bordeaux.inria.fr`
 - `https://nonguix-proxy.ditigal.xyz`
 
-The fallback list keeps the standard Guix servers and additional mirrors after
-the preferred set.
+Official Guix:
+- `https://ci.guix.gnu.org`
+- `https://bordeaux.guix.gnu.org`
+
+Additional mirrors:
+- `https://cache-sg.guix.moe`
+- `https://mirror.yandex.ru/mirrors/guix`
+- `https://substitutes.nonguix.org`
 
 Outputs:
 

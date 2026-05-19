@@ -28,6 +28,21 @@ small, medium, and large packages with 1, 3, 5, and 8 seeders.
 The methodology and acceptance criteria are documented in
 `docs/benchmarks.md` under "Future Benchmark Work".
 
+## Async HTTP Decompression
+
+The current HTTP fallback downloads the compressed response body into memory,
+then decompresses it into a raw NAR buffer before hash verification and restore.
+This is simple and keeps lzip support through `lzma-rust2`, but it temporarily
+holds both compressed and decompressed bytes.
+
+Revisit `async-compression` when HTTP downloads become common in benchmark
+evidence or when large-NAR HTTP fallback memory use becomes a practical issue.
+The likely first step is streaming gzip and zstd through async decoders while
+keeping lzip on the existing `lzma-rust2` path until async lzip support is
+available. The refactor should preserve per-candidate hash verification,
+progress traces, bandwidth limiting, and fallback to lower-preference
+compression candidates.
+
 ## Corporate/LAN Proxy Mode
 
 A single guix-p2p daemon in an office can serve as a local substitute mirror.

@@ -36,6 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
+      # Grouped by trust source: third-party preferred mirrors first for
+      # availability, official Guix servers next, then additional mirrors.
       BENCHMARK_GUIX_SUBSTITUTE_URLS: >-
         https://ci.guix.trop.in
         https://cache-cdn.guix.moe

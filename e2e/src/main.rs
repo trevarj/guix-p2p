@@ -393,25 +393,30 @@ enum HttpCondition {
     Flaky,
 }
 
-// Preferred mirrors come first so CI benchmarks are less sensitive to outages
-// or rate limits on the default Guix substitute servers.
+// Third-party mirrors come first so CI benchmarks are less sensitive to outages
+// or rate limits on the official Guix substitute servers. The official URLs are
+// kept as a named fallback group because they share Guix's default trust root.
 const BENCHMARK_PRIMARY_SUBSTITUTE_URL: &str = "https://ci.guix.trop.in";
 const BENCHMARK_SECONDARY_SUBSTITUTE_URL: &str = "https://cache-cdn.guix.moe";
-const BENCHMARK_SUBSTITUTE_URLS_COMMA: &str = "https://ci.guix.trop.in,https://cache-cdn.guix.moe,https://cache-fi.guix.moe,https://guix.bordeaux.inria.fr,https://nonguix-proxy.ditigal.xyz,https://ci.guix.gnu.org,https://bordeaux.guix.gnu.org,https://cache-sg.guix.moe,https://mirror.yandex.ru/mirrors/guix,https://substitutes.nonguix.org";
+const BENCHMARK_THIRD_PARTY_SUBSTITUTE_URLS_COMMA: &str = "https://ci.guix.trop.in,https://cache-cdn.guix.moe,https://cache-fi.guix.moe,https://guix.bordeaux.inria.fr,https://nonguix-proxy.ditigal.xyz";
+const BENCHMARK_OFFICIAL_SUBSTITUTE_URLS_COMMA: &str =
+    "https://ci.guix.gnu.org,https://bordeaux.guix.gnu.org";
+const BENCHMARK_ADDITIONAL_SUBSTITUTE_URLS_COMMA: &str = "https://cache-sg.guix.moe,https://mirror.yandex.ru/mirrors/guix,https://substitutes.nonguix.org";
 const BENCHMARK_SUBSTITUTE_URLS_SPACE: &str = "https://ci.guix.trop.in https://cache-cdn.guix.moe https://cache-fi.guix.moe https://guix.bordeaux.inria.fr https://nonguix-proxy.ditigal.xyz https://ci.guix.gnu.org https://bordeaux.guix.gnu.org https://cache-sg.guix.moe https://mirror.yandex.ru/mirrors/guix https://substitutes.nonguix.org";
-const BENCHMARK_DEAD_PRIMARY_SUBSTITUTE_URLS_COMMA: &str = "http://127.0.0.1:9,https://ci.guix.trop.in,https://cache-cdn.guix.moe,https://cache-fi.guix.moe,https://guix.bordeaux.inria.fr,https://nonguix-proxy.ditigal.xyz,https://ci.guix.gnu.org,https://bordeaux.guix.gnu.org,https://cache-sg.guix.moe,https://mirror.yandex.ru/mirrors/guix,https://substitutes.nonguix.org";
 const SYSTEM_BUILD_BENCHMARK_NAME: &str = "system-build";
 const SYSTEM_BUILD_CONFIG_PATH: &str = "/tmp/guix-p2p-system-benchmark.scm";
 
 impl HttpCondition {
-    fn substitute_urls(self) -> &'static str {
+    fn substitute_urls(self) -> String {
         match self {
             HttpCondition::Normal | HttpCondition::Slow | HttpCondition::Flaky => {
-                BENCHMARK_SUBSTITUTE_URLS_COMMA
+                benchmark_substitute_url_groups().join(",")
             },
-            HttpCondition::SinglePrimary => BENCHMARK_PRIMARY_SUBSTITUTE_URL,
-            HttpCondition::SingleSecondary => BENCHMARK_SECONDARY_SUBSTITUTE_URL,
-            HttpCondition::DeadPrimary => BENCHMARK_DEAD_PRIMARY_SUBSTITUTE_URLS_COMMA,
+            HttpCondition::SinglePrimary => BENCHMARK_PRIMARY_SUBSTITUTE_URL.to_string(),
+            HttpCondition::SingleSecondary => BENCHMARK_SECONDARY_SUBSTITUTE_URL.to_string(),
+            HttpCondition::DeadPrimary => {
+                format!("http://127.0.0.1:9,{}", benchmark_substitute_url_groups().join(","))
+            },
         }
     }
 
@@ -429,8 +434,16 @@ impl HttpCondition {
     }
 
     fn vm_substitute_urls(self) -> String {
-        self.substitute_urls().to_string()
+        self.substitute_urls()
     }
+}
+
+fn benchmark_substitute_url_groups() -> [&'static str; 3] {
+    [
+        BENCHMARK_THIRD_PARTY_SUBSTITUTE_URLS_COMMA,
+        BENCHMARK_OFFICIAL_SUBSTITUTE_URLS_COMMA,
+        BENCHMARK_ADDITIONAL_SUBSTITUTE_URLS_COMMA,
+    ]
 }
 
 impl std::fmt::Display for HttpCondition {
@@ -2233,12 +2246,13 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                             continue;
                         }
 
+                        let substitute_urls = condition.substitute_urls();
                         let result = match mode {
                             BenchmarkMode::Http => run_http_benchmark(
                                 &run_dir,
                                 &package.store_path,
                                 &tools,
-                                condition.substitute_urls(),
+                                &substitute_urls,
                             )
                             .map(|elapsed_ms| P2pBuildOutcome {
                                 elapsed_ms,
@@ -2273,7 +2287,7 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                                     node_b_dashboard_port,
                                     dashboard_bind: "127.0.0.1",
                                     node_b_policy: policy,
-                                    substitute_urls: condition.substitute_urls(),
+                                    substitute_urls: &substitute_urls,
                                     strict_p2p_evidence: *mode == BenchmarkMode::P2pOnly,
                                     hold_after_success: false,
                                     vm_direct: false,
@@ -5517,6 +5531,14 @@ mod tests {
 
     #[test]
     fn benchmark_http_conditions_prefer_reliable_substitute_urls() {
+        assert_eq!(
+            benchmark_substitute_url_groups(),
+            [
+                "https://ci.guix.trop.in,https://cache-cdn.guix.moe,https://cache-fi.guix.moe,https://guix.bordeaux.inria.fr,https://nonguix-proxy.ditigal.xyz",
+                "https://ci.guix.gnu.org,https://bordeaux.guix.gnu.org",
+                "https://cache-sg.guix.moe,https://mirror.yandex.ru/mirrors/guix,https://substitutes.nonguix.org"
+            ]
+        );
         assert!(
             HttpCondition::Normal
                 .substitute_urls()
