@@ -88,7 +88,7 @@ guix-p2p (Rust, libp2p)
 | Transport | QUIC (libp2p-quic) + TCP fallback | QUIC is the default listen address; TCP is enabled for restricted containers and networks where UDP is unavailable |
 | NAT traversal | Built into libp2p (autonat/relay/dcutr), deferred post-MVP | Significant complexity; initial users need open ports or IPv6 |
 | Daemon integration | Unix socket relay + Guix substitute extension | Zero daemon C++ changes; relay gives <1ms startup |
-| Narinfos | HTTP fetch from official substitute URLs, optional local metadata file for offline harnesses | Tiny (<500 bytes); existing trust chain unchanged for HTTP, while local metadata lets seeded p2p-only tests avoid network lookup |
+| Narinfos | HTTP fetch from official substitute URLs, optional local metadata file for offline harnesses | Tiny (<500 bytes); existing trust chain unchanged for HTTP, while local metadata is reserved for explicit offline tests |
 | Nars | DHT + swarm; not-found replies let guix-daemon chain to HTTP substituters | Heavy payload; distributed across peers for P2P |
 | Distribution | External project, crates.io for development, Guix channel for packaging | Not targeting upstream Guix inclusion (would need pure Guile) |
 
@@ -171,9 +171,9 @@ remote substitute servers. The file has a top-level `narinfos` array with
 optional `download_size` fields. This is intended for offline/local benchmark
 harnesses that pre-seed store paths and already know the corresponding NAR
 hashes. VM benchmarks use remote substitute-server narinfo lookups for public
-package and profile p2p modes. Only the synthetic `system-build` suite copies
-local metadata into the fetch node because that exact VM system output is not
-expected to have public substitute narinfo.
+package, profile, and system-build p2p modes. If the benchmark target lacks
+public substitute narinfo, the p2p benchmark should fail instead of injecting
+generated local metadata.
 If local metadata has `nar_size = 0`, p2p downloads derive the block count from
 the provider handshake and still verify the final NAR hash.
 

@@ -2624,34 +2624,6 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
             let vm_nar_size = seed_metadata.1;
             package.store_path = store_path.clone();
             package.nar_hash = vm_nar_hash.clone();
-            let use_local_narinfo = is_system_build_benchmark(&package.name);
-            let remote_local_narinfo_path = if use_local_narinfo {
-                let local_narinfo_path = output_dir.join(format!(
-                    "{}-{}-local-narinfo.json",
-                    slugify_node_name(&package.name),
-                    condition
-                ));
-                write_vm_benchmark_local_narinfo_metadata_from_vm(
-                    &condition_config,
-                    &seed_node.name,
-                    &local_narinfo_path,
-                    &store_path,
-                    &vm_nar_hash,
-                    vm_nar_size,
-                )
-                .with_context(|| {
-                    format!("failed to write VM benchmark narinfo metadata for {}", package.name)
-                })?;
-                let fetch_node = registry.node(&opts.fetch_node)?;
-                let remote_path = "/tmp/guix-p2p-b-local-narinfo.json";
-                push_file_to_node(&condition_config, fetch_node, &local_narinfo_path, remote_path)
-                    .with_context(|| {
-                        format!("failed to push local narinfo metadata to {}", opts.fetch_node)
-                    })?;
-                Some(remote_path)
-            } else {
-                None
-            };
 
             for mode in &opts.modes {
                 for iteration in 1..=opts.iterations {
@@ -2699,7 +2671,7 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                                 &[],
                                 None,
                                 None,
-                                remote_local_narinfo_path,
+                                None,
                                 VmDaemonIntegration::RawExtension,
                             )
                             .map(|mut phases| {
@@ -3976,88 +3948,6 @@ fn write_local_narinfo_metadata_with_guix(
             }))
         })
         .collect::<anyhow::Result<_>>()?;
-    let document = serde_json::json!({ "narinfos": narinfos });
-    std::fs::write(path, serde_json::to_vec_pretty(&document)?)
-        .with_context(|| format!("failed to write {}", path.display()))
-}
-
-fn write_vm_benchmark_local_narinfo_metadata_from_vm(
-    config: &VmConfig,
-    node_name: &str,
-    path: &std::path::Path,
-    vm_store_path: &str,
-    vm_nar_hash: &str,
-    vm_nar_size: Option<u64>,
-) -> anyhow::Result<()> {
-    let registry = VmRegistry::load(config)?;
-    let node = registry.node(node_name)?;
-    let command = format!(
-        r#"
-set -eu
-STORE_PATH={store_path}
-guix gc -R "$STORE_PATH" | sort -u | while IFS= read -r path; do
-  [ -n "$path" ] || continue
-  printf 'PATH\t%s\n' "$path"
-  printf 'HASH\t%s\n' "$(guix hash -S nar -f hex "$path")"
-  printf 'REFS'
-  guix gc --references "$path" | sort -u | while IFS= read -r ref; do
-    [ -n "$ref" ] || continue
-    printf '\t%s' "$ref"
-  done
-  printf '\nEND\n'
-done
-"#,
-        store_path = shell_quote(vm_store_path)
-    );
-    let output = ssh_run(config, node, &command)?;
-    let mut narinfos = Vec::new();
-    let mut current_path: Option<String> = None;
-    let mut current_hash: Option<String> = None;
-    let mut current_refs: Vec<String> = Vec::new();
-
-    for line in output.lines() {
-        if let Some(value) = line.strip_prefix("PATH\t") {
-            current_path = Some(value.to_string());
-            current_hash = None;
-            current_refs.clear();
-        } else if let Some(value) = line.strip_prefix("HASH\t") {
-            current_hash = Some(value.to_string());
-        } else if let Some(value) = line.strip_prefix("REFS") {
-            current_refs =
-                value.split('\t').filter(|part| !part.is_empty()).map(str::to_string).collect();
-        } else if line == "END" {
-            let store_path = current_path
-                .take()
-                .ok_or_else(|| anyhow::anyhow!("VM metadata block ended without PATH"))?;
-            let nar_hash = current_hash
-                .take()
-                .ok_or_else(|| anyhow::anyhow!("VM metadata block ended without HASH"))?;
-            let nar_size = if store_path == vm_store_path { vm_nar_size.unwrap_or(0) } else { 0 };
-            narinfos.push(serde_json::json!({
-                "store_path": store_path,
-                "nar_hash": nar_hash,
-                "nar_size": nar_size,
-                "references": current_refs,
-                "deriver": null,
-                "download_size": nar_size
-            }));
-            current_refs = Vec::new();
-        }
-    }
-
-    if !narinfos.iter().any(|entry| {
-        entry.get("store_path").and_then(serde_json::Value::as_str) == Some(vm_store_path)
-    }) {
-        narinfos.push(serde_json::json!({
-            "store_path": vm_store_path,
-            "nar_hash": vm_nar_hash,
-            "nar_size": vm_nar_size.unwrap_or(0),
-            "references": [],
-            "deriver": null,
-            "download_size": vm_nar_size.unwrap_or(0)
-        }));
-    }
-
     let document = serde_json::json!({ "narinfos": narinfos });
     std::fs::write(path, serde_json::to_vec_pretty(&document)?)
         .with_context(|| format!("failed to write {}", path.display()))
