@@ -326,16 +326,18 @@ error.
   `min_providers` in config.
 - Swarm download stalls (no new blocks for `stall_timeout_secs` (30s)) → abort, reply not-found
 - Nar hash verification failed → reply not-found
-- Narinfo signature verification failed → report error, no fallback (security)
+- Narinfo signature verification failed for one substitute URL → try the next
+  configured substitute URL; if none verify, report an error
 
 Narinfo flow:
 1. Check NarinfoCache (60s TTL, shared via `std::sync::Mutex`)
-2. `reqwest` GET `<substitute_url>/<hash-part>.narinfo`
-3. Verify Guix's SPKI signature with libgcrypt against `/etc/guix/acl`
-   public keys
+2. For each configured substitute URL, `reqwest` GET
+   `<substitute_url>/<hash-part>.narinfo`
+3. Verify each candidate's Guix SPKI signature with libgcrypt against
+   `/etc/guix/acl` public keys
 4. Decode `NarHash: sha256:<nix-base32>` to raw SHA-256 bytes for DHT/swarm
    keys
-5. Cache result, return parsed Narinfo
+5. Cache and return the first verified Narinfo
 
 ## Crate Dependencies
 

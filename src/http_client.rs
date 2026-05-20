@@ -72,31 +72,38 @@ pub async fn fetch_narinfo(
         return Ok(cached);
     }
 
-    let narinfo = fetch_narinfo_raw(config, hash_part, client).await?;
-
     let keys = load_acl_keys(&config.acl_path)
         .map_err(|e| HttpClientError::Other(format!("failed to load ACL: {}", e)))?;
-
-    if !verify_narinfo_signature(&narinfo, &keys) {
-        tracing::warn!("Narinfo signature verification failed for {}", hash_part);
-        return Err(HttpClientError::BadSignature);
-    }
+    let narinfo = fetch_verified_narinfo(config, hash_part, client, &keys).await?;
 
     cache.lock().unwrap().put(hash_part.to_string(), narinfo.clone());
 
     Ok(narinfo)
 }
 
-async fn fetch_narinfo_raw(
+async fn fetch_verified_narinfo(
     config: &Config,
     hash_part: &str,
     client: &reqwest::Client,
+    keys: &[ed25519_dalek::VerifyingKey],
 ) -> Result<Narinfo, HttpClientError> {
+    let mut saw_bad_signature = false;
     for base_url in &config.substitute_urls {
         let url = format!("{}/{}.narinfo", base_url.trim_end_matches('/'), hash_part);
         tracing::debug!("Fetching narinfo from {}", url);
         match fetch_narinfo_from_url(&url, client).await {
-            Ok(info) => return Ok(info),
+            Ok(info) => {
+                if verify_narinfo_signature(&info, keys) {
+                    return Ok(info);
+                }
+                saw_bad_signature = true;
+                tracing::warn!(
+                    "Narinfo signature verification failed for {} from {}",
+                    hash_part,
+                    url
+                );
+                continue;
+            },
             Err(HttpClientError::Http(e)) if e.status() == Some(reqwest::StatusCode::NOT_FOUND) => {
                 continue;
             },
@@ -106,7 +113,11 @@ async fn fetch_narinfo_raw(
             },
         }
     }
-    Err(HttpClientError::NotFound)
+    if saw_bad_signature {
+        Err(HttpClientError::BadSignature)
+    } else {
+        Err(HttpClientError::NotFound)
+    }
 }
 
 async fn fetch_narinfo_from_url(
@@ -385,6 +396,22 @@ fn decompress_lzip(data: &[u8]) -> Result<Vec<u8>, HttpClientError> {
 mod tests {
     use super::*;
 
+    const GUIX_SIGNING_KEY_HEX: &str =
+        "7D602902D3A2DBB83F8A0FB98602A754C5493B0B778C8D1DD4E0F41DE14DE34F";
+
+    const VALID_HELLO_NARINFO: &str = "\
+StorePath: /gnu/store/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2
+NarHash: sha256:0qhasy0w9w9mfv0vacgzymxl4nww8cslyza5x2ci42v7i2b13lyl
+NarSize: 282616
+References: cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2 m2vhzr0dy352cn59sgcklcaykprrr4j6-gcc-14.3.0-lib yj053cys0724p7vs9kir808x7fivz17m-glibc-2.41
+System: x86_64-linux
+Deriver: rxw8g87bf61bwbagfq38sp5xwy28jb5d-hello-2.12.2.drv
+Signature: 1;bayfront;KHNpZ25hdHVyZSAKIChkYXRhIAogIChmbGFncyByZmM2OTc5KQogIChoYXNoIHNoYTI1NiAjMENDQjE0QjFFNkZFQUI4OTIyRjVGN0NFQjQ3QzRENUQ5N0E4QTFFNzk3RkIyM0RDREY5N0QyQkRFODA4MjYyQSMpCiAgKQogKHNpZy12YWwgCiAgKGVjZHNhIAogICAociAjMEJBNkY2ODkzQjhEQThCQ0ZCNUMxNDk2QTUwMDA4MTIzNUUyMjFCQkU4RDFCNUJBOEQ3NTk1REUyNkYxNUYxNCMpCiAgIChzICMwM0RCOUQ0MzA1QUEwRjQ3N0NCMDM4MkEyMzJBNzFGNUMyQkFEOEJBRjEwQzJGNURCMUM0NTZFNTE1MjA5RTIxIykKICAgKQogICkKIChwdWJsaWMta2V5IAogIChlY2MgCiAgIChjdXJ2ZSBFZDI1NTE5KQogICAocSAjN0Q2MDI5MDJEM0EyREJCODNGOEEwRkI5ODYwMkE3NTRDNTQ5M0IwQjc3OEM4RDFERDRFMEY0MURFMTRERTM0RiMpCiAgICkKICApCiApCg==
+URL: nar/lzip/cs56i9digj9qg1bd383cmxc6xrfpdn9n-hello-2.12.2
+Compression: lzip
+FileSize: 68076
+";
+
     fn narinfo_with_urls(urls: Vec<NarUrl>) -> Narinfo {
         Narinfo {
             store_path: "/gnu/store/example".into(),
@@ -404,6 +431,10 @@ mod tests {
 
     fn narinfo_with_hash_and_urls(nar_hash: String, urls: Vec<NarUrl>) -> Narinfo {
         Narinfo { nar_hash, ..narinfo_with_urls(urls) }
+    }
+
+    fn acl_with_key(hex_key: &str) -> String {
+        format!("(acl (entry (public-key (ecc (curve Ed25519) (q #{hex_key}#)))))")
     }
 
     #[test]
@@ -559,6 +590,57 @@ mod tests {
         assert_eq!(download.source_url, format!("{}/good", base_url));
         assert!(download.verified);
         assert!(progress_events.contains(&(format!("{}/good", base_url), 8, 8)));
+    }
+
+    #[tokio::test]
+    async fn fetch_narinfo_tries_next_substitute_after_bad_signature() {
+        use axum::{Router, routing::get};
+
+        let bad_narinfo = VALID_HELLO_NARINFO.replacen("NarSize: 282616", "NarSize: 282617", 1);
+        let bad_app = Router::new().route(
+            "/cs56i9digj9qg1bd383cmxc6xrfpdn9n.narinfo",
+            get(move || async move { bad_narinfo }),
+        );
+        let bad_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bad_base = format!("http://{}", bad_listener.local_addr().unwrap());
+        let bad_server = tokio::spawn(async move {
+            axum::serve(bad_listener, bad_app).await.unwrap();
+        });
+
+        let good_app = Router::new().route(
+            "/cs56i9digj9qg1bd383cmxc6xrfpdn9n.narinfo",
+            get(|| async { VALID_HELLO_NARINFO }),
+        );
+        let good_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let good_base = format!("http://{}", good_listener.local_addr().unwrap());
+        let good_server = tokio::spawn(async move {
+            axum::serve(good_listener, good_app).await.unwrap();
+        });
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let acl_path = temp_dir.path().join("acl");
+        std::fs::write(&acl_path, acl_with_key(GUIX_SIGNING_KEY_HEX)).unwrap();
+        let mut config = crate::config::Config::load(
+            None,
+            None,
+            None,
+            Some(temp_dir.path().join("cache").display().to_string()),
+            None,
+            None,
+        );
+        config.acl_path = acl_path;
+        config.substitute_urls = vec![bad_base, good_base];
+        config.request_timeout_secs = 5;
+        let client = create_http_client(&config).unwrap();
+        let cache = std::sync::Mutex::new(NarinfoCache::new(60));
+
+        let narinfo = fetch_narinfo(&config, "cs56i9digj9qg1bd383cmxc6xrfpdn9n", &cache, &client)
+            .await
+            .unwrap();
+
+        bad_server.abort();
+        good_server.abort();
+        assert_eq!(narinfo.nar_size, 282616);
     }
 
     #[tokio::test]
