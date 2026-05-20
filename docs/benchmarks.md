@@ -120,12 +120,28 @@ reconfigure` itself yet; that would require a separate driver for building and
 activating a full operating-system generation inside the fetch VM.
 
 `system-build` is the preferred reconfigure precursor benchmark. It builds a
-complete operating-system generation inside the VM with grafts enabled, seeds
-the resulting grafted system output from the seed VM, and fetches the same
-grafted output on the fetch VM. It intentionally runs `guix system build`
-rather than `guix system reconfigure`, so it measures the substitute/build
-portion of reconfiguration without bootloader, Shepherd, or activation side
-effects.
+complete operating-system generation inside the seed VM with grafts enabled,
+records the closure items that have public substitute narinfo, and seeds those
+items through `guix-p2p`.
+The generated top-level system output is not timed as a substitute fetch
+because it is local to the benchmark and usually has no public narinfo. During
+the timed step, each mode invokes the substituter protocol directly for the
+recorded public closure paths and restores each NAR to a temporary destination.
+This measures the downloadable system payload without relying on `guix build
+/gnu/store/...`, which does not force missing store output paths to be
+realized.
+The system-build evidence check does not require the generated top-level output
+to appear in the fetch-node P2P catalog. For `p2p-only` and `p2p-first`, it
+requires seed-node block-serving evidence instead; `http-first` may complete
+through HTTP before P2P is used.
+Before each system-build measurement, the harness prepares the mode runner by
+realizing the system once and then deleting the top-level output plus closure
+items that the seed node already identified as having public substitute
+narinfo. Generated/non-public closure items remain local, so each mode is cold
+for downloadable substitutes without forcing Guix to rebuild the whole
+operating-system closure during the timed run.
+The top-level output is deleted before the public closure paths because Guix
+will keep referenced paths alive while the generated system output still exists.
 
 For multiple seeders, start and push additional VM nodes, then pass them as a
 comma-separated list:
@@ -152,23 +168,30 @@ The CSV keeps the original result columns and appends phase timings:
 - `seed_ms`: seed-node setup for the package/condition.
 - `prepare_ms`: realize dependencies and remove only the target output.
 - `p2p_start_ms`: start the fetch-node `guix-p2p` daemon.
-- `provider_wait_ms`: wait until the target is visible through P2P.
+- `provider_wait_ms`: wait until the target is visible through P2P. This is
+  omitted for `system-build`, where availability is checked by fetching the
+  recorded public closure paths.
 - `daemon_start_ms`: start the extension-enabled raw `guix-daemon`.
-- `import_ms`: run the final `guix build` import.
+- `import_ms`: run the final package import, or for `system-build`, fetch,
+  restore, and verify the recorded public closure NARs in a temporary
+  destination tree.
 - `total_ms`: total measured mode time.
 
 Failure records keep the full error chain in `results.csv` and write the same
 details to `error.log`. The Markdown report keeps the failed-run table concise
 and points at the per-run log path.
+For `system-build`, failed p2p runs also include the recorded public closure
+path head and the public-closure fetch log tail, so the failing substitute path
+is visible from the uploaded artifact.
 
 VM benchmark p2p modes do not preload local narinfo metadata into the fetch
 node. The fetch-node `guix-p2p` daemon performs the normal remote narinfo
 lookup, so `p2p-only` means "no HTTP NAR fallback" rather than "metadata is
-already local." This applies to `system-build` too: if the exact VM system
-output does not have public substitute narinfo, the p2p benchmark should fail
-instead of masking that with generated local metadata. The VM `push-binary`
-command installs the substitute extension and loader wrappers for copied Rust
-binaries so they can find their Guix runtime libraries inside the guest.
+already local." For `system-build`, the timed path fetches only public-narinfo
+closure substitutes through the configured P2P/HTTP policy and restores them
+outside `/gnu/store`. The VM `push-binary` command installs the substitute extension and
+loader wrappers for copied Rust binaries so they can find their Guix runtime
+libraries inside the guest.
 Provider selection now filters candidates through peer reputation and connection
 backoff, so stale provider records should be penalized after handshake timeouts
 instead of being retried first on later downloads. Remaining benchmark work

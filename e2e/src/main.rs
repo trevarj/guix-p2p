@@ -655,6 +655,8 @@ struct VmSeed {
     package: String,
     store_path: String,
     peer_id: String,
+    #[serde(default)]
+    public_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -1473,7 +1475,12 @@ fn vm_seed(config: &VmConfig, name: &str, package: &str) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("seed output did not include store_path"))?;
     let peer_id = parse_key_line(&output, "peer_id")
         .ok_or_else(|| anyhow::anyhow!("seed output did not include peer_id"))?;
-    let seed = VmSeed { package: package.to_string(), store_path, peer_id };
+    let public_paths = if is_system_build_benchmark(package) {
+        vm_read_system_build_public_seed_paths(config, &node)?
+    } else {
+        Vec::new()
+    };
+    let seed = VmSeed { package: package.to_string(), store_path, peer_id, public_paths };
     registry.node_mut(name)?.last_seed = Some(seed.clone());
     registry.save(config)?;
     write_vm_env(config, &node, &seed)?;
@@ -1481,6 +1488,23 @@ fn vm_seed(config: &VmConfig, name: &str, package: &str) -> anyhow::Result<()> {
     print_vm_env(&seed);
     println!("# Or load them with: cargo run -p guix-p2p-e2e -- vm env {}", node.name);
     Ok(())
+}
+
+fn vm_read_system_build_public_seed_paths(
+    config: &VmConfig,
+    node: &VmNode,
+) -> anyhow::Result<Vec<String>> {
+    let output = ssh_run(config, node, "cat /tmp/e2e-system-build-public-paths 2>/dev/null")?;
+    let paths: Vec<String> = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("/gnu/store/"))
+        .map(str::to_string)
+        .collect();
+    if paths.is_empty() {
+        anyhow::bail!("system-build seed did not write public closure paths");
+    }
+    Ok(paths)
 }
 
 fn vm_bootstrap(config: &VmConfig, name: &str) -> anyhow::Result<()> {
@@ -1553,14 +1577,21 @@ fn vm_start_daemon_with_integration(
     config: &VmConfig,
     name: &str,
     integration: VmDaemonIntegration,
+    max_jobs: u8,
 ) -> anyhow::Result<()> {
     match integration {
-        VmDaemonIntegration::RawExtension => vm_start_raw_extension_daemon(config, name),
-        VmDaemonIntegration::ChannelService => vm_start_channel_service_daemon(config, name),
+        VmDaemonIntegration::RawExtension => vm_start_raw_extension_daemon(config, name, max_jobs),
+        VmDaemonIntegration::ChannelService => {
+            vm_start_channel_service_daemon(config, name, max_jobs)
+        },
     }
 }
 
-fn vm_start_raw_extension_daemon(config: &VmConfig, name: &str) -> anyhow::Result<()> {
+fn vm_start_raw_extension_daemon(
+    config: &VmConfig,
+    name: &str,
+    max_jobs: u8,
+) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
     push_extension_to_node(config, node)?;
@@ -1576,7 +1607,7 @@ GUIX_P2P_BIN="${GUIX_P2P_E2E_P2P_BIN:-guix-p2p}" \
 /run/current-system/profile/bin/guix-daemon \
   --disable-chroot \
   --build-users-group=guixbuild \
-  --max-jobs=0 \
+  --max-jobs=__MAX_JOBS__ \
   --listen=/tmp/e2e-guix-daemon.sock \
   > /tmp/e2e-guix-daemon.log 2>&1 &
 echo $! > /tmp/e2e-guix-daemon.pid
@@ -1592,13 +1623,18 @@ while [ ! -S /tmp/e2e-guix-daemon.sock ]; do
     sleep 1
 done
 echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
-"#;
-    let output = ssh_run(config, node, remote)?;
+"#
+    .replace("__MAX_JOBS__", &max_jobs.to_string());
+    let output = ssh_run(config, node, &remote)?;
     print!("{output}");
     Ok(())
 }
 
-fn vm_start_channel_service_daemon(config: &VmConfig, name: &str) -> anyhow::Result<()> {
+fn vm_start_channel_service_daemon(
+    config: &VmConfig,
+    name: &str,
+    max_jobs: u8,
+) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
     push_extension_to_node(config, node)?;
@@ -1643,10 +1679,10 @@ env \
   GUIX_EXTENSIONS_PATH="$GUIX_EXTENSIONS_PATH" \
   GUIX_P2P_SOCKET="$GUIX_P2P_SOCKET" \
   GUIX_P2P_BIN="$GUIX_P2P_BIN" \
-  /run/current-system/profile/bin/guix-daemon \
+    /run/current-system/profile/bin/guix-daemon \
     --disable-chroot \
     --build-users-group=guixbuild \
-    --max-jobs=0 \
+    --max-jobs=__MAX_JOBS__ \
     --listen=/tmp/e2e-guix-daemon.sock \
     > /tmp/e2e-guix-daemon.log 2>&1 &
 echo $! > /tmp/e2e-guix-daemon.pid
@@ -1663,8 +1699,9 @@ while [ ! -S /tmp/e2e-guix-daemon.sock ]; do
 done
 echo CHANNEL_PROOF_DAEMON_ENV_READY
 echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
-"#;
-    let output = ssh_run(config, node, remote)?;
+"#
+    .replace("__MAX_JOBS__", &max_jobs.to_string());
+    let output = ssh_run(config, node, &remote)?;
     print!("{output}");
     Ok(())
 }
@@ -1855,6 +1892,7 @@ fn vm_fetch_timed_with_options(
     registry.node_mut(name)?.last_fetch = Some(target.clone());
     registry.save(config)?;
     let started = std::time::Instant::now();
+    let is_system_build = is_system_build_benchmark(&target.package);
 
     let phase_start = std::time::Instant::now();
     vm_start_fetch_p2p(
@@ -1869,27 +1907,34 @@ fn vm_fetch_timed_with_options(
     )?;
     let p2p_start_ms = phase_start.elapsed().as_millis();
 
-    let phase_start = std::time::Instant::now();
-    vm_require_fetch_target_available(config, name, &target)?;
-    let provider_wait_ms = phase_start.elapsed().as_millis();
+    let provider_wait_ms = if is_system_build {
+        None
+    } else {
+        let phase_start = std::time::Instant::now();
+        vm_require_fetch_target_available(config, name, &target)?;
+        Some(phase_start.elapsed().as_millis())
+    };
 
     let phase_start = std::time::Instant::now();
-    vm_start_daemon_with_integration(config, name, integration)?;
+    let max_jobs = if is_system_build { 1 } else { 0 };
+    vm_start_daemon_with_integration(config, name, integration, max_jobs)?;
     let daemon_start_ms = phase_start.elapsed().as_millis();
 
     let phase_start = std::time::Instant::now();
-    let build_command = if is_system_build_benchmark(&target.package) {
+    let build_command = if is_system_build {
         format!(
             r#"
 set -eu
-test ! -e {store_path}
-{write_config}
-GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock guix system build {config_path}
-test -d {store_path} && echo IMPORTED_OUTPUT_IN_NODE_STORE
+STORE_PATH={store_path}
+P2P="${{GUIX_P2P_E2E_P2P_BIN:-guix-p2p}}"
+test ! -e "$STORE_PATH"
+{public_fetch}
 "#,
             store_path = shell_quote(&target.store_path),
-            write_config = system_build_config_write_command(),
-            config_path = shell_quote(SYSTEM_BUILD_CONFIG_PATH)
+            public_fetch = system_build_public_closure_fetch_command(
+                Some("/tmp/guix-p2p-b/guix-p2p.sock"),
+                None
+            )
         )
     } else {
         format!(
@@ -1904,17 +1949,33 @@ test -d {store_path} && echo IMPORTED_OUTPUT_IN_NODE_STORE
         Ok(output) => output,
         Err(e) => {
             let p2p_tail =
-                ssh_run(config, &node, "tail -n 160 /tmp/guix-p2p-b.log 2>/dev/null || true")
+                ssh_run(config, &node, "tail -n 260 /tmp/guix-p2p-b.log 2>/dev/null || true")
                     .unwrap_or_else(|tail_err| format!("failed to read p2p log tail: {tail_err}"));
             let daemon_tail =
                 ssh_run(config, &node, "tail -n 80 /tmp/e2e-guix-daemon.log 2>/dev/null || true")
                     .unwrap_or_else(|tail_err| {
                         format!("failed to read daemon log tail: {tail_err}")
                     });
+            let system_build_tail = if is_system_build {
+                ssh_run(
+                    config,
+                    &node,
+                    "printf 'public paths head:\\n'; sed -n '1,20p' \
+                     /tmp/e2e-system-build-public-paths 2>/dev/null || true; printf '\\npublic \
+                     fetch log tail:\\n'; tail -n 160 /tmp/e2e-system-build-public-fetch.log \
+                     2>/dev/null || true",
+                )
+                .unwrap_or_else(|tail_err| {
+                    format!("failed to read system-build fetch diagnostics: {tail_err}")
+                })
+            } else {
+                String::new()
+            };
             return Err(e).with_context(|| {
                 format!(
                     "fetch failed; fetch-node p2p log tail:\n{p2p_tail}\nfetch-node guix-daemon \
-                     log tail:\n{daemon_tail}"
+                     log tail:\n{daemon_tail}\nsystem-build fetch diagnostics:\n\
+                     {system_build_tail}"
                 )
             });
         },
@@ -1922,10 +1983,14 @@ test -d {store_path} && echo IMPORTED_OUTPUT_IN_NODE_STORE
     let import_ms = phase_start.elapsed().as_millis();
 
     print!("{output}");
-    print_vm_dashboard_evidence(config, &registry, &node, &target)?;
+    if is_system_build {
+        print_vm_system_build_evidence(config, &target, policy)?;
+    } else {
+        print_vm_dashboard_evidence(config, &registry, &node, &target)?;
+    }
     Ok(BenchmarkPhaseTimings {
         p2p_start_ms: Some(p2p_start_ms),
-        provider_wait_ms: Some(provider_wait_ms),
+        provider_wait_ms,
         daemon_start_ms: Some(daemon_start_ms),
         import_ms: Some(import_ms),
         total_ms: Some(started.elapsed().as_millis()),
@@ -1988,15 +2053,14 @@ test ! -e "$STORE_PATH"
 set -eu
 STORE_PATH={store_path}
 SUBSTITUTE_URLS={substitute_urls}
-{write_config}
-guix system build --substitute-urls="$SUBSTITUTE_URLS" {config_path}
-test -d "$STORE_PATH"
-echo HTTP_IMPORTED_OUTPUT_IN_NODE_STORE
+P2P="${{GUIX_P2P_E2E_P2P_BIN:-guix-p2p}}"
+test ! -e "$STORE_PATH"
+{public_fetch}
 "#,
             store_path = shell_quote(&target.store_path),
             substitute_urls = shell_quote(&substitute_urls_for_guix(&config.substitute_urls)),
-            write_config = system_build_config_write_command(),
-            config_path = shell_quote(SYSTEM_BUILD_CONFIG_PATH)
+            public_fetch =
+                system_build_public_closure_fetch_command(None, Some("$SUBSTITUTE_URLS"))
         )
     } else {
         format!(
@@ -2622,11 +2686,33 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
                 .with_context(|| format!("failed to read VM seed metadata for {store_path}"))?;
             let vm_nar_hash = seed_metadata.0.clone().unwrap_or_else(|| package.nar_hash.clone());
             let vm_nar_size = seed_metadata.1;
+            let system_build_public_paths = if is_system_build_benchmark(&package.name) {
+                seed.public_paths.clone()
+            } else {
+                Vec::new()
+            };
             package.store_path = store_path.clone();
             package.nar_hash = vm_nar_hash.clone();
 
             for mode in &opts.modes {
                 for iteration in 1..=opts.iterations {
+                    if is_system_build_benchmark(&package.name) {
+                        let runner = match mode {
+                            BenchmarkMode::Http => &opts.http_node,
+                            BenchmarkMode::P2pOnly
+                            | BenchmarkMode::P2pFirst
+                            | BenchmarkMode::HttpFirst => &opts.fetch_node,
+                        };
+                        vm_prepare_system_build_runner(
+                            &condition_config,
+                            runner,
+                            &store_path,
+                            &system_build_public_paths,
+                        )
+                        .with_context(|| {
+                            format!("failed to prepare VM benchmark runner {runner} before {mode}")
+                        })?;
+                    }
                     tracing::info!(
                         "vm benchmark package={} condition={} mode={} iteration={}/{}",
                         package.name,
@@ -2799,6 +2885,134 @@ fn vm_benchmark(opts: VmBenchmarkOptions) -> anyhow::Result<()> {
     }
 }
 
+fn vm_prepare_system_build_runner(
+    config: &VmConfig,
+    name: &str,
+    store_path: &str,
+    public_paths: &[String],
+) -> anyhow::Result<()> {
+    tracing::info!("preparing VM system-build runner {name} with a cold public closure");
+    if public_paths.is_empty() {
+        anyhow::bail!("system-build seed did not record public closure paths");
+    }
+    let registry = VmRegistry::load(config)?;
+    let node = registry.node(name)?;
+    wait_ssh(config, node)?;
+    let public_paths = public_paths.join("\n");
+    let command = format!(
+        r#"
+set -eu
+STORE_PATH={store_path}
+SUBSTITUTE_URLS={substitute_urls}
+PUBLIC_PATHS=/tmp/e2e-system-build-public-paths
+{write_config}
+guix system build --substitute-urls="$SUBSTITUTE_URLS" {config_path} \
+  >/tmp/e2e-system-build-prepare.log
+cat > "$PUBLIC_PATHS" <<'EOF_PUBLIC_PATHS'
+{public_paths}
+EOF_PUBLIC_PATHS
+if [ -s "$PUBLIC_PATHS" ]; then
+  PUBLIC_COUNT="$(wc -l < "$PUBLIC_PATHS")"
+else
+  PUBLIC_COUNT=0
+fi
+if [ -e "$STORE_PATH" ]; then
+  guix gc -D "$STORE_PATH" >/dev/null || true
+fi
+test ! -e "$STORE_PATH"
+REMOVED_PUBLIC_COUNT=0
+REMAINING_PUBLIC_COUNT=0
+if [ -s "$PUBLIC_PATHS" ]; then
+  while IFS= read -r PUBLIC_PATH; do
+    [ -n "$PUBLIC_PATH" ] || continue
+    if [ -e "$PUBLIC_PATH" ]; then
+      guix gc -D "$PUBLIC_PATH" >/dev/null 2>&1 || true
+    fi
+    if [ -e "$PUBLIC_PATH" ]; then
+      REMAINING_PUBLIC_COUNT=$((REMAINING_PUBLIC_COUNT + 1))
+    else
+      REMOVED_PUBLIC_COUNT=$((REMOVED_PUBLIC_COUNT + 1))
+    fi
+  done < "$PUBLIC_PATHS"
+fi
+if [ "$PUBLIC_COUNT" -gt 0 ] && [ "$REMOVED_PUBLIC_COUNT" -eq 0 ]; then
+  echo "system-build runner prep did not remove any public closure paths" >&2
+  exit 1
+fi
+printf 'SYSTEM_BUILD_RUNNER_PREPARED public_paths=%s removed_public_paths=%s remaining_public_paths=%s store_path=%s\n' \
+  "$PUBLIC_COUNT" "$REMOVED_PUBLIC_COUNT" "$REMAINING_PUBLIC_COUNT" "$STORE_PATH"
+"#,
+        store_path = shell_quote(store_path),
+        substitute_urls = shell_quote(&substitute_urls_for_guix(&config.substitute_urls)),
+        write_config = system_build_config_write_command(),
+        config_path = shell_quote(SYSTEM_BUILD_CONFIG_PATH),
+        public_paths = public_paths
+    );
+    let output = ssh_run(config, node, &command)?;
+    print!("{output}");
+    Ok(())
+}
+
+fn system_build_public_closure_fetch_command(
+    daemon_socket: Option<&str>,
+    substitute_urls_var: Option<&str>,
+) -> String {
+    let fetch_command = if let Some(socket) = daemon_socket {
+        format!("\"$P2P\" --substitute --socket {}", shell_quote(socket))
+    } else {
+        let substitute_urls =
+            substitute_urls_var.expect("HTTP system-build fetch needs substitute URLs");
+        format!(
+            "\"$P2P\" --substitute --policy http-first --substitute-urls \"{substitute_urls}\" \
+                 --cache-dir /tmp/guix-p2p-http-direct"
+        )
+    };
+    format!(
+        r#"PUBLIC_PATHS=/tmp/e2e-system-build-public-paths
+FETCH_LOG=/tmp/e2e-system-build-public-fetch.log
+DEST_ROOT=/tmp/e2e-system-build-public-fetch-dest
+: > "$FETCH_LOG"
+rm -rf "$DEST_ROOT"
+mkdir -p "$DEST_ROOT"
+test -s "$PUBLIC_PATHS"
+PUBLIC_COUNT="$(wc -l < "$PUBLIC_PATHS")"
+MISSING_PUBLIC_COUNT=0
+FETCHED_PUBLIC_COUNT=0
+while IFS= read -r PUBLIC_PATH; do
+  [ -n "$PUBLIC_PATH" ] || continue
+  if [ ! -e "$PUBLIC_PATH" ]; then
+    MISSING_PUBLIC_COUNT=$((MISSING_PUBLIC_COUNT + 1))
+    DEST="$DEST_ROOT/$MISSING_PUBLIC_COUNT"
+    rm -rf "$DEST"
+    printf 'FETCH_PUBLIC_PATH index=%s path=%s\n' "$MISSING_PUBLIC_COUNT" "$PUBLIC_PATH" \
+      | tee -a "$FETCH_LOG"
+    printf 'substitute %s %s\n' "$PUBLIC_PATH" "$DEST" | {fetch_command} 4>&1 \
+      >>"$FETCH_LOG" 2>&1 || {{
+        STATUS="$?"
+        printf 'FETCH_PUBLIC_PATH_COMMAND_FAILED index=%s status=%s path=%s\n' \
+          "$MISSING_PUBLIC_COUNT" "$STATUS" "$PUBLIC_PATH" >&2
+        tail -n 120 "$FETCH_LOG" >&2 || true
+        exit "$STATUS"
+      }}
+  fi
+  if [ "$MISSING_PUBLIC_COUNT" -gt 0 ] && [ ! -e "$DEST" ]; then
+    printf 'FETCH_PUBLIC_PATH_DEST_MISSING index=%s path=%s dest=%s\n' \
+      "$MISSING_PUBLIC_COUNT" "$PUBLIC_PATH" "$DEST" >&2
+    tail -n 120 "$FETCH_LOG" >&2 || true
+    exit 1
+  fi
+  FETCHED_PUBLIC_COUNT=$((FETCHED_PUBLIC_COUNT + 1))
+done < "$PUBLIC_PATHS"
+if [ "$MISSING_PUBLIC_COUNT" -eq 0 ]; then
+  echo "system-build public closure was already present before fetch" >&2
+  exit 1
+fi
+printf 'SYSTEM_BUILD_PUBLIC_CLOSURE_FETCHED public_paths=%s missing_before=%s verified=%s store_path=%s\n' \
+  "$PUBLIC_COUNT" "$MISSING_PUBLIC_COUNT" "$FETCHED_PUBLIC_COUNT" "$STORE_PATH"
+"#
+    )
+}
+
 fn ensure_vm_benchmark_nodes_ready(
     config: &VmConfig,
     seed_nodes: &[String],
@@ -2846,6 +3060,7 @@ fn vm_require_seeders_served_blocks(
 ) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let mut missing = Vec::new();
+    let mut missing_logs = Vec::new();
 
     for name in seed_nodes {
         let node = registry.node(name)?;
@@ -2855,17 +3070,28 @@ fn vm_require_seeders_served_blocks(
             println!("VM_PROOF_SEEDER_BLOCKS_SERVED node={name}");
         } else {
             missing.push(name.clone());
+            missing_logs.push(format!(
+                "--- {name} /tmp/guix-p2p-a.log tail ---\n{}",
+                tail_lines(&log, 120)
+            ));
         }
     }
 
     if !missing.is_empty() {
         anyhow::bail!(
-            "VM proof did not observe block-serving evidence from seed node(s): {}",
-            missing.join(",")
+            "VM proof did not observe block-serving evidence from seed node(s): {}\n{}",
+            missing.join(","),
+            missing_logs.join("\n")
         );
     }
 
     Ok(())
+}
+
+fn tail_lines(text: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..].join("\n")
 }
 
 fn vm_seed_bootstrap_peers(
@@ -3818,6 +4044,24 @@ fn print_vm_dashboard_evidence(
     println!("fetch_node={} catalog_count={}", fetch_node.name, json_array_len(&catalog));
     println!("catalog_entry={}", serde_json::to_string(catalog_entry)?);
     println!("DASHBOARD_EVIDENCE_END");
+    Ok(())
+}
+
+fn print_vm_system_build_evidence(
+    config: &VmConfig,
+    target: &VmFetch,
+    policy: &str,
+) -> anyhow::Result<()> {
+    println!("SYSTEM_BUILD_EVIDENCE_BEGIN");
+    println!("top_level_output={}", target.store_path);
+    println!("top_level_output_realized_locally=true");
+    if policy == "http-first" {
+        println!("p2p_block_serving_required=false");
+    } else {
+        println!("p2p_block_serving_required=true");
+        vm_require_seeders_served_blocks(config, std::slice::from_ref(&target.from))?;
+    }
+    println!("SYSTEM_BUILD_EVIDENCE_END");
     Ok(())
 }
 
@@ -5045,6 +5289,37 @@ if [ -z "$STORE_PATH" ]; then
   echo "guix system build did not print a store path" >&2
   exit 1
 fi
+SEED_PATHS="$STORE_PATH"
+PUBLIC_PATHS=/tmp/e2e-system-build-public-paths
+: > "$PUBLIC_PATHS"
+PUBLIC_SEED_COUNT=0
+for CLOSURE_PATH in $(guix gc -R "$STORE_PATH"); do
+  STORE_HASH="${{CLOSURE_PATH#/gnu/store/}}"
+  STORE_HASH="${{STORE_HASH%%-*}}"
+  NARINFO_URL=''
+  for BASE_URL in $SUBSTITUTE_URLS; do
+    URL="${{BASE_URL%/}}/$STORE_HASH.narinfo"
+    if curl -fsL "$URL" -o /dev/null 2>&1; then
+      NARINFO_URL="$URL"
+      break
+    fi
+  done
+  if [ -n "$NARINFO_URL" ]; then
+    case ",$SEED_PATHS," in
+      *",$CLOSURE_PATH,"*) ;;
+      *)
+        SEED_PATHS="$SEED_PATHS,$CLOSURE_PATH"
+        printf '%s\n' "$CLOSURE_PATH" >> "$PUBLIC_PATHS"
+        PUBLIC_SEED_COUNT=$((PUBLIC_SEED_COUNT + 1))
+        ;;
+    esac
+  fi
+done
+if [ "$PUBLIC_SEED_COUNT" -eq 0 ]; then
+  echo "system build closure did not contain public substitute narinfo" >&2
+  echo "seed node needs signed narinfo from one of: $SUBSTITUTE_URLS" >&2
+  exit 1
+fi
 mkdir -p "$CACHE_DIR" "$HOME/.config/guix-p2p"
 printf 'min_providers = 1\n' > "$HOME/.config/guix-p2p/config.toml"
 if [ -f /tmp/guix-p2p-a.pid ]; then
@@ -5066,7 +5341,7 @@ RUST_LOG="${{RUST_LOG:-info}}" "$P2P" --daemon \
   --dashboard --dashboard-bind "$DASHBOARD_BIND" --dashboard-port "$DASHBOARD_PORT" \
   --external-addresses "$EXTERNAL_ADDRESS" \
   $BOOTSTRAP_ARGS \
-  --seed "$STORE_PATH" \
+  --seed "$SEED_PATHS" \
   > "$LOG" 2>&1 &
 PID="$!"
 printf '%s\n' "$PID" > /tmp/guix-p2p-a.pid
@@ -5090,6 +5365,7 @@ if [ -z "$PEER_ID" ]; then
 fi
 [ -n "$PEER_ID" ] && printf '%s\n' "$PEER_ID" > /tmp/guix-p2p-a-peer-id
 printf 'store_path=%s\n' "$STORE_PATH"
+printf 'public_seed_count=%s\n' "$PUBLIC_SEED_COUNT"
 printf 'peer_id=%s\n' "$PEER_ID"
 printf 'pid=%s\nlog=%s\nsocket=%s\ndashboard=http://127.0.0.1:%s\n' "$PID" "$LOG" "$SOCKET" "$DASHBOARD_PORT"
 "#,
@@ -5477,6 +5753,7 @@ mod tests {
             package: "hello".to_string(),
             store_path: "/gnu/store/example-hello".to_string(),
             peer_id: "12D3KooWalice".to_string(),
+            public_paths: Vec::new(),
         };
         let mut node = VmNode {
             name: "Bob".to_string(),
@@ -5722,6 +5999,26 @@ mod tests {
         assert!(command.contains("guix system build --substitute-urls=\"$SUBSTITUTE_URLS\""));
         assert!(command.contains("guix-p2p-system-benchmark.scm"));
         assert!(!command.contains("--no-grafts"));
+        assert!(command.contains("for CLOSURE_PATH in $(guix gc -R \"$STORE_PATH\")"));
+        assert!(command.contains("--seed \"$SEED_PATHS\""));
+        assert!(command.contains("PUBLIC_PATHS=/tmp/e2e-system-build-public-paths"));
+        assert!(command.contains("public_seed_count=%s"));
+    }
+
+    #[test]
+    fn system_build_fetch_command_downloads_public_closure_paths() {
+        let p2p = system_build_public_closure_fetch_command(Some("/tmp/daemon.sock"), None);
+        assert!(p2p.contains("PUBLIC_PATHS=/tmp/e2e-system-build-public-paths"));
+        assert!(p2p.contains("\"$P2P\" --substitute --socket '/tmp/daemon.sock'"));
+        assert!(p2p.contains("printf 'substitute %s %s\\n' \"$PUBLIC_PATH\" \"$DEST\""));
+        assert!(p2p.contains("\"$PUBLIC_PATH\""));
+        assert!(!p2p.contains("guix system build"));
+        assert!(!p2p.contains("guix build --no-grafts"));
+
+        let http = system_build_public_closure_fetch_command(None, Some("$SUBSTITUTE_URLS"));
+        assert!(http.contains("\"$P2P\" --substitute --policy http-first"));
+        assert!(http.contains("--substitute-urls \"$SUBSTITUTE_URLS\""));
+        assert!(!http.contains("GUIX_DAEMON_SOCKET"));
     }
 
     #[test]

@@ -171,9 +171,10 @@ remote substitute servers. The file has a top-level `narinfos` array with
 optional `download_size` fields. This is intended for offline/local benchmark
 harnesses that pre-seed store paths and already know the corresponding NAR
 hashes. VM benchmarks use remote substitute-server narinfo lookups for public
-package, profile, and system-build p2p modes. If the benchmark target lacks
-public substitute narinfo, the p2p benchmark should fail instead of injecting
-generated local metadata.
+package, profile, and system-build p2p modes. System-build benchmarks are the
+exception for the generated top-level system output: that local-only output is
+used to compute the closure, but the timed benchmark fetches the public-narinfo
+closure substitutes directly through the normal P2P/HTTP policy.
 If local metadata has `nar_size = 0`, p2p downloads derive the block count from
 the provider handshake and still verify the final NAR hash.
 
