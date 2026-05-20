@@ -28,6 +28,31 @@ small, medium, and large packages with 1, 3, 5, and 8 seeders.
 The methodology and acceptance criteria are documented in
 `docs/benchmarks.md` under "Future Benchmark Work".
 
+## Channel-Generation Narinfo Prefetch
+
+After `guix pull`, guix-p2p could optionally prefetch and cache verified
+narinfo metadata for the user's current channel generation. This should be an
+optimization layer, not a trust mechanism: cached narinfos still depend on
+their signatures and signer policy.
+
+The first useful shape is a bounded, channel-aware cache keyed by substitute
+base URL, store path, and channel generation or revision when known. Populate
+it lazily from real downloads first, then consider explicit prefetch commands
+for known closures such as the current system, home configuration, profile
+manifest, or benchmark target.
+
+For benchmarks, keep cold and warm metadata modes separate:
+
+- Cold metadata: include narinfo discovery in the timed result.
+- Warm metadata: prefetch verified narinfos before timing to isolate NAR or
+  block transfer performance.
+
+An eventual command could look like:
+
+```sh
+guix-p2p narinfo prefetch --closure /gnu/store/... --substitute-urls ...
+```
+
 ## Async HTTP Decompression
 
 The current HTTP fallback downloads the compressed response body into memory,
