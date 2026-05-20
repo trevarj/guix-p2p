@@ -253,8 +253,11 @@ Peer → Client: Blocks { data: Vec<BlockData> }
   selection report keeps reputation filtering and connection-backoff filtering
   visible as separate reasons.
 - If cached providers are filtered below `min_providers`, wait for fresh DHT
-  provider notifications before failing the P2P attempt.
+  provider notifications, then retry selection against the original providers
+  plus any fresh providers before failing the P2P attempt.
 - Require at least `min_providers` successful handshakes before downloading.
+- Successful handshakes reset the peer's connection-backoff state, so repeated
+  successful sequential downloads from the same provider do not self-throttle.
 - Assign pending blocks to the least-loaded peer that advertises the block.
 - Requeue stalled or invalid in-flight blocks for another provider.
 

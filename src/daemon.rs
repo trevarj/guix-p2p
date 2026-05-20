@@ -805,8 +805,13 @@ async fn try_p2p_download(
 
     tracing::info!("Found {} P2P providers for {}", providers.len(), nar_hash);
 
-    let mut providers =
-        select_provider_candidates(&providers, reputation, conn_mgr, config.max_peers_per_download);
+    let discovered_providers = providers;
+    let mut providers = select_provider_candidates(
+        &discovered_providers,
+        reputation,
+        conn_mgr,
+        config.max_peers_per_download,
+    );
 
     if providers.len() < config.min_providers {
         tracing::debug!(
@@ -820,7 +825,7 @@ async fn try_p2p_download(
             tokio::time::Duration::from_secs(config.request_timeout_secs),
         )
         .await;
-        let merged = merge_provider_lists(&providers, &refreshed);
+        let merged = merge_provider_lists(&discovered_providers, &refreshed);
         providers = select_provider_candidates(
             &merged,
             reputation,
@@ -890,11 +895,20 @@ async fn try_p2p_download(
     {
         Ok((nar_data, _verified_hash)) => {
             let elapsed_ms = download_start.elapsed().as_millis() as u64;
+            let bytes = nar_data.len() as u64;
+            {
+                let mut tracker = reputation.lock().unwrap();
+                let mut connections = conn_mgr.lock().unwrap();
+                for handshake in &handshakes {
+                    tracker.record_success(handshake.peer, bytes);
+                    connections.on_active(handshake.peer);
+                }
+            }
 
             let _ = event_tx.send(DashboardEvent::DownloadSucceeded {
                 nar_hash: nar_hash.to_string(),
                 store_path: store_path.to_string(),
-                size: nar_data.len() as u64,
+                size: bytes,
                 elapsed_ms,
             });
 
@@ -1171,6 +1185,7 @@ async fn handshake_with_providers(
                     peer,
                     blocks_available.len()
                 );
+                conn_mgr.lock().unwrap().on_connected(peer);
 
                 results.push(PeerHandshake {
                     peer,
@@ -2049,6 +2064,23 @@ mod tests {
         let selected = select_provider_candidates(&[stale, current], &reputation, &conn_mgr, 8);
 
         assert_eq!(selected, vec![current]);
+    }
+
+    #[test]
+    fn select_provider_candidates_allows_peer_after_success_resets_backoff() {
+        let peer = PeerId::random();
+        let reputation = Arc::new(Mutex::new(ReputationTracker::new(5)));
+        let conn_mgr =
+            Arc::new(Mutex::new(ConnectionManager::new(crate::connection::ConnectionConfig {
+                max_retries: 1,
+                ..Default::default()
+            })));
+
+        conn_mgr.lock().unwrap().record_attempt(peer);
+        assert!(select_provider_candidates(&[peer], &reputation, &conn_mgr, 8).is_empty());
+
+        conn_mgr.lock().unwrap().on_connected(peer);
+        assert_eq!(select_provider_candidates(&[peer], &reputation, &conn_mgr, 8), vec![peer]);
     }
 
     #[test]
