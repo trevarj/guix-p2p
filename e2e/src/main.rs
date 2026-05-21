@@ -2053,14 +2053,17 @@ test ! -e "$STORE_PATH"
 set -eu
 STORE_PATH={store_path}
 SUBSTITUTE_URLS={substitute_urls}
+P2P_SUBSTITUTE_URLS={p2p_substitute_urls}
 P2P="${{GUIX_P2P_E2E_P2P_BIN:-guix-p2p}}"
 test ! -e "$STORE_PATH"
 {public_fetch}
 "#,
             store_path = shell_quote(&target.store_path),
             substitute_urls = shell_quote(&substitute_urls_for_guix(&config.substitute_urls)),
+            p2p_substitute_urls =
+                shell_quote(&substitute_urls_for_guix_p2p(&config.substitute_urls)),
             public_fetch =
-                system_build_public_closure_fetch_command(None, Some("$SUBSTITUTE_URLS"))
+                system_build_public_closure_fetch_command(None, Some("$P2P_SUBSTITUTE_URLS"))
         )
     } else {
         format!(
@@ -2970,10 +2973,13 @@ fn system_build_public_closure_fetch_command(
     format!(
         r#"PUBLIC_PATHS=/tmp/e2e-system-build-public-paths
 FETCH_LOG=/tmp/e2e-system-build-public-fetch.log
-DEST_ROOT=/tmp/e2e-system-build-public-fetch-dest
+DEST_ROOT="$(mktemp -d /tmp/e2e-system-build-public-fetch-dest.XXXXXX)"
 : > "$FETCH_LOG"
-rm -rf "$DEST_ROOT"
-mkdir -p "$DEST_ROOT"
+cleanup_dest_root() {{
+  chmod -R u+w "$DEST_ROOT" 2>/dev/null || true
+  rm -rf "$DEST_ROOT" 2>/dev/null || true
+}}
+trap cleanup_dest_root EXIT
 test -s "$PUBLIC_PATHS"
 PUBLIC_COUNT="$(wc -l < "$PUBLIC_PATHS")"
 MISSING_PUBLIC_COUNT=0
@@ -6009,15 +6015,21 @@ mod tests {
     fn system_build_fetch_command_downloads_public_closure_paths() {
         let p2p = system_build_public_closure_fetch_command(Some("/tmp/daemon.sock"), None);
         assert!(p2p.contains("PUBLIC_PATHS=/tmp/e2e-system-build-public-paths"));
+        assert!(
+            p2p.contains(
+                "DEST_ROOT=\"$(mktemp -d /tmp/e2e-system-build-public-fetch-dest.XXXXXX)\""
+            )
+        );
+        assert!(p2p.contains("trap cleanup_dest_root EXIT"));
         assert!(p2p.contains("\"$P2P\" --substitute --socket '/tmp/daemon.sock'"));
         assert!(p2p.contains("printf 'substitute %s %s\\n' \"$PUBLIC_PATH\" \"$DEST\""));
         assert!(p2p.contains("\"$PUBLIC_PATH\""));
         assert!(!p2p.contains("guix system build"));
         assert!(!p2p.contains("guix build --no-grafts"));
 
-        let http = system_build_public_closure_fetch_command(None, Some("$SUBSTITUTE_URLS"));
+        let http = system_build_public_closure_fetch_command(None, Some("$P2P_SUBSTITUTE_URLS"));
         assert!(http.contains("\"$P2P\" --substitute --policy http-first"));
-        assert!(http.contains("--substitute-urls \"$SUBSTITUTE_URLS\""));
+        assert!(http.contains("--substitute-urls \"$P2P_SUBSTITUTE_URLS\""));
         assert!(!http.contains("GUIX_DAEMON_SOCKET"));
     }
 

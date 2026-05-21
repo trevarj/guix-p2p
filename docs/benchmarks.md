@@ -130,6 +130,9 @@ recorded public closure paths and restores each NAR to a temporary destination.
 This measures the downloadable system payload without relying on `guix build
 /gnu/store/...`, which does not force missing store output paths to be
 realized.
+Each timed system-build fetch uses a fresh temporary restore root because
+restored NAR permissions can make a reused destination non-removable between
+modes.
 The system-build evidence check does not require the generated top-level output
 to appear in the fetch-node P2P catalog. For `p2p-only` and `p2p-first`, it
 requires seed-node block-serving evidence instead; `http-first` may complete
