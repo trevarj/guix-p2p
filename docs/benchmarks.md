@@ -362,8 +362,10 @@ columns stay readable.
 Benchmark report dates are written as UTC datetimes, and the Pages renderer
 normalizes older epoch-second reports for display.
 The benchmark page also renders dependency-free SVG charts from `results.csv`
-when it is available, with larger labels and a markdown table fallback for
-docs-only deploys.
+when it is available, including elapsed time, phase timing, and system-build
+payload throughput. When Pages can download recent successful benchmark
+artifacts, it also writes `history.csv` and renders a cross-run trend chart.
+Docs-only deploys keep a markdown table fallback.
 The static renderer keeps the site dependency-free while adding language labels
 and lightweight syntax highlighting for Scheme, shell, and TOML code blocks.
 Generated HTML references JavaScript assets with a commit-derived query string
@@ -407,6 +409,9 @@ The report includes host and Rust summary, tier, package store paths, nar
 hashes, nar sizes when observed from dashboard seed data, HTTP condition, seed
 count, per-run elapsed time, medians, p95 values, provider counts, P2P
 block-serving evidence, HTTP evidence, skipped runs, and failed runs.
+For `system-build`, the report and CSV also include public closure item count,
+missing-before-fetch count, verified count, fetched NAR bytes, and payload
+throughput based on import time.
 
 Per-run temp directories are removed unless `--keep-temp` is passed.
 

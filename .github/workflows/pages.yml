@@ -46,9 +46,26 @@ jobs:
             if (context.eventName === "workflow_run") {
               core.setOutput("found", "true");
               core.setOutput("run-id", String(context.payload.workflow_run.id));
-              return;
+            } else {
+              const response = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: "benchmarks.yml",
+                branch: "master",
+                status: "completed",
+                per_page: 20,
+              });
+              const successfulRuns = response.data.workflow_runs.filter((run) => run.conclusion === "success");
+              const run = successfulRuns[0];
+              if (!run) {
+                core.warning("No successful benchmark workflow run found; deploying docs without benchmark artifact.");
+                core.setOutput("found", "false");
+                return;
+              }
+              core.setOutput("found", "true");
+              core.setOutput("run-id", String(run.id));
+              core.info(`Using benchmark artifact from run ${run.id}.`);
             }
-
             const response = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -57,15 +74,12 @@ jobs:
               status: "completed",
               per_page: 20,
             });
-            const run = response.data.workflow_runs.find((run) => run.conclusion === "success");
-            if (!run) {
-              core.warning("No successful benchmark workflow run found; deploying docs without benchmark artifact.");
-              core.setOutput("found", "false");
-              return;
+            const successfulRuns = response.data.workflow_runs.filter((run) => run.conclusion === "success");
+            const historyRunIds = successfulRuns.map((run) => run.id);
+            if (context.eventName === "workflow_run") {
+              historyRunIds.unshift(context.payload.workflow_run.id);
             }
-            core.setOutput("found", "true");
-            core.setOutput("run-id", String(run.id));
-            core.info(`Using benchmark artifact from run ${run.id}.`);
+            core.setOutput("history-run-ids", [...new Set(historyRunIds)].slice(0, 8).join(" "));
 
       - name: Download benchmark artifact
         if: steps.benchmark-run.outputs.found == 'true'
@@ -76,6 +90,21 @@ jobs:
           pattern: guix-p2p-benchmark-*
           path: latest-benchmark
           merge-multiple: true
+
+      - name: Download benchmark history artifacts
+        if: steps.benchmark-run.outputs.found == 'true' && steps.benchmark-run.outputs.history-run-ids != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HISTORY_RUN_IDS: ${{ steps.benchmark-run.outputs.history-run-ids }}
+        run: |
+          mkdir -p latest-benchmark-history
+          for run_id in $HISTORY_RUN_IDS; do
+            mkdir -p "latest-benchmark-history/$run_id"
+            gh run download "$run_id" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern 'guix-p2p-benchmark-*' \
+              --dir "latest-benchmark-history/$run_id" || true
+          done
 
       - name: Select benchmark artifact files
         id: benchmark-artifact
@@ -119,6 +148,7 @@ jobs:
         env:
           BENCHMARK_RESULTS_MD: latest-benchmark-selected/benchmark-results.md
           BENCHMARK_RESULTS_CSV: latest-benchmark-selected/results.csv
+          BENCHMARK_HISTORY_DIR: latest-benchmark-history
         run: scripts/build-pages-site.sh
 
       - name: Build Pages site from repository docs

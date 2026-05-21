@@ -4,6 +4,7 @@ set -eu
 site_dir="${SITE_DIR:-site}"
 report_src="${BENCHMARK_RESULTS_MD:-target/guix-p2p-bench/benchmark-results.md}"
 csv_src="${BENCHMARK_RESULTS_CSV:-target/guix-p2p-bench/results.csv}"
+history_src="${BENCHMARK_HISTORY_DIR:-}"
 asset_version="$(git rev-parse --short HEAD 2>/dev/null || date +%s)"
 
 mkdir -p "$site_dir"
@@ -24,6 +25,31 @@ if [ -r "$csv_src" ]; then
   cp "$csv_src" "$site_dir/results.csv"
 else
   printf 'status\nno benchmark CSV has been published yet\n' > "$site_dir/results.csv"
+fi
+
+if [ -n "$history_src" ] && [ -d "$history_src" ]; then
+  history_tmp="$site_dir/history.csv.tmp"
+  history_out="$site_dir/history.csv"
+  first=true
+  : > "$history_tmp"
+  while IFS= read -r csv; do
+    run_id="${csv#"$history_src"/}"
+    run_id="${run_id%%/*}"
+    if [ "$first" = true ]; then
+      header="$(head -n 1 "$csv")"
+      printf 'run_id,%s\n' "$header" > "$history_tmp"
+      first=false
+    fi
+    tail -n +2 "$csv" | sed "s/^/$run_id,/" >> "$history_tmp"
+  done < <(find "$history_src" -name results.csv -type f | sort)
+  if [ "$first" = false ]; then
+    mv "$history_tmp" "$history_out"
+  else
+    rm -f "$history_tmp"
+    printf 'status\nno benchmark history has been published yet\n' > "$history_out"
+  fi
+else
+  printf 'status\nno benchmark history has been published yet\n' > "$site_dir/history.csv"
 fi
 
 cp docs/benchmarks.md "$site_dir/benchmark-methodology.md"
@@ -390,6 +416,10 @@ pre[data-language]::before {
   background: var(--accent);
   fill: var(--accent);
 }
+.chart-bar-http-first {
+  background: #0ea5e9;
+  fill: #0ea5e9;
+}
 .chart-phase-seed {
   background: #6f8fc7;
   fill: #6f8fc7;
@@ -691,6 +721,30 @@ function formatDuration(ms) {
   return `${Math.round(ms)}ms`;
 }
 
+function parseNumber(value) {
+  const trimmed = String(value || "").trim();
+  if (trimmed === "") return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatBytes(bytes) {
+  if (bytes === null || !Number.isFinite(bytes)) return "n/a";
+  const units = ["B", "KiB", "MiB", "GiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value >= 10 || unit === 0 ? 1 : 2)} ${units[unit]}`;
+}
+
+function formatThroughput(bytesPerSecond) {
+  if (bytesPerSecond === null || !Number.isFinite(bytesPerSecond)) return "n/a";
+  return `${formatBytes(bytesPerSecond)}/s`;
+}
+
 function modeClass(mode) {
   return `chart-bar-${String(mode || "unknown").replaceAll("_", "-")}`;
 }
@@ -716,6 +770,12 @@ function rowsFromCsv(csvText) {
       daemon_start_ms: parseDurationMs(row.daemon_start_ms),
       import_ms: parseDurationMs(row.import_ms),
       total_ms: parseDurationMs(row.total_ms || row.elapsed_ms),
+      system_build_public_paths: parseNumber(row.system_build_public_paths),
+      system_build_missing_before: parseNumber(row.system_build_missing_before),
+      system_build_verified: parseNumber(row.system_build_verified),
+      system_build_nar_bytes: parseNumber(row.system_build_nar_bytes),
+      system_build_throughput_bps: parseNumber(row.system_build_throughput_bps),
+      run_id: row.run_id || "",
     }))
     .filter((row) => row.package && row.mode && row.elapsed_ms !== null);
 }
@@ -754,6 +814,9 @@ function rowsFromMarkdown(markdown) {
       daemon_start_ms: parseDurationMs(row["Daemon start"]),
       import_ms: parseDurationMs(row.Import),
       total_ms: parseDurationMs(row.Elapsed),
+      system_build_nar_bytes: parseNumber(row.Payload),
+      system_build_throughput_bps: null,
+      run_id: "",
     }))
     .filter((row) => row.package && row.mode && row.elapsed_ms !== null);
 }
@@ -781,6 +844,11 @@ function summarizeRows(rows) {
     provider_wait_ms: median(group.samples.map((row) => row.provider_wait_ms)),
     daemon_start_ms: median(group.samples.map((row) => row.daemon_start_ms)),
     import_ms: median(group.samples.map((row) => row.import_ms)),
+    system_build_public_paths: median(group.samples.map((row) => row.system_build_public_paths)),
+    system_build_missing_before: median(group.samples.map((row) => row.system_build_missing_before)),
+    system_build_verified: median(group.samples.map((row) => row.system_build_verified)),
+    system_build_nar_bytes: median(group.samples.map((row) => row.system_build_nar_bytes)),
+    system_build_throughput_bps: median(group.samples.map((row) => row.system_build_throughput_bps)),
   })).filter((row) => row.elapsed_ms !== null);
 }
 
@@ -810,7 +878,88 @@ function renderElapsedChart(rows) {
     <span><i class="chart-swatch chart-bar-http"></i>HTTP</span>
     <span><i class="chart-swatch chart-bar-p2p-only"></i>P2P only</span>
     <span><i class="chart-swatch chart-bar-p2p-first"></i>P2P first</span>
+    <span><i class="chart-swatch chart-bar-http-first"></i>HTTP first</span>
   </div>`;
+}
+
+function renderThroughputChart(rows) {
+  const data = summarizeRows(rows)
+    .filter((row) => row.system_build_throughput_bps !== null)
+    .sort((a, b) => b.system_build_throughput_bps - a.system_build_throughput_bps);
+  if (data.length === 0) return "<p class=\"muted\">No system-build payload throughput is available yet.</p>";
+  const width = 1160;
+  const rowHeight = 46;
+  const labelWidth = 390;
+  const chartWidth = width - labelWidth - 190;
+  const height = 52 + data.length * rowHeight;
+  const max = Math.max(...data.map((row) => row.system_build_throughput_bps));
+  const bars = data.map((row, index) => {
+    const y = 36 + index * rowHeight;
+    const barWidth = Math.max(2, (row.system_build_throughput_bps / max) * chartWidth);
+    return `<g>
+      <text class="chart-label" x="0" y="${y + 18}">${escapeHtml(displayCase(row))}</text>
+      <rect class="${modeClass(row.mode)}" x="${labelWidth}" y="${y}" width="${barWidth}" height="24" rx="5"></rect>
+      <text class="chart-label" x="${labelWidth + barWidth + 12}" y="${y + 18}">${formatThroughput(row.system_build_throughput_bps)}</text>
+    </g>`;
+  }).join("");
+  return `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="System-build payload throughput by case">
+    <line class="chart-axis" x1="${labelWidth}" y1="24" x2="${labelWidth}" y2="${height - 10}"></line>
+    ${bars}
+  </svg>`;
+}
+
+function summarizeHistory(rows) {
+  const groups = new Map();
+  for (const row of rows.filter((item) => item.success && item.run_id)) {
+    const key = [row.run_id, row.package, row.http_condition, row.mode, row.seed_count].join("\u001f");
+    const current = groups.get(key) || { ...row, samples: [] };
+    current.samples.push(row);
+    groups.set(key, current);
+  }
+  return [...groups.values()].map((group) => ({
+    ...group,
+    elapsed_ms: median(group.samples.map((row) => row.elapsed_ms)),
+  })).filter((row) => row.elapsed_ms !== null);
+}
+
+function renderHistoryChart(rows) {
+  const data = summarizeHistory(rows).sort((a, b) => Number(a.run_id) - Number(b.run_id));
+  if (data.length === 0) return "<p class=\"muted\">No benchmark history is available yet.</p>";
+  const runIds = [...new Set(data.map((row) => row.run_id))];
+  const cases = [...new Set(data.map((row) => displayCase(row)))];
+  const width = 1160;
+  const height = 120 + cases.length * 34;
+  const left = 390;
+  const chartWidth = width - left - 80;
+  const max = Math.max(...data.map((row) => row.elapsed_ms));
+  const runX = (runId) => {
+    const index = runIds.indexOf(runId);
+    if (runIds.length === 1) return left + chartWidth;
+    return left + (index / (runIds.length - 1)) * chartWidth;
+  };
+  const rowsSvg = cases.map((label, index) => {
+    const y = 42 + index * 34;
+    const points = data
+      .filter((row) => displayCase(row) === label)
+      .map((row) => {
+        const x = runX(row.run_id);
+        const radius = Math.max(3, (row.elapsed_ms / max) * 11);
+        return `<circle class="${modeClass(row.mode)}" cx="${x}" cy="${y}" r="${radius}"><title>Run ${row.run_id}: ${formatDuration(row.elapsed_ms)}</title></circle>`;
+      })
+      .join("");
+    return `<g>
+      <text class="chart-label" x="0" y="${y + 5}">${escapeHtml(label)}</text>
+      ${points}
+    </g>`;
+  }).join("");
+  const ticks = runIds.map((runId) => {
+    const x = runX(runId);
+    return `<g><line class="chart-axis" x1="${x}" y1="22" x2="${x}" y2="${height - 34}"></line><text class="chart-muted" x="${x - 18}" y="${height - 10}">${escapeHtml(runId)}</text></g>`;
+  }).join("");
+  return `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Benchmark median elapsed time across workflow runs">
+    ${ticks}
+    ${rowsSvg}
+  </svg>`;
 }
 
 function renderPhaseChart(rows) {
@@ -861,17 +1010,24 @@ function renderPhaseChart(rows) {
 async function loadBenchmarkCharts() {
   const elapsed = document.getElementById("elapsed-chart");
   const phases = document.getElementById("phase-chart");
-  if (!elapsed || !phases) return;
-  const [csvResponse, markdownResponse] = await Promise.all([
+  const throughput = document.getElementById("throughput-chart");
+  const history = document.getElementById("history-chart");
+  if (!elapsed || !phases || !throughput || !history) return;
+  const [csvResponse, markdownResponse, historyResponse] = await Promise.all([
     fetch("results.csv", { cache: "no-store" }),
     fetch("benchmark-results.md", { cache: "no-store" }),
+    fetch("history.csv", { cache: "no-store" }),
   ]);
   const csvText = csvResponse.ok ? await csvResponse.text() : "";
   const markdown = markdownResponse.ok ? await markdownResponse.text() : "";
+  const historyText = historyResponse.ok ? await historyResponse.text() : "";
   const csvRows = rowsFromCsv(csvText);
   const rows = csvRows.length > 0 ? csvRows : rowsFromMarkdown(markdown);
+  const historyRows = rowsFromCsv(historyText);
   elapsed.innerHTML = renderElapsedChart(rows);
   phases.innerHTML = renderPhaseChart(rows);
+  throughput.innerHTML = renderThroughputChart(rows);
+  history.innerHTML = renderHistoryChart(historyRows);
 }
 JS
 
@@ -1178,6 +1334,16 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
           <h3>Phase Breakdown</h3>
           <p class="muted">Timing phases reported by the VM benchmark harness.</p>
           <div id="phase-chart" class="muted">Loading phase chart...</div>
+        </article>
+        <article class="chart-card">
+          <h3>Payload Throughput</h3>
+          <p class="muted">System-build NAR payload bytes divided by import time.</p>
+          <div id="throughput-chart" class="muted">Loading throughput chart...</div>
+        </article>
+        <article class="chart-card">
+          <h3>Run History</h3>
+          <p class="muted">Median elapsed time from recent successful benchmark artifacts.</p>
+          <div id="history-chart" class="muted">Loading history chart...</div>
         </article>
       </div>
     </section>

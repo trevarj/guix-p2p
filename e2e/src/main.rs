@@ -757,6 +757,10 @@ struct BenchmarkPhaseTimings {
     daemon_start_ms: Option<u128>,
     import_ms: Option<u128>,
     total_ms: Option<u128>,
+    system_build_public_paths: Option<u64>,
+    system_build_missing_before: Option<u64>,
+    system_build_verified: Option<u64>,
+    system_build_nar_bytes: Option<u64>,
 }
 
 struct VmProofOptions {
@@ -1994,8 +1998,106 @@ test ! -e "$STORE_PATH"
         daemon_start_ms: Some(daemon_start_ms),
         import_ms: Some(import_ms),
         total_ms: Some(started.elapsed().as_millis()),
-        ..BenchmarkPhaseTimings::default()
+        ..parse_system_build_payload_metrics(&output).unwrap_or_default()
     })
+}
+
+fn parse_system_build_payload_metrics(output: &str) -> Option<BenchmarkPhaseTimings> {
+    let line =
+        output.lines().find(|line| line.starts_with("SYSTEM_BUILD_PUBLIC_CLOSURE_FETCHED "))?;
+    let mut timings = BenchmarkPhaseTimings::default();
+    for field in line.split_whitespace().skip(1) {
+        let Some((key, value)) = field.split_once('=') else {
+            continue;
+        };
+        match key {
+            "public_paths" => timings.system_build_public_paths = value.parse().ok(),
+            "missing_before" => timings.system_build_missing_before = value.parse().ok(),
+            "verified" => timings.system_build_verified = value.parse().ok(),
+            "nar_bytes" => timings.system_build_nar_bytes = value.parse().ok(),
+            _ => {},
+        }
+    }
+    Some(timings)
+}
+
+fn merge_system_build_payload_metrics(
+    mut timings: BenchmarkPhaseTimings,
+    output: &str,
+) -> BenchmarkPhaseTimings {
+    if let Some(payload) = parse_system_build_payload_metrics(output) {
+        timings.system_build_public_paths = payload.system_build_public_paths;
+        timings.system_build_missing_before = payload.system_build_missing_before;
+        timings.system_build_verified = payload.system_build_verified;
+        timings.system_build_nar_bytes = payload.system_build_nar_bytes;
+    }
+    timings
+}
+
+fn throughput_bytes_per_second(bytes: Option<u64>, ms: Option<u128>) -> Option<u64> {
+    let bytes = bytes?;
+    let ms = ms?;
+    if ms == 0 {
+        return None;
+    }
+    Some(((bytes as u128) * 1000 / ms) as u64)
+}
+
+fn format_throughput(bytes_per_second: Option<u64>) -> String {
+    bytes_per_second
+        .map(|value| format!("{}/s", format_bytes(value)))
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
+fn format_u64_option(value: Option<u64>) -> String {
+    value.map(|n| n.to_string()).unwrap_or_else(|| "n/a".to_string())
+}
+
+fn phase_median_u64(
+    records: &[&BenchmarkRecord],
+    field: impl Fn(&BenchmarkPhaseTimings) -> Option<u64>,
+) -> String {
+    let values: Vec<u128> =
+        records.iter().filter_map(|record| field(&record.phases).map(u128::from)).collect();
+    format_u64_option(median_ms(values).map(|value| value as u64))
+}
+
+fn phase_median_bytes(
+    records: &[&BenchmarkRecord],
+    field: impl Fn(&BenchmarkPhaseTimings) -> Option<u64>,
+) -> String {
+    let values: Vec<u128> =
+        records.iter().filter_map(|record| field(&record.phases).map(u128::from)).collect();
+    median_ms(values).map(|value| format_bytes(value as u64)).unwrap_or_else(|| "n/a".to_string())
+}
+
+fn phase_median_throughput(records: &[&BenchmarkRecord]) -> String {
+    let values: Vec<u128> = records
+        .iter()
+        .filter_map(|record| {
+            throughput_bytes_per_second(
+                record.phases.system_build_nar_bytes,
+                record.phases.import_ms,
+            )
+            .map(u128::from)
+        })
+        .collect();
+    format_throughput(median_ms(values).map(|value| value as u64))
+}
+
+fn phase_payload_present(records: &[&BenchmarkRecord]) -> bool {
+    records.iter().any(|record| record.phases.system_build_nar_bytes.is_some())
+}
+
+fn format_record_payload_bytes(record: &BenchmarkRecord) -> String {
+    record.phases.system_build_nar_bytes.map(format_bytes).unwrap_or_else(|| "n/a".to_string())
+}
+
+fn format_record_throughput(record: &BenchmarkRecord) -> String {
+    format_throughput(throughput_bytes_per_second(
+        record.phases.system_build_nar_bytes,
+        record.phases.import_ms,
+    ))
 }
 
 fn vm_http_fetch(
@@ -2093,12 +2195,15 @@ echo HTTP_IMPORTED_OUTPUT_IN_NODE_STORE
     print!("{output}");
     let import_ms = phase_start.elapsed().as_millis();
 
-    Ok(BenchmarkPhaseTimings {
-        prepare_ms: Some(prepare_ms),
-        import_ms: Some(import_ms),
-        total_ms: Some(started.elapsed().as_millis()),
-        ..BenchmarkPhaseTimings::default()
-    })
+    Ok(merge_system_build_payload_metrics(
+        BenchmarkPhaseTimings {
+            prepare_ms: Some(prepare_ms),
+            import_ms: Some(import_ms),
+            total_ms: Some(started.elapsed().as_millis()),
+            ..BenchmarkPhaseTimings::default()
+        },
+        &output,
+    ))
 }
 
 fn vm_tail_log(config: &VmConfig, name: &str, kind: &str) -> anyhow::Result<()> {
@@ -3013,8 +3118,9 @@ if [ "$MISSING_PUBLIC_COUNT" -eq 0 ]; then
   echo "system-build public closure was already present before fetch" >&2
   exit 1
 fi
-printf 'SYSTEM_BUILD_PUBLIC_CLOSURE_FETCHED public_paths=%s missing_before=%s verified=%s store_path=%s\n' \
-  "$PUBLIC_COUNT" "$MISSING_PUBLIC_COUNT" "$FETCHED_PUBLIC_COUNT" "$STORE_PATH"
+NAR_BYTES="$(awk '/^success / && $3 ~ /^[0-9]+$/ {{sum += $3}} END {{printf "%.0f", sum + 0}}' "$FETCH_LOG")"
+printf 'SYSTEM_BUILD_PUBLIC_CLOSURE_FETCHED public_paths=%s missing_before=%s verified=%s nar_bytes=%s store_path=%s\n' \
+  "$PUBLIC_COUNT" "$MISSING_PUBLIC_COUNT" "$FETCHED_PUBLIC_COUNT" "$NAR_BYTES" "$STORE_PATH"
 "#
     )
 }
@@ -4302,7 +4408,8 @@ fn write_benchmark_csv(path: &std::path::Path, records: &[BenchmarkRecord]) -> a
         "tier,package,store_path,nar_hash,nar_size,mode,http_condition,seed_count,iteration,\
          elapsed_ms,success,skipped,p2p_evidence,http_evidence,provider_count,run_dir,error,\
          skip_reason,seed_ms,prepare_ms,p2p_start_ms,provider_wait_ms,daemon_start_ms,import_ms,\
-         total_ms\n",
+         total_ms,system_build_public_paths,system_build_missing_before,system_build_verified,\
+         system_build_nar_bytes,system_build_throughput_bps\n",
     );
     for record in records {
         csv.push_str(&csv_row(&[
@@ -4331,6 +4438,16 @@ fn write_benchmark_csv(path: &std::path::Path, records: &[BenchmarkRecord]) -> a
             record.phases.daemon_start_ms.map(|n| n.to_string()).unwrap_or_default(),
             record.phases.import_ms.map(|n| n.to_string()).unwrap_or_default(),
             record.phases.total_ms.map(|n| n.to_string()).unwrap_or_default(),
+            record.phases.system_build_public_paths.map(|n| n.to_string()).unwrap_or_default(),
+            record.phases.system_build_missing_before.map(|n| n.to_string()).unwrap_or_default(),
+            record.phases.system_build_verified.map(|n| n.to_string()).unwrap_or_default(),
+            record.phases.system_build_nar_bytes.map(|n| n.to_string()).unwrap_or_default(),
+            throughput_bytes_per_second(
+                record.phases.system_build_nar_bytes,
+                record.phases.import_ms,
+            )
+            .map(|n| n.to_string())
+            .unwrap_or_default(),
         ]));
         csv.push('\n');
     }
@@ -4408,10 +4525,11 @@ fn write_benchmark_report(
     report.push_str("\n## Runs\n\n");
     report.push_str(
         "| Tier | Package | HTTP condition | Mode | Seeds | Iteration | Elapsed | Status | P2P | \
-         HTTP | Providers | Seed | Prepare | P2P start | Provider wait | Daemon start | Import |\n",
+         HTTP | Providers | Seed | Prepare | P2P start | Provider wait | Daemon start | Import | \
+         Payload | Throughput |\n",
     );
     report.push_str(
-        "|------|---------|----------------|------|-------|-----------|---------|--------|-----|------|-----------|------|---------|-----------|---------------|--------------|--------|\n",
+        "|------|---------|----------------|------|-------|-----------|---------|--------|-----|------|-----------|------|---------|-----------|---------------|--------------|--------|---------|------------|\n",
     );
     for record in records {
         let elapsed = record
@@ -4429,7 +4547,7 @@ fn write_benchmark_report(
         };
         report.push_str(&format!(
             "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} \
-             |\n",
+             | {} | {} |\n",
             record.tier,
             record.package,
             record.http_condition,
@@ -4446,7 +4564,9 @@ fn write_benchmark_report(
             format_ms_option(record.phases.p2p_start_ms),
             format_ms_option(record.phases.provider_wait_ms),
             format_ms_option(record.phases.daemon_start_ms),
-            format_ms_option(record.phases.import_ms)
+            format_ms_option(record.phases.import_ms),
+            format_record_payload_bytes(record),
+            format_record_throughput(record)
         ));
     }
 
@@ -4493,6 +4613,51 @@ fn write_benchmark_report(
             p2p,
             http
         ));
+    }
+
+    let payload_groups: BTreeSet<_> = records
+        .iter()
+        .filter(|r| r.phases.system_build_nar_bytes.is_some())
+        .map(|r| (r.tier, r.package.clone(), r.http_condition, r.mode, r.seed_count))
+        .collect();
+    if !payload_groups.is_empty() {
+        report.push_str("\n## Payload Summary\n\n");
+        report.push_str(
+            "| Tier | Package | HTTP condition | Mode | Seeds | Public paths | Missing before | \
+             Verified | Payload median | Throughput median |\n",
+        );
+        report.push_str(
+            "|------|---------|----------------|------|-------|--------------|----------------|----------|----------------|-------------------|\n",
+        );
+        for (tier, package, condition, mode, seed_count) in payload_groups {
+            let subset: Vec<&BenchmarkRecord> = records
+                .iter()
+                .filter(|r| {
+                    r.success
+                        && r.tier == tier
+                        && r.package == package
+                        && r.http_condition == condition
+                        && r.mode == mode
+                        && r.seed_count == seed_count
+                })
+                .collect();
+            if !phase_payload_present(&subset) {
+                continue;
+            }
+            report.push_str(&format!(
+                "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+                tier,
+                package,
+                condition,
+                mode,
+                seed_count,
+                phase_median_u64(&subset, |p| p.system_build_public_paths),
+                phase_median_u64(&subset, |p| p.system_build_missing_before),
+                phase_median_u64(&subset, |p| p.system_build_verified),
+                phase_median_bytes(&subset, |p| p.system_build_nar_bytes),
+                phase_median_throughput(&subset)
+            ));
+        }
     }
 
     report.push_str("\n## Phase Summary\n\n");
@@ -6031,6 +6196,25 @@ mod tests {
         assert!(http.contains("\"$P2P\" --substitute --policy http-first"));
         assert!(http.contains("--substitute-urls \"$P2P_SUBSTITUTE_URLS\""));
         assert!(!http.contains("GUIX_DAEMON_SOCKET"));
+    }
+
+    #[test]
+    fn parses_system_build_payload_metrics() {
+        let output = "\
+FETCH_PUBLIC_PATH index=1 path=/gnu/store/example
+SYSTEM_BUILD_PUBLIC_CLOSURE_FETCHED public_paths=338 missing_before=73 verified=338 nar_bytes=975175432 store_path=/gnu/store/system
+";
+        let metrics = parse_system_build_payload_metrics(output).unwrap();
+        assert_eq!(metrics.system_build_public_paths, Some(338));
+        assert_eq!(metrics.system_build_missing_before, Some(73));
+        assert_eq!(metrics.system_build_verified, Some(338));
+        assert_eq!(metrics.system_build_nar_bytes, Some(975_175_432));
+    }
+
+    #[test]
+    fn computes_payload_throughput() {
+        assert_eq!(throughput_bytes_per_second(Some(1_000), Some(250)), Some(4_000));
+        assert_eq!(throughput_bytes_per_second(Some(1_000), Some(0)), None);
     }
 
     #[test]
