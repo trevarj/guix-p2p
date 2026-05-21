@@ -225,6 +225,94 @@ pub enum MetadataSource {
 shape so the daemon can keep using the same `success sha256:<hash> <size>` and
 info replies.
 
+## Dashboard Support
+
+The dashboard should make the metadata trust path visible. Today the transfer
+path can show observed packages, trusted narinfo, providers, block movement,
+verification, and re-seeding. Attestation mode needs the same operational proof,
+but with the metadata source and quorum decision made explicit.
+
+Add dashboard events for attestation resolution:
+
+```rust
+pub enum DashboardEvent {
+    AttestationLookupStarted {
+        store_path: String,
+        metadata_policy: MetadataPolicy,
+        threshold: usize,
+    },
+    AttestationProvidersFound {
+        store_path: String,
+        provider_count: usize,
+    },
+    AttestationsReceived {
+        store_path: String,
+        peer_id: String,
+        total: usize,
+        syntactically_valid: usize,
+    },
+    AttestationQuorumAccepted {
+        store_path: String,
+        nar_hash: String,
+        nar_size: u64,
+        trusted_signers: Vec<String>,
+        threshold: usize,
+        source: MetadataSource,
+    },
+    AttestationQuorumRejected {
+        store_path: String,
+        reason: String,
+        trusted_signers: Vec<String>,
+        conflicting_signers: Vec<String>,
+    },
+}
+```
+
+Dashboard views:
+
+- Transfer path: rename the metadata stage from `Narinfo Trusted` to
+  `Metadata Trusted`. The value should show `official narinfo`, `local
+  narinfo`, or `attestation quorum`.
+- Build detail: show metadata source, attestation threshold, accepted signer
+  key IDs, rejected signer key IDs, conflicting claim count, and raw signed
+  attestations behind a collapsed details control.
+- Events: add an `attestation` filter beside transfers, seeds, peers,
+  discovery, and failures.
+- Catalog/build rows: add a compact trust badge:
+  `official`, `local`, `attested 2/2`, `attested 2/3`, `conflict`, or
+  `no quorum`.
+- Full-P2P proof summary: show whether official substitute-server narinfo was
+  used for the selected path or closure. For `metadata_policy =
+  "attestation-only"`, the dashboard should display `official narinfo: none`
+  once the resolver finishes.
+
+Dashboard API additions:
+
+- Extend `/api/builds` with `metadata_source`, `attestation_threshold`,
+  `trusted_attestation_signers`, `rejected_attestation_signers`,
+  `conflicting_attestation_signers`, and `official_narinfo_used`.
+- Extend `/api/transfers` with the accepted metadata source for each transfer.
+- Keep `/api/events` as the source of detailed timeline evidence; retain
+  attestation events in the same bounded event-history buffer as other events.
+
+Privacy and safety:
+
+- Do not expose full public keys by default. Show truncated key IDs unless a
+  detail view is explicitly opened.
+- Never expose secret key paths or signing command arguments.
+- Raw signed attestations are public metadata, but keep them collapsed by
+  default to avoid crowding the build panel.
+
+E2E dashboard expectations:
+
+- The attestation-only `hello` proof should assert that the dashboard sees an
+  `AttestationQuorumAccepted` event before download success.
+- The closure proof should assert that every fetched path has
+  `metadata_source = "attestation-quorum"`.
+- The full system proof should report counts for official narinfo, local
+  narinfo, and attestation quorum so regressions are visible without reading
+  logs.
+
 ## Local Storage
 
 Store imported or locally created attestations under the cache directory:
@@ -457,6 +545,8 @@ Tasks:
 Files likely touched:
 
 - `src/daemon.rs`
+- `src/dashboard.rs`
+- `src/dashboard.html`
 - `src/http_client.rs`
 - `src/attestation.rs`
 - `src/config.rs`
@@ -468,6 +558,10 @@ Tasks:
 - Make daemon `have`, `info`, and `substitute` use `AcceptedMetadata`.
 - Support `metadata_policy = "attestation-only"` with local cached
   attestations.
+- Emit dashboard events for lookup start, quorum acceptance, and quorum
+  rejection.
+- Extend build and transfer API records with metadata source and accepted signer
+  IDs.
 - Keep `official-only` behavior unchanged.
 - Add an e2e test where Bob imports Alice and Charles attestations and fetches
   bytes from a local P2P seeder without HTTP narinfo for the item.
@@ -479,6 +573,8 @@ Files likely touched:
 - `src/behaviour.rs`
 - `src/runtime.rs`
 - `src/channel.rs`
+- `src/dashboard.rs`
+- `src/dashboard.html`
 - `src/dht.rs`
 - `src/attestation.rs`
 - `docs/swarm-protocol.md`
@@ -489,6 +585,7 @@ Tasks:
 - Add provider announcements for attestation keys.
 - Fetch attestation lists from provider peers during metadata resolution.
 - Cache valid fetched attestations locally.
+- Emit dashboard provider and peer-response events for attestation discovery.
 - Apply response size limits before parsing.
 - Add integration tests for peer fetch, malformed peer response, insufficient
   quorum, conflict, and successful quorum.
@@ -508,6 +605,8 @@ Tasks:
 - Report how many paths resolved through attestation quorum.
 - Report how many NAR bytes came from P2P under `attestation-only`.
 - Verify no substitute-server narinfo requests are made for attested items.
+- Add dashboard e2e assertions for metadata source, accepted quorum, and
+  official narinfo avoidance.
 
 ## E2E Proof
 
