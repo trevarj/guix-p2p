@@ -42,6 +42,8 @@ pub use protocol::{
     format_trace_succeeded, parse_command_line, read_command,
 };
 
+const MIN_P2P_DOWNLOAD_BYTES_PER_SEC: u64 = 1024 * 1024;
+
 pub fn extract_hash_part(store_path: &str) -> Result<String, String> {
     store_path::hash_part(store_path)
 }
@@ -1247,6 +1249,22 @@ fn block_hash_array(hash: &[u8]) -> [u8; 32] {
     arr
 }
 
+fn block_download_overall_timeout_secs(
+    request_timeout_secs: u64,
+    stall_timeout_secs: u64,
+    nar_size: u64,
+) -> u64 {
+    if nar_size == 0 {
+        return request_timeout_secs;
+    }
+
+    // The request timeout remains the floor for small nars. Large nars also
+    // get transfer budget so active downloads are governed by the stall guard.
+    let transfer_secs = nar_size.saturating_add(MIN_P2P_DOWNLOAD_BYTES_PER_SEC - 1)
+        / MIN_P2P_DOWNLOAD_BYTES_PER_SEC;
+    request_timeout_secs.max(stall_timeout_secs.saturating_add(transfer_secs))
+}
+
 /// Orchestrate block downloads from peers.
 async fn download_blocks_from_peers(
     ctx: BlockDownloadContext<'_>,
@@ -1286,8 +1304,13 @@ async fn download_blocks_from_peers(
         })
         .collect();
 
-    let overall_deadline = tokio::time::Instant::now()
-        + tokio::time::Duration::from_secs(ctx.config.request_timeout_secs);
+    let overall_timeout_secs = block_download_overall_timeout_secs(
+        ctx.config.request_timeout_secs,
+        ctx.config.stall_timeout_secs,
+        nar_size,
+    );
+    let overall_deadline =
+        tokio::time::Instant::now() + tokio::time::Duration::from_secs(overall_timeout_secs);
     let mut stall_deadline = tokio::time::Instant::now()
         + tokio::time::Duration::from_secs(ctx.config.stall_timeout_secs);
     let block_timeout = tokio::time::Duration::from_secs(ctx.config.stall_timeout_secs);
@@ -2100,6 +2123,20 @@ mod tests {
 
         assert_eq!(&hashes[0][..4], &[1, 2, 3, 0]);
         assert_eq!(hashes[1], [9; 32]);
+    }
+
+    #[test]
+    fn block_download_overall_timeout_keeps_small_nars_at_request_timeout() {
+        let timeout = block_download_overall_timeout_secs(60, 30, 512 * 1024);
+
+        assert_eq!(timeout, 60);
+    }
+
+    #[test]
+    fn block_download_overall_timeout_scales_large_nars() {
+        let timeout = block_download_overall_timeout_secs(30, 30, 488_197_280);
+
+        assert_eq!(timeout, 496);
     }
 
     #[test]

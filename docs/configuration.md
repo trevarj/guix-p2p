@@ -44,7 +44,7 @@ seed_paths = ["/gnu/store/...-hello"]
 | `substitute_urls` | `https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org` | `--substitute-urls` | HTTP substitute servers used for narinfo metadata and allowed HTTP nar fallback. |
 | `substitute_policy` | `p2p-first` | `--policy` | `p2p-only`, `p2p-first`, or `http-first`. |
 | `block_size` | `262144` | none | Nar block size in bytes for swarm requests. |
-| `request_timeout_secs` | `30` | none | Overall provider lookup and block request timeout. |
+| `request_timeout_secs` | `30` | none | Provider lookup timeout and floor for the size-scaled P2P block download deadline. |
 | `stall_timeout_secs` | `30` | none | Abort a P2P download after this many seconds without block progress. |
 | `max_peers_per_download` | `8` | none | Upper bound on peers used for one active download. |
 | `max_in_flight_blocks_per_peer` | `4` | none | Maximum outstanding block requests kept active per peer during a P2P download. |

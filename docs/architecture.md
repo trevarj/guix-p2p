@@ -327,6 +327,9 @@ error.
 - DHT returns < `min_providers` peers → skip swarm, reply not-found. The
   provider threshold defaults to `3` and can be set with `--min-providers` or
   `min_providers` in config.
+- Swarm downloads use a size-scaled overall deadline with `request_timeout_secs`
+  as the floor. Large nars are allowed to keep running while block progress is
+  flowing.
 - Swarm download stalls (no new blocks for `stall_timeout_secs` (30s)) → abort, reply not-found
 - Nar hash verification failed → reply not-found
 - Narinfo signature verification failed for one substitute URL → try the next
