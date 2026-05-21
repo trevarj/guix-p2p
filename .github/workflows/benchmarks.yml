@@ -122,7 +122,7 @@ jobs:
             export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             export GUIX_P2P_E2E_SUBSTITUTE_URLS="$4"
             export GUIX_P2P_E2E_ENABLE_KVM=auto
-            export GUIX_P2P_E2E_VM_MEMORY=1536
+            export GUIX_P2P_E2E_VM_MEMORY=4096
             export GUIX_P2P_E2E_VM_CPUS=2
 
             df -h

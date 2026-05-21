@@ -321,6 +321,9 @@ locally.
 The job frees unused hosted-runner toolchains before building the VM image and
 stops immediately if image creation fails, so later VM setup errors do not hide
 the original Guix image failure.
+The GitHub VM guests use 4 GiB of memory. The `system-build` suite can fetch a
+large Guix NAR during p2p-only runs, and the current downloader still assembles
+that NAR in memory before restore.
 
 To run one:
 
