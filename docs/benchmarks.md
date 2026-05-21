@@ -180,6 +180,12 @@ The CSV keeps the original result columns and appends phase timings:
   destination tree.
 - `total_ms`: total measured mode time.
 
+For `system-build`, the CSV also records `system_build_public_paths`,
+`system_build_missing_before`, `system_build_verified`,
+`system_build_nar_bytes`, and `system_build_throughput_bps`. The byte count is
+summed from the substitute protocol `success sha256:<hash> <bytes>` replies
+captured during the timed public-closure fetch.
+
 Failure records keep the full error chain in `results.csv` and write the same
 details to `error.log`. The Markdown report keeps the failed-run table concise
 and points at the per-run log path.
@@ -197,9 +203,11 @@ loader wrappers for copied Rust binaries so they can find their Guix runtime
 libraries inside the guest.
 Provider selection now filters candidates through peer reputation and connection
 backoff, so stale provider records should be penalized after handshake timeouts
-instead of being retried first on later downloads. Remaining benchmark work
-should focus on larger packages, repeated runs, and HTTP comparison modes before
-making performance claims.
+instead of being retried first on later downloads. During an active block
+download, request-response failures requeue the affected peer's in-flight blocks
+so transient provider connection closes can be retried within the same
+substitute attempt. Remaining benchmark work should focus on larger packages,
+repeated runs, and HTTP comparison modes before making performance claims.
 
 The older top-level `benchmark` command remains a fast container harness, but
 VM benchmarks are the publishable path because each node has its own writable

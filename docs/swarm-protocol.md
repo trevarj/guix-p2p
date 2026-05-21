@@ -187,9 +187,14 @@ struct NarDownloader {
 | Overall download | configurable | 0 | Stall detection triggers HTTP fallback |
 
 Retry strategy:
-- Same peer: exponential backoff (1s → 2s → 4s)
-- Different peer: retry immediately if other providers exist
-- After 2 failures from a peer: remove from peer pool for this nar
+- Failed request-response sends requeue the affected peer's in-flight blocks
+  immediately.
+- Timed-out in-flight blocks are requeued before the stall guard can end an
+  otherwise recoverable download.
+- Different peer: retry immediately if another handshake peer advertises the
+  block.
+- Repeated peer failures are tracked in per-download state and long-lived peer
+  reputation/backoff.
 
 ## Peer Reputation
 

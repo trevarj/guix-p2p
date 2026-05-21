@@ -1351,14 +1351,6 @@ async fn download_blocks_from_peers(
             break;
         }
 
-        if tokio::time::Instant::now() > stall_deadline {
-            tracing::warn!(
-                "Block download stalled (no new blocks for {}s)",
-                ctx.config.stall_timeout_secs
-            );
-            break;
-        }
-
         let requeued = requeue_expired_blocks(&mut peer_states, &mut block_states, block_timeout);
         if requeued > 0 {
             tracing::debug!("Requeued {} stalled blocks", requeued);
@@ -1371,6 +1363,14 @@ async fn download_blocks_from_peers(
             nar_hash,
             max_in_flight,
         );
+
+        if tokio::time::Instant::now() > stall_deadline {
+            tracing::warn!(
+                "Block download stalled (no new blocks for {}s)",
+                ctx.config.stall_timeout_secs
+            );
+            break;
+        }
 
         let in_flight = peer_states.values().map(|peer| peer.in_flight.len()).sum::<usize>();
         if in_flight == 0
@@ -1403,6 +1403,17 @@ async fn download_blocks_from_peers(
 
                 if download.is_complete() {
                     break;
+                }
+            },
+            Ok(Ok(SwarmNotification::BlockRequestFailed { peer })) => {
+                let requeued =
+                    requeue_in_flight_blocks_for_peer(&mut peer_states, &mut block_states, peer);
+                if requeued > 0 {
+                    tracing::debug!(
+                        "Requeued {} blocks after request failure from {}",
+                        requeued,
+                        peer
+                    );
                 }
             },
             Ok(Ok(_)) => {},
@@ -1547,6 +1558,34 @@ fn requeue_expired_blocks(
             *state = BlockFetchState::Pending;
             requeued += 1;
         }
+    }
+
+    requeued
+}
+
+fn requeue_in_flight_blocks_for_peer(
+    peer_states: &mut HashMap<PeerId, PeerFetchState>,
+    block_states: &mut [BlockFetchState],
+    peer: PeerId,
+) -> usize {
+    let mut requeued = 0;
+
+    for (idx, state) in block_states.iter_mut().enumerate() {
+        let should_requeue = matches!(state, BlockFetchState::InFlight { peer: state_peer, .. } if *state_peer == peer);
+        if should_requeue {
+            *state = BlockFetchState::Pending;
+            requeued += 1;
+
+            if let Some(peer_state) = peer_states.get_mut(&peer) {
+                peer_state.in_flight.remove(&(idx as u32));
+            }
+        }
+    }
+
+    if requeued > 0
+        && let Some(peer_state) = peer_states.get_mut(&peer)
+    {
+        peer_state.failures += 1;
     }
 
     requeued
@@ -2220,6 +2259,49 @@ mod tests {
             },
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn requeues_in_flight_blocks_after_request_failure() {
+        let failed = PeerId::random();
+        let other = PeerId::random();
+        let requested_at = tokio::time::Instant::now();
+        let mut peer_states = HashMap::from([
+            (
+                failed,
+                PeerFetchState {
+                    available: HashSet::from([0, 1]),
+                    in_flight: HashSet::from([0, 1]),
+                    failures: 0,
+                    bytes_received: 0,
+                },
+            ),
+            (
+                other,
+                PeerFetchState {
+                    available: HashSet::from([2]),
+                    in_flight: HashSet::from([2]),
+                    failures: 0,
+                    bytes_received: 0,
+                },
+            ),
+        ]);
+        let mut block_states = vec![
+            BlockFetchState::InFlight { peer: failed, requested_at },
+            BlockFetchState::InFlight { peer: failed, requested_at },
+            BlockFetchState::InFlight { peer: other, requested_at },
+        ];
+
+        let requeued =
+            requeue_in_flight_blocks_for_peer(&mut peer_states, &mut block_states, failed);
+
+        assert_eq!(requeued, 2);
+        assert!(matches!(block_states[0], BlockFetchState::Pending));
+        assert!(matches!(block_states[1], BlockFetchState::Pending));
+        assert!(matches!(block_states[2], BlockFetchState::InFlight { peer, .. } if peer == other));
+        assert!(peer_states[&failed].in_flight.is_empty());
+        assert_eq!(peer_states[&failed].failures, 1);
+        assert_eq!(peer_states[&other].in_flight, HashSet::from([2]));
     }
 
     fn test_block_hash(block: &[u8]) -> [u8; 32] {

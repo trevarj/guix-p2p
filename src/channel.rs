@@ -21,6 +21,8 @@ pub enum SwarmNotification {
     ProvidersFound { hash: String, peers: Vec<PeerId> },
     /// A block protocol response arrived from a peer.
     BlockResponse { peer: PeerId, response: BlockResponse },
+    /// A block protocol request failed before a response arrived.
+    BlockRequestFailed { peer: PeerId },
 }
 
 /// Type alias for the broadcast sender used by the swarm task.

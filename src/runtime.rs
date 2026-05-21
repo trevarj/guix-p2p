@@ -232,6 +232,7 @@ fn handle_block_exchange(
         },
         request_response::Event::OutboundFailure { peer, error, .. } => {
             tracing::warn!("Outbound request failed for {}: {:?}", peer, error);
+            let _ = ctx.notify_tx.send(SwarmNotification::BlockRequestFailed { peer });
             ctx.reputation.lock().unwrap().record_failure(peer);
         },
         other => {

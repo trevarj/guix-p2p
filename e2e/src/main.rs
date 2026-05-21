@@ -3094,17 +3094,21 @@ while IFS= read -r PUBLIC_PATH; do
   if [ ! -e "$PUBLIC_PATH" ]; then
     MISSING_PUBLIC_COUNT=$((MISSING_PUBLIC_COUNT + 1))
     DEST="$DEST_ROOT/$MISSING_PUBLIC_COUNT"
+    COMMAND_OUTPUT="$DEST_ROOT/$MISSING_PUBLIC_COUNT.output"
     rm -rf "$DEST"
     printf 'FETCH_PUBLIC_PATH index=%s path=%s\n' "$MISSING_PUBLIC_COUNT" "$PUBLIC_PATH" \
       | tee -a "$FETCH_LOG"
-    printf 'substitute %s %s\n' "$PUBLIC_PATH" "$DEST" | {fetch_command} 4>&1 \
-      >>"$FETCH_LOG" 2>&1 || {{
+    if printf 'substitute %s %s\n' "$PUBLIC_PATH" "$DEST" | {fetch_command} \
+      >"$COMMAND_OUTPUT" 2>&1 4>&1; then
+      cat "$COMMAND_OUTPUT" | tee -a "$FETCH_LOG"
+    else
         STATUS="$?"
+        cat "$COMMAND_OUTPUT" >>"$FETCH_LOG" 2>/dev/null || true
         printf 'FETCH_PUBLIC_PATH_COMMAND_FAILED index=%s status=%s path=%s\n' \
           "$MISSING_PUBLIC_COUNT" "$STATUS" "$PUBLIC_PATH" >&2
         tail -n 120 "$FETCH_LOG" >&2 || true
         exit "$STATUS"
-      }}
+    fi
   fi
   if [ "$MISSING_PUBLIC_COUNT" -gt 0 ] && [ ! -e "$DEST" ]; then
     printf 'FETCH_PUBLIC_PATH_DEST_MISSING index=%s path=%s dest=%s\n' \
@@ -6188,6 +6192,9 @@ mod tests {
         assert!(p2p.contains("trap cleanup_dest_root EXIT"));
         assert!(p2p.contains("\"$P2P\" --substitute --socket '/tmp/daemon.sock'"));
         assert!(p2p.contains("printf 'substitute %s %s\\n' \"$PUBLIC_PATH\" \"$DEST\""));
+        assert!(p2p.contains("COMMAND_OUTPUT=\"$DEST_ROOT/$MISSING_PUBLIC_COUNT.output\""));
+        assert!(p2p.contains(">\"$COMMAND_OUTPUT\" 2>&1 4>&1"));
+        assert!(p2p.contains("cat \"$COMMAND_OUTPUT\" | tee -a \"$FETCH_LOG\""));
         assert!(p2p.contains("\"$PUBLIC_PATH\""));
         assert!(!p2p.contains("guix system build"));
         assert!(!p2p.contains("guix build --no-grafts"));
