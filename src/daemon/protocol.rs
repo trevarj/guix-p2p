@@ -90,6 +90,25 @@ impl ReplyWriter {
         Ok(())
     }
 
+    /// Stream raw NAR bytes to a socket relay without buffering the encoded
+    /// response in memory.
+    pub async fn write_nar_data_to_socket(
+        writer: &mut (impl tokio::io::AsyncWrite + Unpin),
+        nar_data: &[u8],
+    ) -> io::Result<()> {
+        use tokio::io::AsyncWriteExt;
+
+        const CHUNK_SIZE: usize = 48 * 1024;
+
+        for chunk in nar_data.chunks(CHUNK_SIZE) {
+            writer.write_all(b"nar:").await?;
+            writer.write_all(BASE64.encode(chunk).as_bytes()).await?;
+            writer.write_all(b"\n").await?;
+        }
+        writer.write_all(b"nar-end\n").await?;
+        writer.flush().await
+    }
+
     pub fn is_socket(&self) -> bool {
         matches!(self, ReplyWriter::Socket { .. })
     }
@@ -223,6 +242,15 @@ mod tests {
         let ReplyWriter::Socket { buf } = reply else {
             panic!("expected socket reply writer");
         };
+        assert_eq!(String::from_utf8(buf).unwrap(), "nar:bmFyLWJ5dGVz\nnar-end\n");
+    }
+
+    #[tokio::test]
+    async fn socket_writer_streams_nar_data() {
+        let mut buf = Vec::new();
+
+        ReplyWriter::write_nar_data_to_socket(&mut buf, b"nar-bytes").await.unwrap();
+
         assert_eq!(String::from_utf8(buf).unwrap(), "nar:bmFyLWJ5dGVz\nnar-end\n");
     }
 

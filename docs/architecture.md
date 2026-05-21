@@ -139,7 +139,8 @@ The Unix socket between daemon and relay uses channel prefix framing:
 - `fd4:<line>\n` — structured reply data (have paths, info metadata, success/not-found)
 - `out:<line>\n` — trace output (`@ download-started`, `@ download-succeeded`)
 - `nar:<base64-chunk>\n` / `nar-end\n` — verified NAR bytes for the current
-  substitute request
+  substitute request. The daemon streams these chunks directly to the socket
+  instead of buffering a full base64-encoded NAR reply.
 
 The relay demuxes these: `fd4:` lines are written to fd 4, `out:` lines to
 stdout (fd 1), and `nar:` chunks are buffered to a temporary NAR file. At
@@ -150,6 +151,9 @@ stdout (fd 1), and `nar:` chunks are buffered to a temporary NAR file. At
 Destination writes happen in the relay process spawned by `guix-daemon`, not in
 the long-lived user daemon. This keeps the warm swarm architecture while
 matching guix-daemon's permission model.
+If the daemon socket closes during substitute mode before a terminal `fd4:`
+reply (`success`, `not-found`, or `hash-mismatch`), the relay exits with an
+error instead of silently reporting success.
 
 ### Query protocol
 

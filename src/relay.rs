@@ -67,6 +67,7 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
     let mut nar_file: Option<tokio::fs::File> = None;
     let mut nar_temp_path: Option<std::path::PathBuf> = None;
     let mut nar_index = 0u64;
+    let mut saw_substitute_terminal_reply = !matches!(mode, RelayMode::Substitute);
 
     loop {
         line.clear();
@@ -76,6 +77,9 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
         }
 
         if let Some(data) = line.strip_prefix("fd4:") {
+            if matches!(mode, RelayMode::Substitute) && is_substitute_terminal_reply(data) {
+                saw_substitute_terminal_reply = true;
+            }
             // Structured reply → fd 4
             let buf = data.as_bytes();
             unsafe {
@@ -171,6 +175,12 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("daemon socket closed before finishing nar for {dest}"));
     }
 
+    if !saw_substitute_terminal_reply {
+        return Err(anyhow::anyhow!(
+            "daemon socket closed before substitute returned a terminal reply"
+        ));
+    }
+
     if let Some(task) = copy_task {
         let _ = task.await;
     }
@@ -184,6 +194,13 @@ fn substitute_destination(line: &str) -> Option<&str> {
     parts.next().filter(|dest| !dest.is_empty())
 }
 
+fn is_substitute_terminal_reply(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed == "not-found"
+        || trimmed.starts_with("success ")
+        || trimmed.starts_with("hash-mismatch ")
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum RelayMode {
     Query,
@@ -192,7 +209,7 @@ pub enum RelayMode {
 
 #[cfg(test)]
 mod tests {
-    use super::substitute_destination;
+    use super::{is_substitute_terminal_reply, substitute_destination};
 
     #[test]
     fn parses_substitute_destination() {
@@ -201,5 +218,14 @@ mod tests {
             Some("/gnu/store/abc-foo")
         );
         assert_eq!(substitute_destination("have /gnu/store/abc-foo"), None);
+    }
+
+    #[test]
+    fn detects_substitute_terminal_replies() {
+        assert!(is_substitute_terminal_reply("not-found\n"));
+        assert!(is_substitute_terminal_reply("success sha256:abc 123\n"));
+        assert!(is_substitute_terminal_reply("hash-mismatch sha256 sha256:a sha256:b\n"));
+        assert!(!is_substitute_terminal_reply(""));
+        assert!(!is_substitute_terminal_reply("@ download-started /gnu/store/abc p2p://abc 1"));
     }
 }

@@ -375,6 +375,7 @@ pub async fn run_substitute_mode(
                 cache,
                 cmd_tx,
                 &mut reply,
+                None,
                 &path,
                 &dest,
                 &mut notify_rx,
@@ -404,6 +405,7 @@ async fn try_swarm_substitute(
     cache: &ProviderCache,
     cmd_tx: &UnboundedSender<SwarmCommand>,
     reply: &mut ReplyWriter,
+    socket_writer: Option<&mut tokio::net::unix::OwnedWriteHalf>,
     path: &str,
     dest: &str,
     notify_rx: &mut NotifyRx,
@@ -662,9 +664,27 @@ async fn try_swarm_substitute(
             }
 
             if reply.is_socket() {
-                if let Err(e) = reply.write_nar_data(&nar_data) {
-                    tracing::error!("Failed to queue nar for socket relay: {}", e);
+                let Some(writer) = socket_writer else {
+                    tracing::error!("Socket substitute requested without a socket writer");
                     let _ = reply.write_line("not-found");
+                    let _ = event_tx.send(DashboardEvent::DownloadFailed {
+                        nar_hash: nar_hash_hex.clone(),
+                        store_path: store_path.clone(),
+                        reason: "socket relay writer missing".to_string(),
+                    });
+                    return;
+                };
+                if let Err(e) = reply.flush_socket(writer).await {
+                    tracing::error!("Failed to flush socket relay metadata: {}", e);
+                    let _ = event_tx.send(DashboardEvent::DownloadFailed {
+                        nar_hash: nar_hash_hex.clone(),
+                        store_path: store_path.clone(),
+                        reason: format!("socket relay flush error: {}", e),
+                    });
+                    return;
+                }
+                if let Err(e) = ReplyWriter::write_nar_data_to_socket(writer, &nar_data).await {
+                    tracing::error!("Failed to stream nar to socket relay: {}", e);
                     let _ = event_tx.send(DashboardEvent::DownloadFailed {
                         nar_hash: nar_hash_hex.clone(),
                         store_path: store_path.clone(),
@@ -1882,6 +1902,7 @@ async fn handle_socket_connection(
                         cache,
                         cmd_tx,
                         &mut reply,
+                        Some(&mut socket_write),
                         &path,
                         &dest,
                         &mut notify_rx,
