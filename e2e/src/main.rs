@@ -2154,18 +2154,15 @@ test ! -e "$STORE_PATH"
             r#"
 set -eu
 STORE_PATH={store_path}
-SUBSTITUTE_URLS={substitute_urls}
-P2P_SUBSTITUTE_URLS={p2p_substitute_urls}
 P2P="${{GUIX_P2P_E2E_P2P_BIN:-guix-p2p}}"
 test ! -e "$STORE_PATH"
 {public_fetch}
 "#,
             store_path = shell_quote(&target.store_path),
-            substitute_urls = shell_quote(&substitute_urls_for_guix(&config.substitute_urls)),
-            p2p_substitute_urls =
-                shell_quote(&substitute_urls_for_guix_p2p(&config.substitute_urls)),
-            public_fetch =
-                system_build_public_closure_fetch_command(None, Some("$P2P_SUBSTITUTE_URLS"))
+            public_fetch = system_build_public_closure_fetch_command(
+                Some("/tmp/guix-p2p-b/guix-p2p.sock"),
+                None
+            )
         )
     } else {
         format!(
@@ -2190,6 +2187,23 @@ echo HTTP_IMPORTED_OUTPUT_IN_NODE_STORE
     print!("{output}");
     let prepare_ms = phase_start.elapsed().as_millis();
 
+    let is_system_build = is_system_build_benchmark(&target.package);
+    let p2p_start_ms = if is_system_build {
+        let phase_start = std::time::Instant::now();
+        vm_start_fetch_p2p(config, name, &target, "http-first", &[], None, None, None)?;
+        Some(phase_start.elapsed().as_millis())
+    } else {
+        None
+    };
+
+    let daemon_start_ms = if is_system_build {
+        let phase_start = std::time::Instant::now();
+        vm_start_daemon_with_integration(config, name, VmDaemonIntegration::RawExtension, 1)?;
+        Some(phase_start.elapsed().as_millis())
+    } else {
+        None
+    };
+
     let phase_start = std::time::Instant::now();
     let output = ssh_run(config, &node, &import_command)?;
     print!("{output}");
@@ -2198,6 +2212,8 @@ echo HTTP_IMPORTED_OUTPUT_IN_NODE_STORE
     Ok(merge_system_build_payload_metrics(
         BenchmarkPhaseTimings {
             prepare_ms: Some(prepare_ms),
+            p2p_start_ms,
+            daemon_start_ms,
             import_ms: Some(import_ms),
             total_ms: Some(started.elapsed().as_millis()),
             ..BenchmarkPhaseTimings::default()

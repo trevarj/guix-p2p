@@ -137,6 +137,11 @@ The system-build evidence check does not require the generated top-level output
 to appear in the fetch-node P2P catalog. For `p2p-only` and `p2p-first`, it
 requires seed-node block-serving evidence instead; `http-first` may complete
 through HTTP before P2P is used.
+The `http` mode uses the same warm `guix-p2p` socket and raw Guix daemon
+extension path as the P2P modes, but starts the daemon with HTTP-first policy
+and does not require seed-node block-serving evidence. This keeps the
+system-build HTTP baseline comparable with P2P modes instead of measuring a
+cold direct substitute helper for every public path.
 Before each system-build measurement, the harness prepares the mode runner by
 realizing the system once and then deleting the top-level output plus closure
 items that the seed node already identified as having public substitute
@@ -170,11 +175,13 @@ The CSV keeps the original result columns and appends phase timings:
 
 - `seed_ms`: seed-node setup for the package/condition.
 - `prepare_ms`: realize dependencies and remove only the target output.
-- `p2p_start_ms`: start the fetch-node `guix-p2p` daemon.
+- `p2p_start_ms`: start the benchmark `guix-p2p` daemon. For `system-build`,
+  this is recorded for warm HTTP and P2P modes.
 - `provider_wait_ms`: wait until the target is visible through P2P. This is
   omitted for `system-build`, where availability is checked by fetching the
   recorded public closure paths.
-- `daemon_start_ms`: start the extension-enabled raw `guix-daemon`.
+- `daemon_start_ms`: start the extension-enabled raw `guix-daemon`. For
+  `system-build`, this is recorded for warm HTTP and P2P modes.
 - `import_ms`: run the final package import, or for `system-build`, fetch,
   restore, and verify the recorded public closure NARs in a temporary
   destination tree.
