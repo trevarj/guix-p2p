@@ -119,6 +119,12 @@ Publish the first `shareable_addresses` value exactly as clients should dial it:
 
 ## Client Config
 
+Current project bootstrap node:
+
+```toml
+bootstrap_peers = "/dns4/guix-p2p.trevs.site/udp/6881/quic-v1/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"
+```
+
 ```toml
 bootstrap_peers = "/dns4/bootstrap.example.org/udp/6881/quic-v1/p2p/12D3KooW..."
 ```

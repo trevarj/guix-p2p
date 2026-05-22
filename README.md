@@ -160,6 +160,12 @@ and `cargo-inputs-from-lockfile` support.
 
 ## Bootstrap Peers
 
+The current project bootstrap node is:
+
+```toml
+bootstrap_peers = "/dns4/guix-p2p.trevs.site/udp/6881/quic-v1/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"
+```
+
 If another tester is acting as a bootstrap node, ask them for their full
 multiaddr and pass it as `bootstrap_peers` in `~/.config/guix-p2p/config.toml`:
 

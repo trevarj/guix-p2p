@@ -1144,6 +1144,7 @@ cat > "$site_dir/index.html" <<'HTML'
         <article class="info-card">
           <h3>Bootstrap peers</h3>
           <p class="muted">Use full peer multiaddrs such as <code>/dns4/node.example.org/udp/6881/quic-v1/p2p/12D3KooW...</code> in <code>bootstrap_peers</code>. Do not share <code>/ip4/0.0.0.0/...</code>; that is only a local bind address.</p>
+          <pre data-language="TOML"><code class="language-toml">bootstrap_peers = <span class="tok-string">"/dns4/guix-p2p.trevs.site/udp/6881/quic-v1/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"</span></code></pre>
         </article>
         <article class="info-card">
           <h3>Dashboard</h3>
