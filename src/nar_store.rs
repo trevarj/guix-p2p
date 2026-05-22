@@ -376,12 +376,12 @@ fn export_nar(store_path: &str) -> anyhow::Result<Vec<u8>> {
 }
 
 fn system_profile_command(name: &str) -> std::ffi::OsString {
-    let system_path = std::path::Path::new("/run/current-system/profile/bin").join(name);
-    if system_path.exists() {
-        return system_path.into_os_string();
-    }
+    system_profile_command_from(std::path::Path::new("/run/current-system/profile/bin"), name)
+}
 
-    std::ffi::OsString::from(name)
+fn system_profile_command_from(bin_dir: &std::path::Path, name: &str) -> std::ffi::OsString {
+    let command = bin_dir.join(name);
+    if command.exists() { command.into_os_string() } else { std::ffi::OsString::from(name) }
 }
 
 #[cfg(test)]
@@ -395,6 +395,25 @@ mod tests {
         let command = system_profile_command("guix");
 
         assert!(!command.is_empty());
+    }
+
+    #[test]
+    fn nar_store_prefers_system_profile_commands() {
+        let tmp = tempfile::tempdir().unwrap();
+        let command_path = tmp.path().join("guile");
+        std::fs::write(&command_path, b"").unwrap();
+
+        let command = system_profile_command_from(tmp.path(), "guile");
+
+        assert_eq!(command, command_path.into_os_string());
+    }
+
+    #[test]
+    fn nar_store_falls_back_to_path_command_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let command = system_profile_command_from(tmp.path(), "guix");
+
+        assert_eq!(command, std::ffi::OsString::from("guix"));
     }
 
     #[test]

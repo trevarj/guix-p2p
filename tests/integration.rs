@@ -180,6 +180,22 @@ mod cli_contract {
     }
 }
 
+mod service_environment_contract {
+    #[test]
+    fn service_helpers_do_not_depend_on_shell_path_for_guix_tools() {
+        for path in ["src/dashboard/packages.rs", "src/nar_store.rs"] {
+            let source = std::fs::read_to_string(path).unwrap();
+            assert!(
+                !source.contains("Command::new(\"guix\")")
+                    && !source.contains("Command::new(\"guile\")")
+                    && !source.contains("std::process::Command::new(\"guix\")")
+                    && !source.contains("std::process::Command::new(\"guile\")"),
+                "{path} must resolve Guix tools from /run/current-system/profile/bin before falling back to PATH"
+            );
+        }
+    }
+}
+
 // ======================================================================
 // Reputation Behaviour Tests
 // ======================================================================

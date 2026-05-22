@@ -1271,6 +1271,18 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_package_discovery_prefers_system_profile_guix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bin = tmp.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("guix"), b"").unwrap();
+
+        let command = packages::guix_binary_from_system_profile(tmp.path());
+
+        assert_eq!(command, bin.join("guix").into_os_string());
+    }
+
+    #[test]
     fn seed_mutation_requires_loopback_bind_address() {
         assert!(seed_mutation_allowed_for_bind("127.0.0.1"));
         assert!(seed_mutation_allowed_for_bind("::1"));

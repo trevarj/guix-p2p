@@ -80,9 +80,13 @@ pub(super) fn installed_packages_from_profile(
 }
 
 pub(super) fn guix_binary() -> OsString {
-    let system_guix = FsPath::new("/run/current-system/profile/bin/guix");
+    guix_binary_from_system_profile(FsPath::new("/run/current-system/profile"))
+}
+
+pub(super) fn guix_binary_from_system_profile(profile: &FsPath) -> OsString {
+    let system_guix = profile.join("bin/guix");
     if system_guix.exists() {
-        return system_guix.as_os_str().to_owned();
+        return system_guix.into_os_string();
     }
 
     OsString::from("guix")
