@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -1788,6 +1790,7 @@ async fn start_socket_listener(
 
     let listener = tokio::net::UnixListener::bind(socket_path)
         .map_err(|e| anyhow::anyhow!("failed to bind socket {}: {}", socket_path, e))?;
+    set_relay_socket_permissions(socket_path)?;
     tracing::info!("Listening for relay connections on {}", socket_path);
 
     loop {
@@ -1836,6 +1839,20 @@ async fn start_socket_listener(
             },
         }
     }
+}
+
+#[cfg(unix)]
+fn set_relay_socket_permissions(socket_path: &str) -> anyhow::Result<()> {
+    // Relay clients are spawned by guix-daemon, not necessarily by the daemon
+    // service user, so the local Unix socket must be connectable system-wide.
+    let permissions = std::fs::Permissions::from_mode(0o666);
+    std::fs::set_permissions(socket_path, permissions)
+        .map_err(|e| anyhow::anyhow!("failed to chmod socket {}: {}", socket_path, e))
+}
+
+#[cfg(not(unix))]
+fn set_relay_socket_permissions(_socket_path: &str) -> anyhow::Result<()> {
+    Ok(())
 }
 
 /// Handle a single relay connection over a Unix socket.

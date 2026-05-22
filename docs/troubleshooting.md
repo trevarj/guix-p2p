@@ -72,4 +72,10 @@ Check:
   integration.
 
 `--doctor` reports whether the daemon socket is live at the time it runs. A
-stale socket file is reported as an error.
+stale socket file is reported as an error. When no config file is present,
+doctor also probes the Guix System service socket at
+`/var/cache/guix-p2p/guix-p2p.sock`.
+
+The system relay socket must be connectable by the Guix substitute process. If
+doctor reports `Permission denied`, restart the `guix-p2p` service after
+upgrading to a build that sets world-connectable socket permissions.
