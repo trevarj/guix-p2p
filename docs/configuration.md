@@ -27,7 +27,9 @@ guix-p2p --init
 `--init` writes the config path above and refuses to overwrite an existing file.
 CLI values such as `--bootstrap-peers`, `--external-addresses`, `--listen-addr`,
 `--cache-dir`, `--socket`, `--substitute-urls`, and `--policy` are copied into
-the generated template.
+the generated template. The template includes comments for the first remote
+tester flow: set `external_addresses`, start the daemon, then run
+`guix-p2p --share-info` and share the generated `bootstrap_peers` snippet.
 
 ## Example
 

@@ -268,6 +268,11 @@ fn initial_config_template(options: InitConfigOptions) -> String {
     format!(
         r#"# guix-p2p tester configuration
 # Run `guix-p2p --doctor` after editing this file.
+# To let remote peers dial this node:
+# 1. Keep cache_dir stable so the PeerId stays stable.
+# 2. Set external_addresses to the public DNS/IP multiaddr.
+# 3. Start the daemon, then run `guix-p2p --share-info`.
+# 4. Share the generated bootstrap_peers snippet with testers.
 
 listen_addr = {listen_addr}
 bootstrap_peers = {bootstrap_peers}
@@ -277,6 +282,7 @@ peer_store_max_entries = 100
 
 # Set this when peers outside your LAN should dial this node.
 # Example: "/dns4/node.example.org/udp/6881/quic-v1"
+# Run `guix-p2p --share-info` after setting this to see the full /p2p address.
 external_addresses = {external_addresses}
 
 cache_dir = {cache_dir}
