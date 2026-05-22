@@ -80,7 +80,8 @@
            pkg-config
            perl))
     (inputs
-     (append (cargo-inputs-from-lockfile)
+     (append (cargo-inputs-from-lockfile
+              (string-append %guix-p2p-checkout-root "/Cargo.lock"))
              (list libgcrypt
                    nss-certs
                    openssl
