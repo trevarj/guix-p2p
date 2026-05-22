@@ -606,16 +606,18 @@ function copyText(text){
 function copyDiagnostics(){
   Promise.all([
     fetch('/api/status').then(function(r){return r.json()}),
+    fetch('/api/diagnostics').then(function(r){return r.json()}),
     fetch('/api/peers').then(function(r){return r.json()}),
     fetch('/api/seeds').then(function(r){return r.json()})
   ]).then(function(parts){
-    var status=parts[0],peers=parts[1]||[],seeds=parts[2]||[];
+    var status=parts[0],diagnostics=parts[1]||{},peers=parts[2]||[],seeds=parts[3]||[];
     var report={
       peer_id:status.peer_id,
       listen_addr:status.listen_addr,
       external_addresses:status.external_addresses,
       bootstrap_peer_count:status.bootstrap_peer_count,
       connectivity:status.connectivity,
+      diagnostics:diagnostics,
       connected_peers:status.connected_peers,
       known_peers:peers.length,
       seed_count:seeds.length,

@@ -743,6 +743,8 @@ Dashboard API endpoints:
 - `/api/status` returns the local peer id, listen address, configured external
   addresses, shareable multiaddrs, uptime, currently connected peer count, DHT
   entry count, observed build count, and seed count.
+- `/api/diagnostics` returns the daemon's doctor-style report with
+  connectivity, readiness checks, and error/warning booleans.
 - `/api/peers` returns full peer ids, connection state, known addresses,
   address count, last-active age, and reputation counters.
 - `/api/builds` returns observed builds with a `lookup_key` for detail links.

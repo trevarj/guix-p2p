@@ -74,6 +74,10 @@ The dashboard header includes:
 Use `/api/status` for machine-readable state. It includes `connectivity`,
 `bootstrap_peer_count`, `shareable_addresses`, and the local PeerId.
 
+Use `/api/diagnostics` for the dashboard daemon's full doctor-style report. It
+returns the same `connectivity`, `checks`, `has_errors`, and `has_warnings`
+fields as `guix-p2p --doctor --json`.
+
 The `copy diag` dashboard button copies a compact JSON report with connectivity,
-peer counts, DHT count, seed count, and the shareable address state. It is meant
-for tester issue reports.
+doctor checks, peer counts, DHT count, seed count, and the shareable address
+state. It is meant for tester issue reports.

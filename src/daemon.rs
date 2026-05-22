@@ -1677,6 +1677,7 @@ pub async fn run_daemon_mode(
             seed_mutation_allowed: dashboard::seed_mutation_allowed_for_bind(
                 &config.dashboard_bind,
             ),
+            config: config.clone(),
         };
         let port = config.dashboard_port;
         let bind = config.dashboard_bind.clone();

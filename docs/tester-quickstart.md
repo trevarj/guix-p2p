@@ -81,6 +81,7 @@ When reporting a failure, include:
 
 - `guix-p2p --doctor` output.
 - dashboard `copy diag` output.
+- `/api/diagnostics` output if the dashboard is reachable.
 - Daemon command line and config file with private data removed.
 - Dashboard `NET` state.
 - Peer count, shareable address, and bootstrap peer count from `/api/status`.

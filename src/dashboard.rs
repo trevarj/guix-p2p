@@ -21,9 +21,10 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
     channel::SwarmCommand,
+    config::Config,
     connection::{ConnectionManager, PeerConnectionSnapshot},
     dht::ProviderCache,
-    diagnostics::{self, ConnectivitySummary},
+    diagnostics::{self, ConnectivitySummary, DiagnosticReport},
     nar_store::NarStore,
     reputation::{PeerScore, ReputationTracker},
 };
@@ -269,6 +270,7 @@ pub struct DashboardState {
     pub catalog: Arc<Mutex<HashMap<String, CatalogItem>>>,
     pub cmd_tx: UnboundedSender<SwarmCommand>,
     pub seed_mutation_allowed: bool,
+    pub config: Config,
 }
 
 pub async fn serve(state: DashboardState, port: u16, bind: &str) {
@@ -303,6 +305,7 @@ fn dashboard_router(state: DashboardState) -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/api/status", get(api_status))
+        .route("/api/diagnostics", get(api_diagnostics))
         .route("/api/peers", get(api_peers))
         .route("/api/builds", get(api_builds))
         .route("/api/build/:hash", get(api_build_detail))
@@ -351,6 +354,10 @@ async fn api_status(State(state): State<DashboardState>) -> Json<ApiStatus> {
     };
 
     Json(status)
+}
+
+async fn api_diagnostics(State(state): State<DashboardState>) -> Json<DiagnosticReport> {
+    Json(diagnostics::diagnostic_report(&state.config, &state.peer_id))
 }
 
 async fn api_peers(State(state): State<DashboardState>) -> Json<Vec<ApiPeer>> {
@@ -838,6 +845,11 @@ mod tests {
     fn dashboard_state() -> (DashboardState, tempfile::TempDir) {
         let tmp = tempfile::TempDir::new().unwrap();
         let (event_bus, _) = tokio::sync::broadcast::channel(16);
+        let mut config =
+            Config::load(None, None, None, Some(tmp.path().display().to_string()), None, None);
+        config.external_addresses = vec!["/dns4/node.example.org/udp/6881/quic-v1".to_string()];
+        config.bootstrap_peers =
+            vec!["/dns4/bootstrap.example.org/udp/6881/quic-v1/p2p/12D3KooWQp4D6Lwq".to_string()];
         let state = DashboardState {
             provider_cache: create_provider_cache(),
             reputation: Arc::new(Mutex::new(ReputationTracker::new(5))),
@@ -857,6 +869,7 @@ mod tests {
             catalog: Arc::new(Mutex::new(HashMap::new())),
             cmd_tx: tokio::sync::mpsc::unbounded_channel().0,
             seed_mutation_allowed: true,
+            config,
         };
         (state, tmp)
     }
@@ -923,6 +936,20 @@ mod tests {
         );
         assert_eq!(status.bootstrap_peer_count, 1);
         assert_eq!(status.connectivity.state, "shareable");
+    }
+
+    #[tokio::test]
+    async fn diagnostics_api_returns_doctor_report() {
+        let (mut state, _tmp) = dashboard_state();
+        let peer = libp2p::PeerId::random();
+        state.peer_id = peer.to_string();
+
+        let report = api_diagnostics(State(state)).await.0;
+
+        assert_eq!(report.peer_id, peer.to_string());
+        assert_eq!(report.connectivity.state, "shareable");
+        assert!(report.checks.iter().any(|check| check.id == "bootstrap-peers"));
+        assert!(report.checks.iter().any(|check| check.id == "shareable-address"));
     }
 
     #[tokio::test]
