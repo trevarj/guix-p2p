@@ -14,6 +14,7 @@
   #:use-module (gnu packages perl)
   #:use-module (gnu packages pkg-config)
   #:use-module (gnu packages tls)
+  #:use-module (ice-9 rdelim)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-13)
   #:export (guix-p2p))
@@ -35,6 +36,53 @@
       (and (file-exists? %guix-p2p-lockfile)
            (dirname (canonicalize-path %guix-p2p-lockfile)))
       (getcwd)))
+
+(define (guix-p2p-read-line file)
+  (and (file-exists? file)
+       (call-with-input-file file read-line)))
+
+(define (guix-p2p-git-dir root)
+  (let ((git (string-append root "/.git")))
+    (cond
+     ((file-is-directory? git) git)
+     ((file-exists? git)
+      (let ((line (guix-p2p-read-line git)))
+        (and line
+             (string-prefix? "gitdir: " line)
+             (let ((dir (string-drop line 8)))
+               (if (absolute-file-name? dir)
+                   dir
+                   (canonicalize-path (string-append root "/" dir)))))))
+     (else #f))))
+
+(define (guix-p2p-packed-ref git-dir ref)
+  (let ((packed-refs (string-append git-dir "/packed-refs")))
+    (and (file-exists? packed-refs)
+         (call-with-input-file packed-refs
+           (lambda (port)
+             (let loop ((line (read-line port)))
+               (cond
+                ((eof-object? line) #f)
+                ((and (not (string-prefix? "#" line))
+                      (string-suffix? (string-append " " ref) line))
+                 (car (string-tokenize line)))
+                (else (loop (read-line port))))))))))
+
+(define (guix-p2p-current-commit root)
+  (let* ((git-dir (guix-p2p-git-dir root))
+         (head (and git-dir (guix-p2p-read-line (string-append git-dir "/HEAD")))))
+    (cond
+     ((not head) "unknown")
+     ((string-prefix? "ref: " head)
+      (let* ((ref (string-drop head 5))
+             (commit (or (guix-p2p-read-line (string-append git-dir "/" ref))
+                         (guix-p2p-packed-ref git-dir ref))))
+        (if commit (string-take commit (min 12 (string-length commit))) "unknown")))
+     (else (string-take head (min 12 (string-length head)))))))
+
+(define %guix-p2p-commit
+  (or (getenv "GUIX_P2P_BUILD_COMMIT")
+      (guix-p2p-current-commit %guix-p2p-checkout-root)))
 
 (define (guix-p2p-generated-path? file)
   (any (lambda (part)
@@ -76,6 +124,9 @@
       #:cargo-install-paths ''(".")
       #:phases
       #~(modify-phases %standard-phases
+          (add-before 'build 'set-build-commit
+            (lambda _
+              (setenv "GUIX_P2P_BUILD_COMMIT" #$%guix-p2p-commit)))
           (add-after 'install 'install-guix-extension
             (lambda _
               (unless (file-exists? "guix/extensions/substitute.scm")

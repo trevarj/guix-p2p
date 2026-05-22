@@ -16,7 +16,8 @@ guix-p2p --doctor
 
 Run this same sequence after pulling channel updates. `cargo run --bin guix-p2p
 -- --doctor` uses the checkout build; `guix-p2p --doctor` uses the binary in
-the active system profile.
+the active system profile. `guix-p2p --version` includes the embedded Git
+commit so testers can confirm which build is active.
 
 ## Build
 

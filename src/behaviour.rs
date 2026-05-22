@@ -105,7 +105,7 @@ fn create_swarm_behaviour_with_mdns(
 
     let identify = identify::Behaviour::new(
         identify::Config::new("/ipfs/0.1.0".into(), keypair.public())
-            .with_agent_version(format!("guix-p2p/{}", env!("CARGO_PKG_VERSION"))),
+            .with_agent_version(format!("guix-p2p/{}", crate::version::VERSION)),
     );
 
     GuixP2PBehaviour { kad, block_exchange, mdns, identify }

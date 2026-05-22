@@ -110,7 +110,9 @@ mod cli_contract {
         let output = Command::new(binary()).arg("--version").output().unwrap();
 
         assert!(output.status.success());
-        assert!(String::from_utf8_lossy(&output.stdout).contains("guix-p2p"));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("guix-p2p"));
+        assert!(stdout.contains("0.1.0 ("));
     }
 
     #[test]

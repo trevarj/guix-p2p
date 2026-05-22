@@ -12,7 +12,7 @@ use guix_p2p::{
 };
 
 #[derive(Parser)]
-#[command(name = "guix-p2p", version)]
+#[command(name = "guix-p2p", version = guix_p2p::version::VERSION)]
 #[command(group(ArgGroup::new("json_output_mode").args(["doctor", "share_info", "test_connectivity"])))]
 struct Cli {
     /// Run in query mode (driven by guix-daemon --query)
