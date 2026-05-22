@@ -28,6 +28,23 @@ configuration:
 (use-modules (guix-p2p services))
 ```
 
+When upgrading an existing node, pull the latest channel, reconfigure the
+system, then restart the long-running services so they stop using old store
+paths:
+
+```sh
+guix pull
+sudo guix system reconfigure /etc/config.scm
+sudo herd restart guix-p2p
+sudo herd restart guix-daemon
+guix-p2p --doctor
+```
+
+`cargo run --bin guix-p2p -- --doctor` checks the checkout build. Plain
+`guix-p2p --doctor` checks the binary installed in the current system profile,
+so it only reflects fixes after `guix pull`, `guix system reconfigure`, and
+service restart.
+
 From a checkout, use the manifest for contributor shells:
 
 ```sh

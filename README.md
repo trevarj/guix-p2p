@@ -60,7 +60,7 @@ For persistent Guix System usage, add this repository as a Guix channel:
  (channel
   (name 'guix-p2p)
   (url "https://codeberg.org/trevarj/guix-p2p")
-  (branch "main"))
+  (branch "master"))
  %default-channels)
 ```
 
@@ -91,6 +91,17 @@ After reconfiguring, keep using normal Guix commands:
 ```sh
 guix build hello
 sudo guix system reconfigure /etc/config.scm
+```
+
+After updating the channel, rebuild the system and restart the services that
+hold old store paths:
+
+```sh
+guix pull
+sudo guix system reconfigure /etc/config.scm
+sudo herd restart guix-p2p
+sudo herd restart guix-daemon
+guix-p2p --doctor
 ```
 
 The extension defaults to:

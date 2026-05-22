@@ -1,5 +1,23 @@
 # Tester Quickstart
 
+## System Install
+
+For persistent Guix System testing, add the `guix-p2p` channel and service as
+shown in [`deployment.md`](deployment.md), then activate the current channel
+build:
+
+```sh
+guix pull
+sudo guix system reconfigure /etc/config.scm
+sudo herd restart guix-p2p
+sudo herd restart guix-daemon
+guix-p2p --doctor
+```
+
+Run this same sequence after pulling channel updates. `cargo run --bin guix-p2p
+-- --doctor` uses the checkout build; `guix-p2p --doctor` uses the binary in
+the active system profile.
+
 ## Build
 
 ```sh
