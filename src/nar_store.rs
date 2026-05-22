@@ -1,7 +1,9 @@
 use std::{
     collections::HashMap,
+    ffi::OsString,
     io::Write,
     path::{Path, PathBuf},
+    process::Command,
     sync::Mutex,
 };
 
@@ -332,13 +334,17 @@ pub type SharedNarStore = Mutex<NarStore>;
 
 /// Compute the nar hash of a store path using `guix hash -S nar -f hex`.
 fn compute_nar_hash(store_path: &str) -> anyhow::Result<String> {
-    let output = std::process::Command::new(system_profile_command("guix"))
+    let output = Command::new(system_profile_command("guix"))
         .args(["hash", "-S", "nar", "-f", "hex", store_path])
         .output()
         .context("failed to run `guix hash`")?;
 
     if !output.status.success() {
-        anyhow::bail!("guix hash failed: {}", String::from_utf8_lossy(&output.stderr));
+        anyhow::bail!(
+            "guix hash failed with status {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
 
     Ok(String::from_utf8(output.stdout)?.trim().to_string())
@@ -350,7 +356,9 @@ fn compute_nar_hash(store_path: &str) -> anyhow::Result<String> {
 /// metadata and a signature. Substitute servers serve the raw single-item nar,
 /// so use Guix's serializer directly.
 fn export_nar(store_path: &str) -> anyhow::Result<Vec<u8>> {
-    let output = std::process::Command::new(system_profile_command("guile"))
+    let mut command = Command::new(system_profile_command("guile"));
+    add_system_profile_guile_env(&mut command);
+    let output = command
         .args([
             "-c",
             r#"
@@ -369,19 +377,49 @@ fn export_nar(store_path: &str) -> anyhow::Result<Vec<u8>> {
         .context("failed to run Guix nar serializer via `guile`")?;
 
     if !output.status.success() {
-        anyhow::bail!("Guix nar serializer failed: {}", String::from_utf8_lossy(&output.stderr));
+        anyhow::bail!(
+            "Guix nar serializer failed with status {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
 
     Ok(output.stdout)
 }
 
-fn system_profile_command(name: &str) -> std::ffi::OsString {
+fn system_profile_command(name: &str) -> OsString {
     system_profile_command_from(std::path::Path::new("/run/current-system/profile/bin"), name)
 }
 
-fn system_profile_command_from(bin_dir: &std::path::Path, name: &str) -> std::ffi::OsString {
+fn system_profile_command_from(bin_dir: &std::path::Path, name: &str) -> OsString {
     let command = bin_dir.join(name);
-    if command.exists() { command.into_os_string() } else { std::ffi::OsString::from(name) }
+    if command.exists() { command.into_os_string() } else { OsString::from(name) }
+}
+
+fn add_system_profile_guile_env(command: &mut Command) {
+    for (key, value) in
+        system_profile_guile_env(std::path::Path::new("/run/current-system/profile"))
+    {
+        command.env(key, value);
+    }
+}
+
+fn system_profile_guile_env(profile: &Path) -> Vec<(&'static str, OsString)> {
+    vec![
+        ("GUILE_LOAD_PATH", profile.join("share/guile/site/3.0").into_os_string()),
+        (
+            "GUILE_LOAD_COMPILED_PATH",
+            join_env_paths([
+                profile.join("lib/guile/3.0/site-ccache"),
+                profile.join("share/guile/site/3.0"),
+            ]),
+        ),
+        ("GUILE_EXTENSIONS_PATH", profile.join("lib/guile/3.0/extensions").into_os_string()),
+    ]
+}
+
+fn join_env_paths(paths: impl IntoIterator<Item = PathBuf>) -> OsString {
+    std::env::join_paths(paths).unwrap_or_else(|_| OsString::new())
 }
 
 #[cfg(test)]
@@ -414,6 +452,24 @@ mod tests {
         let command = system_profile_command_from(tmp.path(), "guix");
 
         assert_eq!(command, std::ffi::OsString::from("guix"));
+    }
+
+    #[test]
+    fn nar_store_sets_system_profile_guile_module_paths() {
+        let env = system_profile_guile_env(Path::new("/system/profile"));
+
+        assert!(env.iter().any(|(key, value)| {
+            *key == "GUILE_LOAD_PATH"
+                && value == &std::ffi::OsString::from("/system/profile/share/guile/site/3.0")
+        }));
+        assert!(env.iter().any(|(key, value)| {
+            *key == "GUILE_LOAD_COMPILED_PATH"
+                && value.to_string_lossy().contains("/system/profile/lib/guile/3.0/site-ccache")
+        }));
+        assert!(env.iter().any(|(key, value)| {
+            *key == "GUILE_EXTENSIONS_PATH"
+                && value == &std::ffi::OsString::from("/system/profile/lib/guile/3.0/extensions")
+        }));
     }
 
     #[test]

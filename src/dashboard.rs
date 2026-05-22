@@ -591,7 +591,7 @@ async fn api_seed(
     })
     .await
     .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("seed task failed: {e}")))?
-    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("seed failed: {e}")))?;
+    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("seed failed: {e:#}")))?;
 
     let info = state
         .nar_store
