@@ -1,0 +1,70 @@
+# Troubleshooting
+
+## No Peers Connected
+
+Run:
+
+```sh
+guix-p2p --doctor
+```
+
+Check:
+
+- `bootstrap-peers` is not empty for remote tests.
+- `shareable-address` is present if other testers should dial this node.
+- the router/firewall allows the listen port and transport.
+- dashboard `NET` is not `local` unless this is a LAN-only test.
+
+## No Providers Found
+
+This means the node did not find peers advertising the requested NAR hash.
+
+Check:
+
+- at least one peer has seeded the store path or downloaded it successfully.
+- the seeding peer is connected or reachable through the DHT.
+- both peers use compatible bootstrap peers.
+- `min_providers` is reasonable for the test size; local two-node tests often
+  use `1`.
+
+## HTTP Fallback Used
+
+`p2p-first` falls back to HTTP when P2P lookup or transfer fails. This is
+expected for availability, but not proof that P2P worked.
+
+Use the dashboard transfer view:
+
+- `providers found` means DHT discovery found candidate peers.
+- `blocks moved` means accepted P2P block data was observed.
+- `verified/imported` means final NAR verification and import succeeded.
+
+## Hash Mismatch
+
+A malicious or broken peer can send bad bytes. The downloader verifies blocks
+and the final NAR hash against trusted narinfo metadata. A mismatch should be
+reported as a failure and should not be accepted into the store.
+
+Include the peer id, store path, and log lines in the report.
+
+## Dashboard Seed Action Fails
+
+Dashboard seed mutation is allowed only when the dashboard binds to a loopback
+address. This prevents remote users from mutating local seed configuration.
+
+Use:
+
+```sh
+--dashboard-bind 127.0.0.1
+```
+
+## Relay Or Wrapper Does Not Route Guix Traffic
+
+Check:
+
+- `guix-p2p --daemon` is running.
+- the configured `socket_path` exists.
+- the wrapper or Guix extension is active in the daemon environment.
+- `GUIX_EXTENSIONS_PATH` includes the extension path when using the raw daemon
+  integration.
+
+`--doctor` reports whether the socket path exists at the time it runs.

@@ -15,13 +15,18 @@ available.
 
 ## Architecture Overview
 
-The binary runs in two modes:
+The binary runs in three operational modes plus diagnostics:
 - **Daemon** (`--daemon`): Persistent process with warm libp2p swarm, listening
   on a Unix domain socket for relay connections
 - **Relay** (`--query --socket PATH` or `--substitute --socket PATH`): Thin
   client that forwards stdin/fd4 through the Unix socket to the daemon,
 
   avoiding cold-start cost
+- **Direct** (`--query` or `--substitute` without `--socket`): Development and
+  fallback path that initializes a fresh swarm for one substituter request.
+- **Doctor** (`--doctor`): Local readiness checks for tester rollout. It loads
+  config and identity, then reports bootstrap peer, shareable address, cache,
+  socket, ACL, and substitute URL readiness without starting the swarm.
 
 ## Data Flow
 
@@ -71,6 +76,11 @@ guix-p2p (Rust, libp2p)
   │     Connection management (retry/backoff, dead peer pruning)
   │
   ├─► Bandwidth Limiter (leaky-bucket, configurable caps)
+  │
+  ├─► Diagnostics
+  │    `--doctor` and dashboard `/api/status` connectivity summary
+  │    Flags missing bootstrap peers, missing shareable addresses, private
+  │    external addresses, missing socket, missing ACL, and substitute URL setup
   │
   └─► HTTP Narinfo Client (reqwest)
        Narinfo fetch from official substitute URLs

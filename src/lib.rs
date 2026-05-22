@@ -6,6 +6,7 @@ pub mod connection;
 pub mod daemon;
 pub mod dashboard;
 pub mod dht;
+pub mod diagnostics;
 pub mod http_client;
 pub mod identity;
 pub mod nar_hash;

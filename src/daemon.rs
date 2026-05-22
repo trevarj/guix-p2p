@@ -1669,6 +1669,7 @@ pub async fn run_daemon_mode(
             peer_id: local_peer_id.to_string(),
             listen_addr: config.listen_addr.clone(),
             external_addresses: config.external_addresses.clone(),
+            bootstrap_peers: config.bootstrap_peers.clone(),
             event_bus: event_tx.clone(),
             nar_store: nar_store.clone(),
             catalog: Arc::new(Mutex::new(HashMap::new())),

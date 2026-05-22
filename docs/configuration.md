@@ -8,6 +8,16 @@ Config file:
 CLI flags in `src/main.rs` override the matching TOML values listed below.
 All other tuning belongs in TOML.
 
+Run local readiness checks with:
+
+```sh
+guix-p2p --doctor
+```
+
+`--doctor` loads the same config and reports bootstrap, shareable address,
+cache, socket, ACL, and substitute URL readiness. It is a local setup check, not
+a remote dialability proof.
+
 ## Example
 
 ```toml
@@ -72,6 +82,10 @@ Use `external_addresses` when the listen address seen locally is not the
 address other peers should dial, such as port-forwarded VMs, NAT rules, or a
 public DNS name. The dashboard appends `/p2p/<peer-id>` to these addresses and
 shows the shareable multiaddr for other users.
+
+The dashboard `/api/status` response includes a `connectivity` object and
+`bootstrap_peer_count`. The `NET` header condenses that state for testers:
+`share`, `share/no-bs`, `client`, or `local`.
 
 ## Policies
 

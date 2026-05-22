@@ -85,8 +85,9 @@ curl -s http://127.0.0.1:3030/api/status
 ```
 
 The response includes `peer_id`, `external_addresses`, and
-`shareable_addresses`. Publish the first `shareable_addresses` value, or combine
-`peer_id` with the public listen address:
+`shareable_addresses`, `bootstrap_peer_count`, and `connectivity`. Publish the
+first `shareable_addresses` value, or combine `peer_id` with the public listen
+address:
 
 ```text
 /ip4/203.0.113.10/udp/6881/quic-v1/p2p/12D3KooW...
@@ -105,7 +106,10 @@ Multiple bootstrap peers are comma-separated.
 
 ## Operational Checks
 
+- `guix-p2p --doctor --cache-dir /var/cache/guix-p2p`: local readiness.
 - `/api/status`: peer ID, uptime, connected peers, DHT entries.
+- dashboard `NET`: should be `share` when external address and bootstrap peers
+  are both configured, or `share/no-bs` for the first standalone bootstrap.
 - logs: look for `Swarm listening`, `Bootstrapping from`, and connection events.
 - `/api/seeds`: may be empty on a pure bootstrap node.
 - `/api/catalog`: grows only when the node is used in substitute query flow.

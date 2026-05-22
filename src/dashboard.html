@@ -54,7 +54,7 @@ header .id{font-size:11px;opacity:.6}
   color:var(--muted);font-size:10px
 }
 .share-peer button{padding:3px 6px;font-size:10px;flex:0 0 auto}
-header .stats{display:grid;grid-template-columns:repeat(7,auto);gap:8px;font-size:11px}
+header .stats{display:grid;grid-template-columns:repeat(8,auto);gap:8px;font-size:11px}
 header .stats div{border:1px solid var(--line);background:var(--panel);padding:4px 7px;min-width:74px}
 header .stats span{display:block;color:var(--acc);font-weight:bold;font-size:14px;line-height:1.1}
 header button,.theme-select{
@@ -350,6 +350,7 @@ main{
     <div data-tip="Installed packages discovered from system, kernel, and Guix Home profiles.">PACKAGES <span id="package-count">0</span></div>
     <div data-tip="Store paths observed through substitute/narinfo lookups.">CATALOG <span id="catalog-count">0</span></div>
     <div data-tip="NARs currently cached locally and available for block serving.">SEEDS <span id="seed-count">0</span></div>
+    <div data-tip="Static reachability readiness based on bootstrap peers and shareable external addresses.">NET <span id="connectivity-state">local</span></div>
     <div data-tip="Daemon dashboard uptime since this process started.">UPTIME <span id="uptime">00:00:00</span></div>
   </div>
   <div class="theme-control">
@@ -360,6 +361,7 @@ main{
       <option value="theme-amber">Terminal Amber</option>
       <option value="theme-tokyo">Tokyo Night</option>
     </select>
+    <button type="button" id="copy-diagnostics" data-tip="Copy dashboard diagnostics for tester failure reports.">copy diag</button>
     <div class="status-pill offline" id="api-status" data-tip="Dashboard API and WebSocket connection state.">connecting</div>
   </div>
 </header>
@@ -437,6 +439,7 @@ var PACKAGES=[];
 var SEEDS={};
 var TRANSFER=null;
 var TRANSFERS={};
+var CONNECTIVITY=null;
 var WS=null;
 var WS_RETRY=1000;
 var SERVER_STARTED=null;
@@ -449,6 +452,7 @@ var HELP_TEXT={
   'package-count':['Installed Packages','The total number of installed packages discovered from the system, kernel, and Guix Home profiles. These are candidates for manual seeding.'],
   'catalog-count':['Catalog Entries','Store paths observed during substitute lookups. Catalog entries show what the daemon has learned about possible packages and whether P2P providers were found.'],
   'seed-count':['Active Seeds','NARs in the local cache that this node can serve to requesting peers. A seed may come from manual seeding or from a successful P2P download that was cached locally.'],
+  connectivity:['Connectivity','Local readiness status derived from bootstrap peer configuration and shareable external addresses. It does not prove Internet reachability by itself, but it catches the common tester setup issues before a transfer starts.'],
   uptime:['Uptime','How long this dashboard-enabled daemon process has been running. Event history is in memory and resets when the daemon restarts.'],
   theme:['Theme','Selects the dashboard color theme. This only affects the current browser and is saved in local storage.'],
   packages:['Packages','Installed package rows let you seed local store paths into the P2P cache.\n\nSearch filters the current installed-package snapshot by name, version, or /gnu/store path. The profile label shows whether an item came from the system, kernel, or Guix Home profile. The seed action serializes the selected store path, caches its NAR, and announces it to peers.'],
@@ -560,6 +564,28 @@ function setStatus(text,state){
   if(DEMO_MODE)el.classList.add('demo')
 }
 
+function renderConnectivityStatus(status){
+  CONNECTIVITY=status.connectivity||null;
+  var el=document.getElementById('connectivity-state');
+  if(!el)return;
+  if(!CONNECTIVITY){
+    el.textContent='unknown';
+    el.dataset.tip='Connectivity status is unavailable';
+    return
+  }
+  var label={
+    'shareable':'share',
+    'shareable-no-bootstrap':'share/no-bs',
+    'client-only':'client',
+    'local-only':'local'
+  }[CONNECTIVITY.state]||CONNECTIVITY.state||'unknown';
+  el.textContent=label;
+  el.dataset.tip=CONNECTIVITY.detail
+    +'\nbootstrap peers: '+(status.bootstrap_peer_count||0)
+    +'\nshareable addresses: '+((CONNECTIVITY.shareable_addresses||[]).length)
+    +(CONNECTIVITY.has_private_external_addresses?'\nprivate external address configured':'')
+}
+
 function applyTheme(themeId){
   if(THEME_IDS.indexOf(themeId)<0)themeId='theme-yellow';
   THEME_IDS.forEach(function(t){document.body.classList.remove(t)});
@@ -575,6 +601,32 @@ function copyText(text){
   if(navigator.clipboard&&navigator.clipboard.writeText){
     navigator.clipboard.writeText(text).catch(function(){})
   }
+}
+
+function copyDiagnostics(){
+  Promise.all([
+    fetch('/api/status').then(function(r){return r.json()}),
+    fetch('/api/peers').then(function(r){return r.json()}),
+    fetch('/api/seeds').then(function(r){return r.json()})
+  ]).then(function(parts){
+    var status=parts[0],peers=parts[1]||[],seeds=parts[2]||[];
+    var report={
+      peer_id:status.peer_id,
+      listen_addr:status.listen_addr,
+      external_addresses:status.external_addresses,
+      bootstrap_peer_count:status.bootstrap_peer_count,
+      connectivity:status.connectivity,
+      connected_peers:status.connected_peers,
+      known_peers:peers.length,
+      seed_count:seeds.length,
+      dht_entries:status.dht_entries,
+      uptime_secs:status.uptime_secs
+    };
+    copyText(JSON.stringify(report,null,2));
+    addEvent('providers','i','Copied dashboard diagnostics')
+  }).catch(function(){
+    addEvent('dl-fail','x','Failed to copy dashboard diagnostics')
+  })
 }
 
 function eventCategory(cls){
@@ -1356,6 +1408,12 @@ document.addEventListener('click',function(ev){
     copy.textContent=value?'copied':'copy';
     setTimeout(function(){copy.textContent='copy'},900)
   }
+  var diag=ev.target.closest('#copy-diagnostics');
+  if(diag){
+    copyDiagnostics();
+    diag.textContent='copied';
+    setTimeout(function(){diag.textContent='copy diag'},900)
+  }
 });
 document.addEventListener('keydown',function(ev){
   if(ev.key==='Escape'){
@@ -1390,6 +1448,7 @@ document.addEventListener('keydown',function(ev){
       copyEl.dataset.value=share;
       document.getElementById('connected').textContent=s.connected_peers;
       document.getElementById('dht-entries').textContent=s.dht_entries;
+      renderConnectivityStatus(s);
       if(s.uptime_secs!=null){
         SERVER_STARTED=Date.now()-s.uptime_secs*1000;
         tickUptime()

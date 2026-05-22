@@ -23,8 +23,8 @@ use crate::{
     channel::SwarmCommand,
     connection::{ConnectionManager, PeerConnectionSnapshot},
     dht::ProviderCache,
+    diagnostics::{self, ConnectivitySummary},
     nar_store::NarStore,
-    peer_store,
     reputation::{PeerScore, ReputationTracker},
 };
 
@@ -164,6 +164,8 @@ struct ApiStatus {
     peer_id: String,
     listen_addr: String,
     external_addresses: Vec<String>,
+    bootstrap_peer_count: usize,
+    connectivity: ConnectivitySummary,
     shareable_addresses: Vec<String>,
     uptime_secs: u64,
     connected_peers: usize,
@@ -261,6 +263,7 @@ pub struct DashboardState {
     pub peer_id: String,
     pub listen_addr: String,
     pub external_addresses: Vec<String>,
+    pub bootstrap_peers: Vec<String>,
     pub event_bus: EventBus,
     pub nar_store: Arc<Mutex<NarStore>>,
     pub catalog: Arc<Mutex<HashMap<String, CatalogItem>>>,
@@ -327,15 +330,19 @@ async fn api_status(State(state): State<DashboardState>) -> Json<ApiStatus> {
     let builds = state.build_registry.lock().unwrap().len();
     let seed_count = state.nar_store.lock().unwrap().len();
     let connected = state.conn_mgr.lock().unwrap().connected_count();
+    let connectivity = diagnostics::connectivity_summary_from_parts(
+        &state.bootstrap_peers,
+        &state.external_addresses,
+        &state.peer_id,
+    );
 
     let status = ApiStatus {
         peer_id: state.peer_id.clone(),
         listen_addr: state.listen_addr.clone(),
         external_addresses: state.external_addresses.clone(),
-        shareable_addresses: peer_store::shareable_addresses(
-            &state.external_addresses,
-            &state.peer_id,
-        ),
+        bootstrap_peer_count: state.bootstrap_peers.len(),
+        shareable_addresses: connectivity.shareable_addresses.clone(),
+        connectivity,
         uptime_secs: now,
         connected_peers: connected,
         dht_entries: dht,
@@ -842,6 +849,9 @@ mod tests {
             peer_id: "local-peer".to_string(),
             listen_addr: "/ip4/0.0.0.0/udp/6881/quic-v1".to_string(),
             external_addresses: vec!["/dns4/node.example.org/udp/6881/quic-v1".to_string()],
+            bootstrap_peers: vec![
+                "/dns4/bootstrap.example.org/udp/6881/quic-v1/p2p/12D3KooWQp4D6Lwq".to_string(),
+            ],
             event_bus,
             nar_store: Arc::new(Mutex::new(NarStore::new(tmp.path(), 262_144))),
             catalog: Arc::new(Mutex::new(HashMap::new())),
@@ -911,6 +921,8 @@ mod tests {
             status.shareable_addresses,
             vec![format!("/dns4/node.example.org/udp/6881/quic-v1/p2p/{peer}")]
         );
+        assert_eq!(status.bootstrap_peer_count, 1);
+        assert_eq!(status.connectivity.state, "shareable");
     }
 
     #[tokio::test]

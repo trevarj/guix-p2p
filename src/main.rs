@@ -23,8 +23,12 @@ struct Cli {
     substitute: bool,
 
     /// Run as a persistent background daemon
-    #[arg(long, conflicts_with_all = ["query", "substitute"])]
+    #[arg(long, conflicts_with_all = ["query", "substitute", "doctor"])]
     daemon: bool,
+
+    /// Run local readiness checks for tester rollout and connectivity setup
+    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon"])]
+    doctor: bool,
 
     /// Comma-separated list of bootstrap peer multiaddrs
     #[arg(long, global = true)]
@@ -158,6 +162,18 @@ async fn main() -> anyhow::Result<()> {
 
     let peer_id = identity::peer_id_from_keypair(&keypair);
     tracing::info!("Peer ID: {}", peer_id);
+
+    if cli.doctor {
+        let checks = guix_p2p::diagnostics::run_config_diagnostics(&config, &peer_id.to_string());
+        print!("{}", guix_p2p::diagnostics::format_diagnostics(&checks));
+        let has_error = checks
+            .iter()
+            .any(|check| check.severity == guix_p2p::diagnostics::DiagnosticSeverity::Error);
+        if has_error {
+            std::process::exit(2);
+        }
+        return Ok(());
+    }
 
     let mut swarm = guix_p2p::runtime::build_swarm(&keypair)?;
 
@@ -344,7 +360,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .await?
     } else {
-        tracing::error!("No mode specified. Use --query, --substitute, or --daemon.");
+        tracing::error!("No mode specified. Use --query, --substitute, --daemon, or --doctor.");
         std::process::exit(1);
     }
 
