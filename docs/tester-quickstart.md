@@ -56,6 +56,17 @@ Open the dashboard:
 http://127.0.0.1:3030
 ```
 
+To share this node with another tester, configure `external_addresses`, restart
+the daemon, then run:
+
+```sh
+guix-p2p --share-info --cache-dir "$GUIX_P2P_CACHE"
+```
+
+The output includes shareable multiaddrs and a `bootstrap_peers = "..."`
+snippet the other tester can paste into their config. The dashboard `copy peer`
+button copies the same bundle as JSON.
+
 The `NET` header shows local connectivity readiness:
 
 - `share`: bootstrap peers and shareable addresses are configured.
@@ -80,7 +91,9 @@ The dashboard `active seeds` panel shows NARs this node can serve.
 When reporting a failure, include:
 
 - `guix-p2p --doctor` output.
+- `guix-p2p --share-info` output if this node should be dialable.
 - dashboard `copy diag` output.
+- dashboard `copy peer` output if this node should be dialable.
 - `/api/diagnostics` output if the dashboard is reachable.
 - Daemon command line and config file with private data removed.
 - Dashboard `NET` state.

@@ -743,6 +743,9 @@ Dashboard API endpoints:
 - `/api/status` returns the local peer id, listen address, configured external
   addresses, shareable multiaddrs, uptime, currently connected peer count, DHT
   entry count, observed build count, and seed count.
+- `/api/share-info` returns the same bootstrap bundle as `guix-p2p
+  --share-info --json`: PeerId, shareable multiaddrs, optional dashboard URL,
+  diagnostic summary flags, and a paste-ready bootstrap config snippet.
 - `/api/diagnostics` returns the daemon's doctor-style report with
   connectivity, readiness checks, and error/warning booleans.
 - `/api/peers` returns full peer ids, connection state, known addresses,

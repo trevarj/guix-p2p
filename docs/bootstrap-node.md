@@ -70,31 +70,32 @@ operator-controlled reverse proxy or tunnel.
 
 ## Publish Peer Info
 
-Set `external_addresses` to the address clients should dial. The dashboard will
-show the full shareable multiaddr after it appends the local PeerId:
+Set `external_addresses` to the address clients should dial:
 
 ```toml
 external_addresses = "/dns4/bootstrap.example.org/udp/6881/quic-v1"
 ```
 
-Start the service and read the PeerId if you need to build the address
-manually:
+Start the service and print the bootstrap bundle:
 
 ```sh
-curl -s http://127.0.0.1:3030/api/status
+guix-p2p --share-info --cache-dir /var/cache/guix-p2p
 ```
 
-The response includes `peer_id`, `external_addresses`, and
-`shareable_addresses`, `bootstrap_peer_count`, and `connectivity`. Publish the
-first `shareable_addresses` value, or combine `peer_id` with the public listen
-address:
+The bundle includes the PeerId, derived shareable multiaddrs, and a paste-ready
+client `bootstrap_peers` line. JSON output is available for scripts:
+
+```sh
+guix-p2p --share-info --json --cache-dir /var/cache/guix-p2p
+curl -s http://127.0.0.1:3030/api/share-info
+```
+
+Publish the first `shareable_addresses` value exactly as clients should dial it:
 
 ```text
 /ip4/203.0.113.10/udp/6881/quic-v1/p2p/12D3KooW...
 /dns4/bootstrap.example.org/tcp/6881/p2p/12D3KooW...
 ```
-
-Publish the multiaddr exactly as clients should dial it.
 
 ## Client Config
 
@@ -107,7 +108,10 @@ Multiple bootstrap peers are comma-separated.
 ## Operational Checks
 
 - `guix-p2p --doctor --cache-dir /var/cache/guix-p2p`: local readiness.
+- `guix-p2p --share-info --cache-dir /var/cache/guix-p2p`: publishable peer
+  bundle.
 - `/api/status`: peer ID, uptime, connected peers, DHT entries.
+- `/api/share-info`: same bootstrap bundle from the running dashboard daemon.
 - dashboard `NET`: should be `share` when external address and bootstrap peers
   are both configured, or `share/no-bs` for the first standalone bootstrap.
 - logs: look for `Swarm listening`, `Bootstrapping from`, and connection events.

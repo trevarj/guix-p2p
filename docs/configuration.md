@@ -94,6 +94,10 @@ address other peers should dial, such as port-forwarded VMs, NAT rules, or a
 public DNS name. The dashboard appends `/p2p/<peer-id>` to these addresses and
 shows the shareable multiaddr for other users.
 
+Use `guix-p2p --share-info` or dashboard `/api/share-info` to print the exact
+derived multiaddr and a paste-ready `bootstrap_peers = "..."` snippet for other
+nodes.
+
 The dashboard `/api/status` response includes a `connectivity` object and
 `bootstrap_peer_count`. The `NET` header condenses that state for testers:
 `share`, `share/no-bs`, `client`, or `local`.
