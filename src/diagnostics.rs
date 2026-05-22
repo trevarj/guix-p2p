@@ -29,6 +29,16 @@ pub struct DiagnosticCheck {
     pub detail: String,
 }
 
+/// Machine-readable report emitted by `guix-p2p --doctor --json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DiagnosticReport {
+    pub peer_id: String,
+    pub connectivity: ConnectivitySummary,
+    pub checks: Vec<DiagnosticCheck>,
+    pub has_errors: bool,
+    pub has_warnings: bool,
+}
+
 /// Compact connectivity status shown by the dashboard and `--doctor`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConnectivitySummary {
@@ -148,6 +158,23 @@ pub fn run_config_diagnostics(config: &Config, peer_id: &str) -> Vec<DiagnosticC
     });
 
     checks
+}
+
+/// Build a complete local diagnostic report.
+pub fn diagnostic_report(config: &Config, peer_id: &str) -> DiagnosticReport {
+    let checks = run_config_diagnostics(config, peer_id);
+    DiagnosticReport {
+        peer_id: peer_id.to_string(),
+        connectivity: connectivity_summary(config, peer_id),
+        has_errors: has_diagnostic_errors(&checks),
+        has_warnings: checks.iter().any(|check| check.severity == DiagnosticSeverity::Warning),
+        checks,
+    }
+}
+
+/// Return true when any diagnostic check is an error.
+pub fn has_diagnostic_errors(checks: &[DiagnosticCheck]) -> bool {
+    checks.iter().any(|check| check.severity == DiagnosticSeverity::Error)
 }
 
 /// Summarize whether this node has enough static configuration to be reachable.
@@ -291,5 +318,20 @@ mod tests {
         let checks = run_config_diagnostics(&config, &peer);
 
         assert!(checks.iter().any(|check| check.id == "nat-address"));
+    }
+
+    #[test]
+    fn diagnostic_report_marks_errors_and_warnings() {
+        let peer = libp2p::PeerId::random().to_string();
+        let mut config = config_with_addresses(vec![], vec![]);
+        config.substitute_urls.clear();
+        config.acl_path = "/definitely/missing/guix-p2p-acl".into();
+
+        let report = diagnostic_report(&config, &peer);
+
+        assert_eq!(report.peer_id, peer);
+        assert!(report.has_errors);
+        assert!(report.has_warnings);
+        assert_eq!(report.connectivity.state, "local-only");
     }
 }

@@ -30,6 +30,10 @@ struct Cli {
     #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "init"])]
     doctor: bool,
 
+    /// Emit machine-readable JSON for --doctor
+    #[arg(long, requires = "doctor")]
+    json: bool,
+
     /// Create a starter config file without overwriting an existing one
     #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor"])]
     init: bool,
@@ -97,13 +101,14 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let default_log_filter = if cli.doctor || cli.init { "warn" } else { "info" };
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| default_log_filter.into()),
         )
         .init();
-
-    let cli = Cli::parse();
 
     if cli.init {
         let path = config::user_config_path();
@@ -197,12 +202,14 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Peer ID: {}", peer_id);
 
     if cli.doctor {
-        let checks = guix_p2p::diagnostics::run_config_diagnostics(&config, &peer_id.to_string());
-        print!("{}", guix_p2p::diagnostics::format_diagnostics(&checks));
-        let has_error = checks
-            .iter()
-            .any(|check| check.severity == guix_p2p::diagnostics::DiagnosticSeverity::Error);
-        if has_error {
+        let peer_id = peer_id.to_string();
+        let report = guix_p2p::diagnostics::diagnostic_report(&config, &peer_id);
+        if cli.json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            print!("{}", guix_p2p::diagnostics::format_diagnostics(&report.checks));
+        }
+        if report.has_errors {
             std::process::exit(2);
         }
         return Ok(());

@@ -128,6 +128,14 @@ mod cli_contract {
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("cannot be used"));
     }
+
+    #[test]
+    fn doctor_json_requires_doctor_mode() {
+        let output = Command::new(binary()).arg("--json").output().unwrap();
+
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("required"));
+    }
 }
 
 // ======================================================================

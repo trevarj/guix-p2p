@@ -9,6 +9,9 @@ peer-store entries, and LAN mDNS. Remote testers should not rely on mDNS.
 guix-p2p --doctor
 ```
 
+Use `guix-p2p --doctor --json` when attaching diagnostics to an issue or
+feeding readiness checks into automation.
+
 The command checks local prerequisites:
 
 - identity can be loaded or generated

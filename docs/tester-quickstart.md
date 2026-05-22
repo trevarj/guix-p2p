@@ -29,6 +29,12 @@ overwrite an existing file.
 guix-p2p --doctor --cache-dir "$GUIX_P2P_CACHE"
 ```
 
+For issue reports or automation:
+
+```sh
+guix-p2p --doctor --json --cache-dir "$GUIX_P2P_CACHE"
+```
+
 Fix `error` rows before testing. `warn` rows are acceptable for LAN-only tests,
 but remote peers usually need bootstrap peers and a shareable external address.
 
