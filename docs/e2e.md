@@ -101,9 +101,10 @@ Use `--suite system-build` to benchmark a full `guix system build` of a
 controlled E2E operating-system configuration. This keeps grafts enabled and
 compares the same HTTP-only, p2p-only, and p2p-first paths without activating
 the new system generation.
-VM commands use the `guix-p2p` binary embedded in the image by default. Use
-`vm push-binary --all` plus `GUIX_P2P_E2E_P2P_BIN=/tmp/guix-p2p` only when you
-need to test a replacement binary without rebuilding the image.
+VM commands prefer `/tmp/guix-p2p` when it exists, falling back to the
+`guix-p2p` binary embedded in the image. `vm proof` runs `vm push-binary --all`
+before starting daemons, so proof dashboards use the current
+`target/release/guix-p2p` after you rebuild it.
 `vm push-binary` also installs the Guix substitute extension used by the raw
 VM `guix-daemon`. `vm channel-proof` additionally copies the local Guix channel
 modules into the fetch VM and verifies that `(guix-p2p services)` produces the

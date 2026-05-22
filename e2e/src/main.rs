@@ -1607,7 +1607,7 @@ kill $(cat /tmp/e2e-guix-daemon.pid 2>/dev/null) 2>/dev/null || true
 rm -f /tmp/e2e-guix-daemon.sock /tmp/e2e-guix-daemon.log /tmp/e2e-guix-daemon.pid
 GUIX_EXTENSIONS_PATH="/tmp/guix-p2p-extensions/guix/extensions${GUIX_EXTENSIONS_PATH:+:$GUIX_EXTENSIONS_PATH}" \
 GUIX_P2P_SOCKET=/tmp/guix-p2p-b/guix-p2p.sock \
-GUIX_P2P_BIN="${GUIX_P2P_E2E_P2P_BIN:-guix-p2p}" \
+GUIX_P2P_BIN="${GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}" \
 /run/current-system/profile/bin/guix-daemon \
   --disable-chroot \
   --build-users-group=guixbuild \
@@ -1930,7 +1930,8 @@ fn vm_fetch_timed_with_options(
             r#"
 set -eu
 STORE_PATH={store_path}
-P2P="${{GUIX_P2P_E2E_P2P_BIN:-guix-p2p}}"
+P2P="${{GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}}"
+[ -x "$P2P" ] || P2P=guix-p2p
 test ! -e "$STORE_PATH"
 {public_fetch}
 "#,
@@ -2154,7 +2155,8 @@ test ! -e "$STORE_PATH"
             r#"
 set -eu
 STORE_PATH={store_path}
-P2P="${{GUIX_P2P_E2E_P2P_BIN:-guix-p2p}}"
+P2P="${{GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}}"
+[ -x "$P2P" ] || P2P=guix-p2p
 test ! -e "$STORE_PATH"
 {public_fetch}
 "#,
@@ -5366,7 +5368,8 @@ PACKAGE={package}
 BOOTSTRAP={bootstrap}
 SUBSTITUTE_URLS={substitute_urls}
 EXTERNAL_ADDRESS={external_address}
-P2P="${{GUIX_P2P_E2E_P2P_BIN:-guix-p2p}}"
+P2P="${{GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}}"
+[ -x "$P2P" ] || P2P=guix-p2p
 CACHE_DIR="${{GUIX_P2P_E2E_A_CACHE:-/tmp/guix-p2p-a}}"
 LOG="${{GUIX_P2P_E2E_A_LOG:-/tmp/guix-p2p-a.log}}"
 SOCKET="${{GUIX_P2P_E2E_A_SOCKET:-$CACHE_DIR/guix-p2p.sock}}"
@@ -5464,7 +5467,8 @@ PACKAGE={package}
 BOOTSTRAP={bootstrap}
 SUBSTITUTE_URLS={substitute_urls}
 EXTERNAL_ADDRESS={external_address}
-P2P="${{GUIX_P2P_E2E_P2P_BIN:-guix-p2p}}"
+P2P="${{GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}}"
+[ -x "$P2P" ] || P2P=guix-p2p
 CACHE_DIR="${{GUIX_P2P_E2E_A_CACHE:-/tmp/guix-p2p-a}}"
 LOG="${{GUIX_P2P_E2E_A_LOG:-/tmp/guix-p2p-a.log}}"
 SOCKET="${{GUIX_P2P_E2E_A_SOCKET:-$CACHE_DIR/guix-p2p.sock}}"
@@ -5634,7 +5638,8 @@ fn fetch_target_available_command(target: &VmFetch) -> String {
         r#"
 set -eu
 STORE_PATH={store_path}
-P2P="${{GUIX_P2P_E2E_P2P_BIN:-guix-p2p}}"
+P2P="${{GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}}"
+[ -x "$P2P" ] || P2P=guix-p2p
 SOCKET="${{GUIX_P2P_E2E_B_SOCKET:-/tmp/guix-p2p-b/guix-p2p.sock}}"
 LOG="${{GUIX_P2P_E2E_B_LOG:-/tmp/guix-p2p-b.log}}"
 i=0
@@ -5678,7 +5683,8 @@ STORE_PATH={store_path}
 BOOTSTRAP={bootstrap}
 EXTERNAL_ADDRESS={external_address}
 POLICY={policy}
-P2P="${{GUIX_P2P_E2E_P2P_BIN:-guix-p2p}}"
+P2P="${{GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}}"
+[ -x "$P2P" ] || P2P=guix-p2p
 CACHE_DIR="${{GUIX_P2P_E2E_B_CACHE:-/tmp/guix-p2p-b}}"
 LOG="${{GUIX_P2P_E2E_B_LOG:-/tmp/guix-p2p-b.log}}"
 SOCKET="${{GUIX_P2P_E2E_B_SOCKET:-$CACHE_DIR/guix-p2p.sock}}"
@@ -5761,7 +5767,8 @@ fn vm_require_fetch_target_available(
 fn bootstrap_node_command() -> &'static str {
     r#"
 set -eu
-P2P="${GUIX_P2P_E2E_P2P_BIN:-guix-p2p}"
+P2P="${GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}"
+[ -x "$P2P" ] || P2P=guix-p2p
 CACHE_DIR="${GUIX_P2P_E2E_BOOTSTRAP_CACHE:-/tmp/guix-p2p-bootstrap}"
 LOG="${GUIX_P2P_E2E_BOOTSTRAP_LOG:-/tmp/guix-p2p-bootstrap.log}"
 SOCKET="${GUIX_P2P_E2E_BOOTSTRAP_SOCKET:-$CACHE_DIR/guix-p2p.sock}"

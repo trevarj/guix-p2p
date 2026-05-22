@@ -24,6 +24,8 @@ pub fn router() -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/api/status", get(status))
+        .route("/api/diagnostics", get(diagnostics))
+        .route("/api/share-info", get(share_info))
         .route("/api/peers", get(peers))
         .route("/api/builds", get(builds))
         .route("/api/build/:hash", get(build_detail))
@@ -43,12 +45,92 @@ async fn index_html() -> Html<&'static str> {
 async fn status() -> Json<Value> {
     Json(json!({
         "peer_id": "12D3KooWDemoBobFetchNode",
+        "listen_addr": "/ip4/0.0.0.0/udp/6883/quic-v1",
+        "external_addresses": ["/ip4/127.0.0.1/udp/6883/quic-v1"],
+        "bootstrap_peer_count": 1,
+        "connectivity": {
+            "state": "shareable",
+            "detail": "bootstrap peers and shareable addresses are configured",
+            "has_bootstrap_peers": true,
+            "has_shareable_addresses": true,
+            "has_private_external_addresses": true,
+            "shareable_addresses": ["/ip4/127.0.0.1/udp/6883/quic-v1/p2p/12D3KooWDemoBobFetchNode"]
+        },
+        "shareable_addresses": ["/ip4/127.0.0.1/udp/6883/quic-v1/p2p/12D3KooWDemoBobFetchNode"],
         "uptime_secs": 1847,
         "connected_peers": 3,
         "dht_entries": 14,
         "build_count": 4,
         "seed_count": 2,
         "demo": true
+    }))
+}
+
+async fn diagnostics() -> Json<Value> {
+    Json(json!({
+        "peer_id": "12D3KooWDemoBobFetchNode",
+        "connectivity": {
+            "state": "shareable",
+            "detail": "bootstrap peers and shareable addresses are configured",
+            "has_bootstrap_peers": true,
+            "has_shareable_addresses": true,
+            "has_private_external_addresses": true,
+            "shareable_addresses": ["/ip4/127.0.0.1/udp/6883/quic-v1/p2p/12D3KooWDemoBobFetchNode"]
+        },
+        "has_errors": false,
+        "has_warnings": true,
+        "checks": [
+            {
+                "id": "identity",
+                "severity": "ok",
+                "summary": "identity loaded",
+                "detail": "peer id: 12D3KooWDemoBobFetchNode"
+            },
+            {
+                "id": "listen-address",
+                "severity": "ok",
+                "summary": "listen address is valid",
+                "detail": "/ip4/0.0.0.0/udp/6883/quic-v1"
+            },
+            {
+                "id": "bootstrap-peers",
+                "severity": "ok",
+                "summary": "bootstrap peers configured",
+                "detail": "1 bootstrap peer(s)"
+            },
+            {
+                "id": "shareable-address",
+                "severity": "ok",
+                "summary": "shareable peer address available",
+                "detail": "/ip4/127.0.0.1/udp/6883/quic-v1/p2p/12D3KooWDemoBobFetchNode"
+            },
+            {
+                "id": "nat-address",
+                "severity": "warning",
+                "summary": "external address looks private or loopback",
+                "detail": "demo dashboard uses loopback addresses"
+            }
+        ]
+    }))
+}
+
+async fn share_info() -> Json<Value> {
+    Json(json!({
+        "peer_id": "12D3KooWDemoBobFetchNode",
+        "connectivity": {
+            "state": "shareable",
+            "detail": "bootstrap peers and shareable addresses are configured",
+            "has_bootstrap_peers": true,
+            "has_shareable_addresses": true,
+            "has_private_external_addresses": true,
+            "shareable_addresses": ["/ip4/127.0.0.1/udp/6883/quic-v1/p2p/12D3KooWDemoBobFetchNode"]
+        },
+        "shareable_addresses": ["/ip4/127.0.0.1/udp/6883/quic-v1/p2p/12D3KooWDemoBobFetchNode"],
+        "bootstrap_peers": ["/ip4/127.0.0.1/udp/6883/quic-v1/p2p/12D3KooWDemoBobFetchNode"],
+        "dashboard_url": null,
+        "has_errors": false,
+        "has_warnings": true,
+        "config_snippet": "bootstrap_peers = \"/ip4/127.0.0.1/udp/6883/quic-v1/p2p/12D3KooWDemoBobFetchNode\""
     }))
 }
 
@@ -187,14 +269,18 @@ async fn transfers() -> Json<Value> {
 async fn events() -> Json<Value> {
     let base = 1_778_841_600_000u64;
     Json(json!([
-        {"id": 0, "timestamp_ms": base, "event": {"type": "PeerConnected", "peer_id": "12D3KooWBootstrapNode", "addresses": ["/ip4/127.0.0.1/tcp/6879"]}},
-        {"id": 1, "timestamp_ms": base + 1000, "event": {"type": "PeerConnected", "peer_id": "12D3KooWAliceSeedNode", "addresses": ["/ip4/127.0.0.1/tcp/6881"]}},
-        {"id": 2, "timestamp_ms": base + 2000, "event": {"type": "BuildDiscovered", "nar_hash": demo_hash(), "store_path": "/gnu/store/1xq2v3demohello-hello-2.12.1", "nar_size": 712704}},
-        {"id": 3, "timestamp_ms": base + 3000, "event": {"type": "ProvidersFound", "nar_hash": demo_hash(), "provider_count": 2}},
-        {"id": 4, "timestamp_ms": base + 4000, "event": {"type": "DownloadStarted", "nar_hash": demo_hash(), "store_path": "/gnu/store/1xq2v3demohello-hello-2.12.1", "nar_size": 712704}},
-        {"id": 5, "timestamp_ms": base + 5000, "event": {"type": "BlockReceived", "nar_hash": demo_hash(), "peer_id": "12D3KooWAliceSeedNode", "indices": [0,1,2], "bytes": 196608}},
-        {"id": 6, "timestamp_ms": base + 6000, "event": {"type": "DownloadSucceeded", "nar_hash": demo_hash(), "store_path": "/gnu/store/1xq2v3demohello-hello-2.12.1", "size": 712704, "elapsed_ms": 1820}},
-        {"id": 7, "timestamp_ms": base + 7000, "event": {"type": "SeedAdded", "nar_hash": demo_hash(), "store_path": "/gnu/store/1xq2v3demohello-hello-2.12.1", "nar_size": 712704}}
+        {"id": 0, "timestamp_ms": base, "event": {"type": "PeerDialStarted", "peer_id": "12D3KooWBootstrapNode"}},
+        {"id": 1, "timestamp_ms": base + 1000, "event": {"type": "PeerConnected", "peer_id": "12D3KooWBootstrapNode", "addresses": ["/ip4/127.0.0.1/tcp/6879"]}},
+        {"id": 2, "timestamp_ms": base + 2000, "event": {"type": "PeerDialFailed", "peer_id": "12D3KooWFormerPeer", "reason": "transport error: connection refused"}},
+        {"id": 3, "timestamp_ms": base + 3000, "event": {"type": "PeerInboundStarted", "address": "/ip4/127.0.0.1/tcp/6884"}},
+        {"id": 4, "timestamp_ms": base + 4000, "event": {"type": "PeerInboundFailed", "peer_id": null, "address": "/ip4/127.0.0.1/tcp/6884", "reason": "handshake failed"}},
+        {"id": 5, "timestamp_ms": base + 5000, "event": {"type": "PeerConnected", "peer_id": "12D3KooWAliceSeedNode", "addresses": ["/ip4/127.0.0.1/tcp/6881"]}},
+        {"id": 6, "timestamp_ms": base + 6000, "event": {"type": "BuildDiscovered", "nar_hash": demo_hash(), "store_path": "/gnu/store/1xq2v3demohello-hello-2.12.1", "nar_size": 712704}},
+        {"id": 7, "timestamp_ms": base + 7000, "event": {"type": "ProvidersFound", "nar_hash": demo_hash(), "provider_count": 2}},
+        {"id": 8, "timestamp_ms": base + 8000, "event": {"type": "DownloadStarted", "nar_hash": demo_hash(), "store_path": "/gnu/store/1xq2v3demohello-hello-2.12.1", "nar_size": 712704}},
+        {"id": 9, "timestamp_ms": base + 9000, "event": {"type": "BlockReceived", "nar_hash": demo_hash(), "peer_id": "12D3KooWAliceSeedNode", "indices": [0,1,2], "bytes": 196608}},
+        {"id": 10, "timestamp_ms": base + 10000, "event": {"type": "DownloadSucceeded", "nar_hash": demo_hash(), "store_path": "/gnu/store/1xq2v3demohello-hello-2.12.1", "size": 712704, "elapsed_ms": 1820}},
+        {"id": 11, "timestamp_ms": base + 11000, "event": {"type": "SeedAdded", "nar_hash": demo_hash(), "store_path": "/gnu/store/1xq2v3demohello-hello-2.12.1", "nar_size": 712704}}
     ]))
 }
 
@@ -286,6 +372,8 @@ async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
 
 async fn handle_ws(mut socket: WebSocket) {
     let events = [
+        json!({"type": "PeerDialStarted", "peer_id": "12D3KooWLivePeer"}),
+        json!({"type": "PeerDialFailed", "peer_id": "12D3KooWLivePeer", "reason": "demo timeout while dialing"}),
         json!({"type": "BlockReceived", "nar_hash": demo_hash(), "peer_id": "12D3KooWCharlesSeedNode", "indices": [9, 10], "bytes": 122880}),
         json!({"type": "BlockServed", "nar_hash": demo_hash(), "peer_id": "12D3KooWCarolFetchNode", "indices": [0, 1]}),
         json!({"type": "CatalogEntry", "hash_part": "5demoliveevent", "store_path": "/gnu/store/5demoliveevent-demo-live-1.0", "nar_size": 98304, "nar_hash": "sha256:demo-live-event", "p2p_available": true}),
@@ -325,6 +413,7 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(body["demo"], true);
         assert_eq!(body["connected_peers"], 3);
+        assert_eq!(body["connectivity"]["state"], "shareable");
     }
 
     #[tokio::test]
@@ -338,5 +427,34 @@ mod tests {
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let body = String::from_utf8(bytes.to_vec()).unwrap();
         assert!(body.contains("guix-p2p dashboard"));
+    }
+
+    #[tokio::test]
+    async fn demo_share_info_endpoint_matches_dashboard_button() {
+        let response = router()
+            .oneshot(Request::builder().uri("/api/share-info").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(body["config_snippet"].as_str().unwrap().contains("bootstrap_peers ="));
+    }
+
+    #[tokio::test]
+    async fn demo_diagnostics_endpoint_supports_net_detail() {
+        let response = router()
+            .oneshot(Request::builder().uri("/api/diagnostics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["connectivity"]["state"], "shareable");
+        assert!(
+            body["checks"].as_array().unwrap().iter().any(|check| check["id"] == "nat-address")
+        );
     }
 }
