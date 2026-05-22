@@ -440,7 +440,7 @@ fn guix_integration_check() -> DiagnosticCheck {
 
     DiagnosticCheck {
         id: "guix-integration",
-        severity: DiagnosticSeverity::Warning,
+        severity: DiagnosticSeverity::Error,
         summary: "Guix substitute integration not confirmed".to_string(),
         detail,
     }
@@ -758,6 +758,15 @@ mod tests {
         ]);
 
         assert!(evidence.is_empty());
+    }
+
+    #[test]
+    fn guix_integration_missing_is_error() {
+        let check = guix_integration_check();
+
+        if check.summary == "Guix substitute integration not confirmed" {
+            assert_eq!(check.severity, DiagnosticSeverity::Error);
+        }
     }
 
     #[test]

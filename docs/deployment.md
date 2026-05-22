@@ -87,7 +87,7 @@ environment.
 
 `guix-p2p --doctor` includes a `guix-integration` check for this setup. It
 inspects the running `guix-daemon` environment for `GUIX_EXTENSIONS_PATH`,
-`GUIX_P2P_BIN`, and `GUIX_P2P_SOCKET`, and warns when the substitute extension
+`GUIX_P2P_BIN`, and `GUIX_P2P_SOCKET`, and errors when the substitute extension
 or legacy wrapper is not confirmed. A shell-level `GUIX_EXTENSIONS_PATH` is not
 enough; the variable must be present in the `guix-service-type` environment.
 
