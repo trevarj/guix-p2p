@@ -43,9 +43,10 @@ guix shell -f guix.scm
 
 The package definition imports Rust crate sources from `Cargo.lock` using
 Guix's lockfile importer. Use a Guix revision that supports
-`guix import crate --lockfile` and `cargo-inputs-from-lockfile`. The lockfile
-path is resolved from the authenticated channel checkout, so `guix pull` can
-build its package cache from any working directory.
+`guix import crate --lockfile` and `cargo-inputs-from-lockfile`.
+`channel/Cargo.lock` is a symlink to the repository lockfile so the installed
+channel module can build Guix's package cache while still packaging the full
+checkout.
 
 Run a persistent node:
 

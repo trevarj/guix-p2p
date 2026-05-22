@@ -18,14 +18,22 @@
   #:use-module (srfi srfi-13)
   #:export (guix-p2p))
 
-(define %guix-p2p-checkout-root
-  (or (getenv "GUIX_P2P_CHECKOUT_ROOT")
-      (and=> (current-filename)
+(define %guix-p2p-channel-root
+  (or (and=> (current-filename)
              (lambda (file)
-               (dirname (dirname (dirname file)))))
+               (dirname (dirname file))))
       (and=> (search-path %load-path "guix-p2p/packages.scm")
              (lambda (file)
-               (dirname (dirname (dirname file)))))
+               (dirname (dirname file))))
+      (getcwd)))
+
+(define %guix-p2p-lockfile
+  (string-append %guix-p2p-channel-root "/Cargo.lock"))
+
+(define %guix-p2p-checkout-root
+  (or (getenv "GUIX_P2P_CHECKOUT_ROOT")
+      (and (file-exists? %guix-p2p-lockfile)
+           (dirname (canonicalize-path %guix-p2p-lockfile)))
       (getcwd)))
 
 (define (guix-p2p-generated-path? file)
@@ -81,7 +89,7 @@
            perl))
     (inputs
      (append (cargo-inputs-from-lockfile
-              (string-append %guix-p2p-checkout-root "/Cargo.lock"))
+              %guix-p2p-lockfile)
              (list libgcrypt
                    nss-certs
                    openssl
