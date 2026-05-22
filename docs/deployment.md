@@ -9,9 +9,17 @@ For a persistent Guix System setup, add this repository as a Guix channel:
  (channel
   (name 'guix-p2p)
   (url "https://codeberg.org/trevarj/guix-p2p")
-  (branch "main"))
+  (branch "master")
+  (introduction
+   (make-channel-introduction
+    "7d6c023e60cffde9cc63d7c4c2232a3f9c9fca1f"
+    (openpgp-fingerprint
+     "A6C2 0D0C 2AD8 38F9 4907  0EA3 A52D 6879 4EBE D758"))))
  %default-channels)
 ```
+
+This introduction starts at the first signed guix-p2p commit that contains
+`.guix-authorizations`.
 
 After `guix pull`, import the service module from your `operating-system`
 configuration:
