@@ -39,14 +39,14 @@
       (getcwd)))
 
 (define (guix-p2p-read-line file)
-  (and (file-exists? file)
+  (and (false-if-exception (file-exists? file))
        (call-with-input-file file read-line)))
 
 (define (guix-p2p-git-dir root)
   (let ((git (string-append root "/.git")))
     (cond
-     ((file-is-directory? git) git)
-     ((file-exists? git)
+     ((false-if-exception (file-is-directory? git)) git)
+     ((false-if-exception (file-exists? git))
       (let ((line (guix-p2p-read-line git)))
         (and line
              (string-prefix? "gitdir: " line)
