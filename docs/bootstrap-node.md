@@ -16,6 +16,26 @@ Recommended locations:
 
 Keep `cache_dir` stable. The PeerId is derived from the identity stored there.
 
+## Operator Checklist
+
+Before publishing a bootstrap node:
+
+- Pick one public transport: QUIC/UDP or TCP.
+- Create a stable DNS name or static public IP.
+- Open the matching host firewall port.
+- Forward the matching router/NAT port to the host when needed.
+- Set `listen_addr` to the local bind multiaddr.
+- Set `external_addresses` to the public DNS/IP multiaddr clients should dial.
+- Keep `cache_dir` on persistent storage so the PeerId does not change.
+- Run `guix-p2p --doctor --cache-dir /var/cache/guix-p2p`.
+- Run `guix-p2p --share-info --cache-dir /var/cache/guix-p2p`.
+- From another machine, run `guix-p2p --test-connectivity <published-multiaddr>`.
+- Confirm dashboard `NET` is `share` or `share/no-bs`.
+- Confirm the events panel shows successful peer connections, not repeated dial
+  or inbound failures.
+- Publish only the generated `/p2p/<peer-id>` multiaddr or `bootstrap_peers`
+  snippet.
+
 ## Shepherd Service
 
 ```scheme
