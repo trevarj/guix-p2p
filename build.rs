@@ -2,9 +2,11 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=GUIX_P2P_BUILD_COMMIT");
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    println!("cargo:rerun-if-changed=.git/refs");
-    println!("cargo:rerun-if-changed=.git/packed-refs");
+    if std::path::Path::new(".git").exists() {
+        println!("cargo:rerun-if-changed=.git/HEAD");
+        println!("cargo:rerun-if-changed=.git/refs");
+        println!("cargo:rerun-if-changed=.git/packed-refs");
+    }
 
     let commit = std::env::var("GUIX_P2P_BUILD_COMMIT")
         .ok()
