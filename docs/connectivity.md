@@ -37,10 +37,12 @@ the common local setup mistakes before testers start transferring data.
 The `guix-integration` check inspects `/proc` for running `guix-daemon`
 processes and looks for the service environment installed by
 `guix-p2p-enable-guix-daemon-extension`: `GUIX_EXTENSIONS_PATH`,
-`GUIX_P2P_BIN`, and `GUIX_P2P_SOCKET`. It also recognizes the legacy
-`GUIX=.../guix-p2p-wrapper` path. Missing or unreadable integration evidence is
-an error because Guix substitute traffic will not be routed through guix-p2p
-unless the system `guix-daemon` has this environment.
+`GUIX_P2P_BIN`, and `GUIX_P2P_SOCKET`. If `guix-daemon` is socket-activated and
+idle, it also checks generated Shepherd service files for the same environment.
+It recognizes the legacy `GUIX=.../guix-p2p-wrapper` path. Missing or
+unreadable integration evidence is an error because Guix substitute traffic
+will not be routed through guix-p2p unless the system `guix-daemon` has this
+environment.
 
 ## Bootstrap Bundle
 

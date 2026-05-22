@@ -98,7 +98,9 @@ environment.
 
 `guix-p2p --doctor` includes a `guix-integration` check for this setup. It
 inspects the running `guix-daemon` environment for `GUIX_EXTENSIONS_PATH`,
-`GUIX_P2P_BIN`, and `GUIX_P2P_SOCKET`, and errors when the substitute extension
+`GUIX_P2P_BIN`, and `GUIX_P2P_SOCKET`. On socket-activated systems where no
+`guix-daemon` process is currently running, it also inspects generated Shepherd
+service files for the same environment. It errors when the substitute extension
 or legacy wrapper is not confirmed. A shell-level `GUIX_EXTENSIONS_PATH` is not
 enough; the variable must be present in the `guix-service-type` environment.
 

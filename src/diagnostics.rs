@@ -505,6 +505,29 @@ fn guix_integration_check() -> DiagnosticCheck {
         };
     }
 
+    let service_evidence = inspect_guix_daemon_service_files();
+    if let Some(evidence) = service_evidence.first() {
+        return DiagnosticCheck {
+            id: "guix-integration",
+            severity: DiagnosticSeverity::Ok,
+            summary: match evidence.kind {
+                GuixIntegrationKind::Extension => "Guix substitute extension enabled".to_string(),
+                GuixIntegrationKind::Wrapper => "Guix wrapper integration enabled".to_string(),
+            },
+            detail: if daemon_probe.found_daemons == 0 {
+                format!(
+                    "{}; no running guix-daemon process was available to inspect",
+                    evidence.detail
+                )
+            } else {
+                format!(
+                    "{}; running guix-daemon environment did not expose integration evidence",
+                    evidence.detail
+                )
+            },
+        };
+    }
+
     let current_env = guix_integration_evidence_from_env(std::env::vars_os());
     let current_env_detail =
         current_env.first().map(|evidence| format!(" Current process: {}.", evidence.detail));
@@ -583,6 +606,36 @@ where
     evidence
 }
 
+fn guix_integration_evidence_from_service_source(
+    source: &str,
+    path: &Path,
+) -> Option<GuixIntegrationEvidence> {
+    if source.contains("guix-p2p-wrapper") {
+        return Some(GuixIntegrationEvidence {
+            kind: GuixIntegrationKind::Wrapper,
+            detail: format!(
+                "generated guix-daemon service uses guix-p2p wrapper at {}",
+                path.display()
+            ),
+        });
+    }
+
+    let has_extensions = source.contains("GUIX_EXTENSIONS_PATH=");
+    let has_bin = source.contains("GUIX_P2P_BIN=");
+    let has_socket = source.contains("GUIX_P2P_SOCKET=");
+    if has_extensions && has_bin && has_socket {
+        return Some(GuixIntegrationEvidence {
+            kind: GuixIntegrationKind::Extension,
+            detail: format!(
+                "generated guix-daemon service includes GUIX_EXTENSIONS_PATH, GUIX_P2P_BIN, and GUIX_P2P_SOCKET at {}",
+                path.display()
+            ),
+        });
+    }
+
+    None
+}
+
 fn split_env_paths(value: &str) -> Vec<PathBuf> {
     value.split(':').filter(|path| !path.is_empty()).map(PathBuf::from).collect()
 }
@@ -621,6 +674,32 @@ fn inspect_guix_daemon_environments() -> GuixDaemonEnvProbe {
     }
 
     probe
+}
+
+fn inspect_guix_daemon_service_files() -> Vec<GuixIntegrationEvidence> {
+    let Ok(entries) = std::fs::read_dir("/gnu/store") else {
+        return Vec::new();
+    };
+
+    let mut evidence = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !file_name.ends_with("-shepherd-guix-daemon.scm") {
+            continue;
+        }
+
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Some(found) = guix_integration_evidence_from_service_source(&source, &path) {
+            evidence.push(found);
+        }
+    }
+
+    evidence
 }
 
 fn process_looks_like_guix_daemon(process_dir: &Path) -> bool {
@@ -938,6 +1017,40 @@ mod tests {
         ]);
 
         assert!(evidence.is_empty());
+    }
+
+    #[test]
+    fn guix_integration_detects_generated_service_environment() {
+        let evidence = guix_integration_evidence_from_service_source(
+            r#"
+            (make-forkexec-constructor
+             (list "/gnu/store/hash-guix/bin/guix-daemon")
+             #:environment-variables
+             (quote ("GUIX_EXTENSIONS_PATH=/run/current-system/profile/share/guix/extensions"
+                     "GUIX_P2P_BIN=/run/current-system/profile/bin/guix-p2p"
+                     "GUIX_P2P_SOCKET=/var/cache/guix-p2p/guix-p2p.sock")))
+            "#,
+            Path::new("/gnu/store/hash-shepherd-guix-daemon.scm"),
+        )
+        .expect("service evidence");
+
+        assert_eq!(evidence.kind, GuixIntegrationKind::Extension);
+        assert!(evidence.detail.contains("shepherd-guix-daemon.scm"));
+    }
+
+    #[test]
+    fn guix_integration_ignores_plain_generated_service() {
+        let evidence = guix_integration_evidence_from_service_source(
+            r#"
+            (make-forkexec-constructor
+             (list "/gnu/store/hash-guix/bin/guix-daemon")
+             #:environment-variables
+             (quote ("GUIX_EXTENSIONS_PATH=/run/current-system/profile/share/guix/extensions")))
+            "#,
+            Path::new("/gnu/store/hash-shepherd-guix-daemon.scm"),
+        );
+
+        assert!(evidence.is_none());
     }
 
     #[test]
