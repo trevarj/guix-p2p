@@ -1113,8 +1113,14 @@ cat > "$site_dir/index.html" <<'HTML'
  (channel
   (<span class="tok-keyword">name</span> <span class="tok-symbol">'guix-p2p</span>)
   (<span class="tok-keyword">url</span> <span class="tok-string">"https://codeberg.org/trevarj/guix-p2p"</span>)
-  (<span class="tok-keyword">branch</span> <span class="tok-string">"master"</span>))
+  (<span class="tok-keyword">branch</span> <span class="tok-string">"master"</span>)
+  (<span class="tok-keyword">introduction</span>
+   (<span class="tok-keyword">make-channel-introduction</span>
+    <span class="tok-string">"7d6c023e60cffde9cc63d7c4c2232a3f9c9fca1f"</span>
+    (<span class="tok-keyword">openpgp-fingerprint</span>
+     <span class="tok-string">"A6C2 0D0C 2AD8 38F9 4907  0EA3 A52D 6879 4EBE D758"</span>))))
  <span class="tok-symbol">%default-channels</span>)</code></pre>
+      <p>The introduction starts at the first signed <code>guix-p2p</code> commit that contains <code>.guix-authorizations</code>, so Guix can authenticate later channel updates.</p>
       <p>Import the service module in your operating-system configuration and enable the daemon extension:</p>
       <pre data-language="Scheme"><code class="language-scheme">(<span class="tok-keyword">use-modules</span> (guix-p2p services))
 

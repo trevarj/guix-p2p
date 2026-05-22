@@ -68,7 +68,6 @@ Before a broader release:
   for older setups.
 - Continue migrating developer-only shell helpers listed in
   [scripts.md](scripts.md) when they become part of normal setup.
-- Add channel introduction/signing metadata before broader release.
 - Decide whether release packages should build from tagged source snapshots
   instead of the current channel checkout.
 - Decide whether release binaries are supported or source builds remain the
