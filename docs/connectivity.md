@@ -22,9 +22,19 @@ The command checks local prerequisites:
 - external addresses can produce a shareable `/p2p/<peer-id>` multiaddr
 - private or loopback external addresses are flagged
 - cache directory, daemon socket, ACL path, and substitute URLs are visible
+- running `guix-daemon` environment appears to have the guix-p2p substitute
+  extension or legacy wrapper enabled
 
 `--doctor` does not prove that another machine can dial the node. It catches
 the common local setup mistakes before testers start transferring data.
+
+The `guix-integration` check inspects `/proc` for running `guix-daemon`
+processes and looks for the service environment installed by
+`guix-p2p-enable-guix-daemon-extension`: `GUIX_EXTENSIONS_PATH`,
+`GUIX_P2P_BIN`, and `GUIX_P2P_SOCKET`. It also recognizes the legacy
+`GUIX=.../guix-p2p-wrapper` path. If the daemon environment is not readable by
+the current user, the check warns and tells the tester to verify the
+`guix-service-type` configuration.
 
 ## Bootstrap Bundle
 

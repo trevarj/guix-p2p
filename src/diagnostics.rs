@@ -1,6 +1,7 @@
 use std::{
+    ffi::OsString,
     net::{Ipv4Addr, Ipv6Addr},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use libp2p::{Multiaddr, multiaddr::Protocol};
@@ -209,6 +210,8 @@ pub fn run_config_diagnostics(config: &Config, peer_id: &str) -> Vec<DiagnosticC
         DiagnosticSeverity::Warning,
     ));
 
+    checks.push(guix_integration_check());
+
     checks.push(DiagnosticCheck {
         id: "substitute-urls",
         severity: if config.substitute_urls.is_empty() {
@@ -367,6 +370,191 @@ fn bootstrap_config_snippet(bootstrap_peers: &[String]) -> String {
     } else {
         format!("bootstrap_peers = \"{}\"", bootstrap_peers.join(","))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum GuixIntegrationKind {
+    Extension,
+    Wrapper,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GuixIntegrationEvidence {
+    kind: GuixIntegrationKind,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct GuixDaemonEnvProbe {
+    found_daemons: usize,
+    readable_envs: usize,
+    unreadable_envs: usize,
+    evidence: Vec<GuixIntegrationEvidence>,
+}
+
+fn guix_integration_check() -> DiagnosticCheck {
+    let daemon_probe = inspect_guix_daemon_environments();
+    if let Some(evidence) = daemon_probe.evidence.first() {
+        return DiagnosticCheck {
+            id: "guix-integration",
+            severity: DiagnosticSeverity::Ok,
+            summary: match evidence.kind {
+                GuixIntegrationKind::Extension => "Guix substitute extension enabled".to_string(),
+                GuixIntegrationKind::Wrapper => "Guix wrapper integration enabled".to_string(),
+            },
+            detail: format!(
+                "{}; inspected {} running guix-daemon environment(s)",
+                evidence.detail, daemon_probe.readable_envs
+            ),
+        };
+    }
+
+    let current_env = guix_integration_evidence_from_env(std::env::vars_os());
+    let current_env_detail =
+        current_env.first().map(|evidence| format!(" Current process: {}.", evidence.detail));
+
+    let detail = if daemon_probe.found_daemons == 0 {
+        format!(
+            "no running guix-daemon process was found; enable \
+             guix-p2p-enable-guix-daemon-extension or the legacy wrapper in the guix-service \
+             environment.{}",
+            current_env_detail.unwrap_or_default()
+        )
+    } else if daemon_probe.readable_envs == 0 {
+        format!(
+            "found {} guix-daemon process(es), but their environments were not readable; run \
+             doctor with enough permissions or verify that GUIX_EXTENSIONS_PATH, GUIX_P2P_BIN, \
+             and GUIX_P2P_SOCKET are set in the guix-service environment.{}",
+            daemon_probe.found_daemons,
+            current_env_detail.unwrap_or_default()
+        )
+    } else {
+        format!(
+            "inspected {} guix-daemon environment(s); none had the guix-p2p substitute extension \
+             or wrapper enabled. Enable guix-p2p-enable-guix-daemon-extension in the guix-service \
+             configuration.{}",
+            daemon_probe.readable_envs,
+            current_env_detail.unwrap_or_default()
+        )
+    };
+
+    DiagnosticCheck {
+        id: "guix-integration",
+        severity: DiagnosticSeverity::Warning,
+        summary: "Guix substitute integration not confirmed".to_string(),
+        detail,
+    }
+}
+
+fn guix_integration_evidence_from_env<I>(vars: I) -> Vec<GuixIntegrationEvidence>
+where
+    I: IntoIterator<Item = (OsString, OsString)>,
+{
+    let vars: Vec<(String, String)> = vars
+        .into_iter()
+        .map(|(key, value)| {
+            (key.to_string_lossy().into_owned(), value.to_string_lossy().into_owned())
+        })
+        .collect();
+    let value =
+        |name: &str| vars.iter().find_map(|(key, value)| (key == name).then_some(value.as_str()));
+
+    let mut evidence = Vec::new();
+
+    if let Some(guix) = value("GUIX")
+        && guix.contains("guix-p2p-wrapper")
+    {
+        evidence.push(GuixIntegrationEvidence {
+            kind: GuixIntegrationKind::Wrapper,
+            detail: format!("GUIX points to {guix}"),
+        });
+    }
+
+    if let Some(extensions_path) = value("GUIX_EXTENSIONS_PATH") {
+        let has_extension_path = split_env_paths(extensions_path)
+            .iter()
+            .any(|path| path_contains_guix_p2p_extension(path));
+        let has_helper_vars = value("GUIX_P2P_BIN").is_some() && value("GUIX_P2P_SOCKET").is_some();
+        if has_extension_path || has_helper_vars {
+            let detail = if has_extension_path {
+                format!("GUIX_EXTENSIONS_PATH includes {extensions_path}")
+            } else {
+                "GUIX_EXTENSIONS_PATH plus GUIX_P2P_BIN and GUIX_P2P_SOCKET are set".to_string()
+            };
+            evidence.push(GuixIntegrationEvidence { kind: GuixIntegrationKind::Extension, detail });
+        }
+    }
+
+    evidence
+}
+
+fn split_env_paths(value: &str) -> Vec<PathBuf> {
+    value.split(':').filter(|path| !path.is_empty()).map(PathBuf::from).collect()
+}
+
+fn path_contains_guix_p2p_extension(path: &Path) -> bool {
+    path.to_string_lossy().contains("guix-p2p")
+        || path.join("substitute.scm").is_file()
+        || path.join("guix/extensions/substitute.scm").is_file()
+}
+
+fn inspect_guix_daemon_environments() -> GuixDaemonEnvProbe {
+    let mut probe = GuixDaemonEnvProbe::default();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return probe;
+    };
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        if !file_name.to_string_lossy().bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+
+        let process_dir = entry.path();
+        if !process_looks_like_guix_daemon(&process_dir) {
+            continue;
+        }
+
+        probe.found_daemons += 1;
+        match read_proc_environ(&process_dir) {
+            Ok(vars) => {
+                probe.readable_envs += 1;
+                probe.evidence.extend(guix_integration_evidence_from_env(vars));
+            },
+            Err(_) => {
+                probe.unreadable_envs += 1;
+            },
+        }
+    }
+
+    probe
+}
+
+fn process_looks_like_guix_daemon(process_dir: &Path) -> bool {
+    let comm = std::fs::read_to_string(process_dir.join("comm")).unwrap_or_default();
+    if comm.trim() == "guix-daemon" {
+        return true;
+    }
+
+    let cmdline = std::fs::read(process_dir.join("cmdline")).unwrap_or_default();
+    cmdline.split(|byte| *byte == 0).any(|arg| String::from_utf8_lossy(arg).contains("guix-daemon"))
+}
+
+fn read_proc_environ(process_dir: &Path) -> std::io::Result<Vec<(OsString, OsString)>> {
+    let environ = std::fs::read(process_dir.join("environ"))?;
+    Ok(environ
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+        .filter_map(|entry| {
+            let split = entry.iter().position(|byte| *byte == b'=')?;
+            let (key, value_with_separator) = entry.split_at(split);
+            let value = &value_with_separator[1..];
+            Some((
+                OsString::from(String::from_utf8_lossy(key).into_owned()),
+                OsString::from(String::from_utf8_lossy(value).into_owned()),
+            ))
+        })
+        .collect())
 }
 
 fn ipv4_is_private_or_loopback(ip: Ipv4Addr) -> bool {
@@ -531,6 +719,45 @@ mod tests {
         let check = checks.iter().find(|check| check.id == "external-addresses").unwrap();
         assert_eq!(check.severity, DiagnosticSeverity::Error);
         assert!(check.summary.contains("invalid"));
+    }
+
+    #[test]
+    fn guix_integration_detects_extension_environment() {
+        let evidence = guix_integration_evidence_from_env([
+            (
+                "GUIX_EXTENSIONS_PATH".into(),
+                "/gnu/store/hash-guix-p2p/share/guix/extensions".into(),
+            ),
+            ("GUIX_P2P_BIN".into(), "/run/current-system/profile/bin/guix-p2p".into()),
+            ("GUIX_P2P_SOCKET".into(), "/var/cache/guix-p2p/guix-p2p.sock".into()),
+        ]);
+
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].kind, GuixIntegrationKind::Extension);
+    }
+
+    #[test]
+    fn guix_integration_detects_wrapper_environment() {
+        let evidence = guix_integration_evidence_from_env([
+            ("GUIX".into(), "/run/current-system/profile/bin/guix-p2p-wrapper".into()),
+            ("REAL_GUIX".into(), "/run/current-system/profile/bin/guix".into()),
+        ]);
+
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].kind, GuixIntegrationKind::Wrapper);
+    }
+
+    #[test]
+    fn guix_integration_ignores_plain_guix_environment() {
+        let evidence = guix_integration_evidence_from_env([
+            ("GUIX".into(), "/run/current-system/profile/bin/guix".into()),
+            (
+                "GUIX_EXTENSIONS_PATH".into(),
+                "/run/current-system/profile/share/guix/extensions".into(),
+            ),
+        ]);
+
+        assert!(evidence.is_empty());
     }
 
     #[test]

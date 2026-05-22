@@ -85,6 +85,12 @@ configured Guix extensions. Guix Home can run user services and set login-shell
 environment, but it cannot directly configure the system `guix-daemon` service
 environment.
 
+`guix-p2p --doctor` includes a `guix-integration` check for this setup. It
+inspects the running `guix-daemon` environment for `GUIX_EXTENSIONS_PATH`,
+`GUIX_P2P_BIN`, and `GUIX_P2P_SOCKET`, and warns when the substitute extension
+or legacy wrapper is not confirmed. A shell-level `GUIX_EXTENSIONS_PATH` is not
+enough; the variable must be present in the `guix-service-type` environment.
+
 Default extension behavior:
 
 - relay socket: `/var/cache/guix-p2p/guix-p2p.sock`
