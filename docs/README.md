@@ -8,6 +8,7 @@ developing `guix-p2p`.
 | [architecture.md](architecture.md) | Architecture, crate map, data flow, dashboard surfaces |
 | [configuration.md](configuration.md) | TOML keys, defaults, CLI overrides |
 | [tester-quickstart.md](tester-quickstart.md) | First-run tester flow, dashboard basics, and failure report shape |
+| [tester-issue-template.md](tester-issue-template.md) | Copyable issue template for tester failures |
 | [connectivity.md](connectivity.md) | Bootstrap, NAT, firewall, and dashboard connectivity signals |
 | [troubleshooting.md](troubleshooting.md) | Common tester failures and what to check |
 | [deployment.md](deployment.md) | Guix channel setup, daemon, relay, extension, and isolated Guix flow |

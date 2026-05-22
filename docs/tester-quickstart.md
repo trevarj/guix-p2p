@@ -88,6 +88,9 @@ The dashboard `active seeds` panel shows NARs this node can serve.
 
 ## Useful Failure Report
 
+Use [`tester-issue-template.md`](tester-issue-template.md) when filing a
+tester failure.
+
 When reporting a failure, include:
 
 - `guix-p2p --doctor` output.
