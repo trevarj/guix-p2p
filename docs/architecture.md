@@ -626,9 +626,11 @@ guix-p2p --daemon --seed /gnu/store/...-foo,/gnu/store/...-bar
 ```
 
 Each path is fed to `NarStore::seed_store_path()`, which runs `guix hash` and
-Guix's raw NAR serializer. It intentionally does not use `guix archive
---export`, because that command writes a signed nar bundle rather than the
-single-item NAR byte stream served by substitute servers.
+Guix's raw NAR serializer. System services resolve these helpers from
+`/run/current-system/profile/bin` when available, then fall back to `PATH`. It
+intentionally does not use `guix archive --export`, because that command writes
+a signed nar bundle rather than the single-item NAR byte stream served by
+substitute servers.
 
 ## Dashboard Seeding View
 

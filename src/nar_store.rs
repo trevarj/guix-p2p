@@ -332,7 +332,7 @@ pub type SharedNarStore = Mutex<NarStore>;
 
 /// Compute the nar hash of a store path using `guix hash -S nar -f hex`.
 fn compute_nar_hash(store_path: &str) -> anyhow::Result<String> {
-    let output = std::process::Command::new("guix")
+    let output = std::process::Command::new(system_profile_command("guix"))
         .args(["hash", "-S", "nar", "-f", "hex", store_path])
         .output()
         .context("failed to run `guix hash`")?;
@@ -350,7 +350,7 @@ fn compute_nar_hash(store_path: &str) -> anyhow::Result<String> {
 /// metadata and a signature. Substitute servers serve the raw single-item nar,
 /// so use Guix's serializer directly.
 fn export_nar(store_path: &str) -> anyhow::Result<Vec<u8>> {
-    let output = std::process::Command::new("guile")
+    let output = std::process::Command::new(system_profile_command("guile"))
         .args([
             "-c",
             r#"
@@ -375,11 +375,27 @@ fn export_nar(store_path: &str) -> anyhow::Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
+fn system_profile_command(name: &str) -> std::ffi::OsString {
+    let system_path = std::path::Path::new("/run/current-system/profile/bin").join(name);
+    if system_path.exists() {
+        return system_path.into_os_string();
+    }
+
+    std::ffi::OsString::from(name)
+}
+
 #[cfg(test)]
 mod tests {
     use sha2::{Digest, Sha256};
 
     use super::*;
+
+    #[test]
+    fn nar_store_resolves_system_profile_commands() {
+        let command = system_profile_command("guix");
+
+        assert!(!command.is_empty());
+    }
 
     #[test]
     fn test_nar_store_save_and_query() {
