@@ -1113,7 +1113,7 @@ cat > "$site_dir/index.html" <<'HTML'
  (channel
   (<span class="tok-keyword">name</span> <span class="tok-symbol">'guix-p2p</span>)
   (<span class="tok-keyword">url</span> <span class="tok-string">"https://codeberg.org/trevarj/guix-p2p"</span>)
-  (<span class="tok-keyword">branch</span> <span class="tok-string">"main"</span>))
+  (<span class="tok-keyword">branch</span> <span class="tok-string">"master"</span>))
  <span class="tok-symbol">%default-channels</span>)</code></pre>
       <p>Import the service module in your operating-system configuration and enable the daemon extension:</p>
       <pre data-language="Scheme"><code class="language-scheme">(<span class="tok-keyword">use-modules</span> (guix-p2p services))
