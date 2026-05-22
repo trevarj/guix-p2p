@@ -163,7 +163,7 @@ and `cargo-inputs-from-lockfile` support.
 The current project bootstrap node is:
 
 ```toml
-bootstrap_peers = "/ip4/104.223.122.157/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"
+bootstrap_peers = "/dns4/guix-p2p.trevs.site/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"
 ```
 
 If another tester is acting as a bootstrap node, ask them for their full

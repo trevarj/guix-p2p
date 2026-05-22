@@ -17,6 +17,9 @@
             guix-p2p-configuration-cache-directory
             guix-p2p-configuration-socket
             guix-p2p-configuration-listen-address
+            guix-p2p-configuration-bootstrap-peers
+            guix-p2p-configuration-external-addresses
+            guix-p2p-configuration-policy
             guix-p2p-configuration-dashboard?
             guix-p2p-configuration-dashboard-bind
             guix-p2p-configuration-dashboard-port
@@ -42,6 +45,12 @@
           (default %guix-p2p-default-socket))
   (listen-address guix-p2p-configuration-listen-address
                   (default "/ip4/0.0.0.0/udp/6881/quic-v1"))
+  (bootstrap-peers guix-p2p-configuration-bootstrap-peers
+                   (default '()))
+  (external-addresses guix-p2p-configuration-external-addresses
+                      (default '()))
+  (policy guix-p2p-configuration-policy
+          (default #f))
   (dashboard? guix-p2p-configuration-dashboard?
               (default #f))
   (dashboard-bind guix-p2p-configuration-dashboard-bind
@@ -55,12 +64,24 @@
   (let* ((package (guix-p2p-configuration-package config))
          (dashboard-port
           (number->string (guix-p2p-configuration-dashboard-port config)))
+         (bootstrap-peers (guix-p2p-configuration-bootstrap-peers config))
+         (external-addresses (guix-p2p-configuration-external-addresses config))
+         (policy (guix-p2p-configuration-policy config))
          (command
           `(,(file-append package "/bin/guix-p2p")
             "--daemon"
             "--listen-addr" ,(guix-p2p-configuration-listen-address config)
             "--cache-dir" ,(guix-p2p-configuration-cache-directory config)
             "--socket" ,(guix-p2p-configuration-socket config)
+            ,@(if (null? bootstrap-peers)
+                  '()
+                  `("--bootstrap-peers" ,(string-join bootstrap-peers ",")))
+            ,@(if (null? external-addresses)
+                  '()
+                  `("--external-addresses" ,(string-join external-addresses ",")))
+            ,@(if policy
+                  `("--policy" ,policy)
+                  '())
             ,@(if (guix-p2p-configuration-dashboard? config)
                   `("--dashboard"
                     "--dashboard-bind" ,(guix-p2p-configuration-dashboard-bind config)

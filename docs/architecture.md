@@ -514,8 +514,24 @@ older setups that set the daemon's `GUIX` environment variable.
 
 ### Shepherd Service (Daemon Mode)
 
-For bootstrap-node operations, use the Shepherd-first guide in
-[`bootstrap-node.md`](bootstrap-node.md).
+Guix System deployments should use `guix-p2p-service-type`. Normal daemon
+network settings are first-class service fields, so system daemon bootstrap
+configuration lives in the operating-system service definition rather than a
+user's TOML file:
+
+```scheme
+(service guix-p2p-service-type
+         (guix-p2p-configuration
+          (dashboard? #t)
+          (bootstrap-peers
+           '("/dns4/guix-p2p.trevs.site/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"))
+          (external-addresses '())
+          (policy "p2p-first")))
+```
+
+For standalone bootstrap-node operations, use the Shepherd-first guide in
+[`bootstrap-node.md`](bootstrap-node.md). The equivalent low-level service shape
+is:
 
 ```scheme
 (define guix-p2p-daemon

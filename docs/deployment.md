@@ -46,7 +46,7 @@ so it only reflects fixes after `guix pull`, `guix system reconfigure`, and
 service restart.
 
 `guix-p2p --version` prints the crate version and embedded Git commit, for
-example `guix-p2p 0.1.2 (abcdef123456)`. Include this value in tester reports
+example `guix-p2p 0.1.3 (abcdef123456)`. Include this value in tester reports
 while releases are still using the same package version.
 
 Substitute relay invocations default to warning-only logs so Guix commands do
@@ -106,14 +106,22 @@ Put this in the `services` field of your `operating-system` configuration:
 
 (services
   (modify-services
-      (cons (service guix-p2p-service-type) %base-services)
+      (cons (service guix-p2p-service-type
+                     (guix-p2p-configuration
+                      (dashboard? #t)
+                      (bootstrap-peers
+                       '("/dns4/guix-p2p.trevs.site/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"))))
+            %base-services)
     (guix-service-type config =>
       (guix-p2p-enable-guix-daemon-extension config))))
 ```
 
 `guix-p2p-service-type` starts `guix-p2p --daemon`, adds the package to the
-system profile, and creates the default cache directory. Installing the package
-puts the extension at
+system profile, and creates the default cache directory. System daemon
+bootstrap peers should live in `guix-p2p-configuration`, not in a user's
+`~/.config/guix-p2p/config.toml`, because Shepherd starts the daemon from the
+system service definition with explicit command-line options. Installing the
+package puts the extension at
 `/run/current-system/profile/share/guix/extensions/substitute.scm`, but
 `guix-daemon` only sees it when that directory is in the daemon environment.
 `guix-p2p-enable-guix-daemon-extension` prepends the package extension

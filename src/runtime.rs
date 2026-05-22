@@ -344,6 +344,20 @@ fn response_size_bytes(response: &BlockResponse) -> u64 {
 pub fn build_swarm(
     keypair: &libp2p::identity::Keypair,
 ) -> anyhow::Result<libp2p::Swarm<GuixP2PBehaviour>> {
+    build_swarm_with_mdns(keypair, true)
+}
+
+/// Build a libp2p swarm without LAN mDNS discovery.
+pub fn build_swarm_without_mdns(
+    keypair: &libp2p::identity::Keypair,
+) -> anyhow::Result<libp2p::Swarm<GuixP2PBehaviour>> {
+    build_swarm_with_mdns(keypair, false)
+}
+
+fn build_swarm_with_mdns(
+    keypair: &libp2p::identity::Keypair,
+    enable_mdns: bool,
+) -> anyhow::Result<libp2p::Swarm<GuixP2PBehaviour>> {
     let mut quic_config = quic::Config::new(keypair);
     quic_config.max_idle_timeout = 30_000;
 
@@ -351,7 +365,14 @@ pub fn build_swarm(
         .with_tokio()
         .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
         .with_quic_config(|_| quic_config)
-        .with_behaviour(|keypair| Ok(behaviour::create_swarm_behaviour(keypair)))?
+        .with_dns()?
+        .with_behaviour(|keypair| {
+            if enable_mdns {
+                Ok(behaviour::create_swarm_behaviour(keypair))
+            } else {
+                Ok(behaviour::create_swarm_behaviour_without_mdns(keypair))
+            }
+        })?
         .build();
 
     Ok(swarm)

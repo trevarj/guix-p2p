@@ -8,6 +8,12 @@ Config file:
 CLI flags in `src/main.rs` override the matching TOML values listed below.
 All other tuning belongs in TOML.
 
+For the Guix System service, put normal daemon network settings in
+`guix-p2p-configuration` fields such as `bootstrap-peers`,
+`external-addresses`, and `policy`. The Shepherd service starts the daemon with
+explicit command-line options and does not read a user's
+`~/.config/guix-p2p/config.toml`.
+
 Run local readiness checks with:
 
 ```sh
@@ -87,6 +93,23 @@ seed_paths = ["/gnu/store/...-hello"]
 | `tor_only` | `false` | `--tor-only` | Route network traffic only through Tor-capable paths. |
 | `socket_path` | `<cache_dir>/guix-p2p.sock` | `--socket` | Unix socket used by relay mode and the Guix wrapper. |
 | `seed_paths` | empty | `--seed` | Store paths serialized as raw single-item NARs and announced in the DHT. |
+
+## Guix System Service Fields
+
+`guix-p2p-service-type` exposes first-class fields for the normal daemon
+command line:
+
+```scheme
+(service guix-p2p-service-type
+         (guix-p2p-configuration
+          (dashboard? #t)
+          (bootstrap-peers
+           '("/dns4/guix-p2p.trevs.site/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"))
+          (external-addresses '())
+          (policy "p2p-first")))
+```
+
+Use `extra-options` only for flags that do not yet have service fields.
 
 Startup bootstrap peers are merged from the built-in project list, configured
 `bootstrap_peers`, CLI `--bootstrap-peers`, and the persisted peer store. The

@@ -26,7 +26,7 @@ pub async fn test_peer_connectivity(
         peer_addr.parse().map_err(|e| anyhow::anyhow!("invalid multiaddr {peer_addr}: {e}"))?;
     let peer = peer_id_from_multiaddr(&addr);
     let started = Instant::now();
-    let mut swarm = runtime::build_swarm(keypair)?;
+    let mut swarm = runtime::build_swarm_without_mdns(keypair)?;
 
     swarm.dial(addr.clone()).map_err(|e| anyhow::anyhow!("failed to start dial {addr}: {e}"))?;
 

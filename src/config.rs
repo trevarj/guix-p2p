@@ -141,6 +141,26 @@ impl Config {
         cli_policy: Option<SubstitutePolicy>,
     ) -> Self {
         let file = load_config_file();
+        Self::load_from_file(
+            file,
+            cli_bootstrap,
+            cli_external_addresses,
+            cli_listen,
+            cli_cache,
+            cli_substitute_urls,
+            cli_policy,
+        )
+    }
+
+    fn load_from_file(
+        file: ConfigFile,
+        cli_bootstrap: Option<String>,
+        cli_external_addresses: Option<String>,
+        cli_listen: Option<String>,
+        cli_cache: Option<String>,
+        cli_substitute_urls: Option<String>,
+        cli_policy: Option<SubstitutePolicy>,
+    ) -> Self {
         let cache_dir = cli_cache
             .as_ref()
             .or(file.cache_dir.as_ref())
@@ -349,7 +369,15 @@ mod tests {
 
     #[test]
     fn test_default_config() {
-        let config = Config::load(None, None, None, Some("/tmp/guix-p2p-test".into()), None, None);
+        let config = Config::load_from_file(
+            ConfigFile::default(),
+            None,
+            None,
+            None,
+            Some("/tmp/guix-p2p-test".into()),
+            None,
+            None,
+        );
         assert_eq!(config.block_size, 262144);
         assert!(config.bootstrap_peers.is_empty());
         assert!(config.enable_default_bootstrap_peers);
