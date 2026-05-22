@@ -374,6 +374,7 @@ main{
       <option value="theme-amber">Terminal Amber</option>
       <option value="theme-tokyo">Tokyo Night</option>
     </select>
+    <button type="button" id="copy-share-info" data-tip="Copy local PeerId, shareable multiaddrs, and paste-ready bootstrap_peers config.">copy peer</button>
     <button type="button" id="copy-diagnostics" data-tip="Copy dashboard diagnostics for tester failure reports.">copy diag</button>
     <div class="status-pill offline" id="api-status" data-tip="Dashboard API and WebSocket connection state.">connecting</div>
   </div>
@@ -641,6 +642,18 @@ function copyDiagnostics(){
     addEvent('providers','i','Copied dashboard diagnostics')
   }).catch(function(){
     addEvent('dl-fail','x','Failed to copy dashboard diagnostics')
+  })
+}
+
+function copyShareInfo(){
+  fetch('/api/share-info').then(function(r){
+    if(!r.ok)throw r;
+    return r.json()
+  }).then(function(bundle){
+    copyText(JSON.stringify(bundle,null,2));
+    addEvent('providers','i','Copied bootstrap share info')
+  }).catch(function(){
+    addEvent('dl-fail','x','Failed to copy bootstrap share info')
   })
 }
 
@@ -1463,6 +1476,12 @@ document.addEventListener('click',function(ev){
     copyDiagnostics();
     diag.textContent='copied';
     setTimeout(function(){diag.textContent='copy diag'},900)
+  }
+  var shareInfo=ev.target.closest('#copy-share-info');
+  if(shareInfo){
+    copyShareInfo();
+    shareInfo.textContent='copied';
+    setTimeout(function(){shareInfo.textContent='copy peer'},900)
   }
   if(ev.target.closest('#network-diagnostics')){
     openDiagnosticsDetail()

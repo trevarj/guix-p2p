@@ -24,7 +24,7 @@ use crate::{
     config::Config,
     connection::{ConnectionManager, PeerConnectionSnapshot},
     dht::ProviderCache,
-    diagnostics::{self, ConnectivitySummary, DiagnosticReport},
+    diagnostics::{self, BootstrapBundle, ConnectivitySummary, DiagnosticReport},
     nar_store::NarStore,
     reputation::{PeerScore, ReputationTracker},
 };
@@ -306,6 +306,7 @@ fn dashboard_router(state: DashboardState) -> Router {
         .route("/", get(index_html))
         .route("/api/status", get(api_status))
         .route("/api/diagnostics", get(api_diagnostics))
+        .route("/api/share-info", get(api_share_info))
         .route("/api/peers", get(api_peers))
         .route("/api/builds", get(api_builds))
         .route("/api/build/:hash", get(api_build_detail))
@@ -358,6 +359,10 @@ async fn api_status(State(state): State<DashboardState>) -> Json<ApiStatus> {
 
 async fn api_diagnostics(State(state): State<DashboardState>) -> Json<DiagnosticReport> {
     Json(diagnostics::diagnostic_report(&state.config, &state.peer_id))
+}
+
+async fn api_share_info(State(state): State<DashboardState>) -> Json<BootstrapBundle> {
+    Json(diagnostics::bootstrap_bundle(&state.config, &state.peer_id))
 }
 
 async fn api_peers(State(state): State<DashboardState>) -> Json<Vec<ApiPeer>> {
@@ -950,6 +955,22 @@ mod tests {
         assert_eq!(report.connectivity.state, "shareable");
         assert!(report.checks.iter().any(|check| check.id == "bootstrap-peers"));
         assert!(report.checks.iter().any(|check| check.id == "shareable-address"));
+    }
+
+    #[tokio::test]
+    async fn share_info_api_returns_bootstrap_bundle() {
+        let (mut state, _tmp) = dashboard_state();
+        let peer = libp2p::PeerId::random();
+        state.peer_id = peer.to_string();
+
+        let bundle = api_share_info(State(state)).await.0;
+
+        assert_eq!(bundle.peer_id, peer.to_string());
+        assert_eq!(
+            bundle.bootstrap_peers,
+            vec![format!("/dns4/node.example.org/udp/6881/quic-v1/p2p/{peer}")]
+        );
+        assert!(bundle.config_snippet.contains("bootstrap_peers ="));
     }
 
     #[tokio::test]

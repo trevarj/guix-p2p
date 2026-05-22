@@ -91,9 +91,15 @@ The dashboard header includes:
 - `NET`: static connectivity readiness.
 
 Open `NET` to inspect the full diagnostic report without leaving the dashboard.
+Use `copy peer` to copy the same bootstrap bundle as `guix-p2p --share-info
+--json`.
 
 Use `/api/status` for machine-readable state. It includes `connectivity`,
 `bootstrap_peer_count`, `shareable_addresses`, and the local PeerId.
+
+Use `/api/share-info` for the daemon's shareable bootstrap bundle. It includes
+the local PeerId, shareable multiaddrs, optional dashboard URL, diagnostic
+summary flags, and a paste-ready `bootstrap_peers` config snippet.
 
 Use `/api/diagnostics` for the dashboard daemon's full doctor-style report. It
 returns the same `connectivity`, `checks`, `has_errors`, and `has_warnings`
