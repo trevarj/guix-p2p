@@ -200,15 +200,7 @@ pub fn run_config_diagnostics(config: &Config, peer_id: &str) -> Vec<DiagnosticC
         DiagnosticSeverity::Error,
     ));
 
-    checks.push(path_check(
-        "socket",
-        Path::new(&config.socket_path),
-        Path::new(&config.socket_path).exists(),
-        "daemon socket exists",
-        "daemon socket not present",
-        "expected before relay/wrapper mode can route Guix substitute traffic through the daemon",
-        DiagnosticSeverity::Warning,
-    ));
+    checks.push(daemon_socket_check(&config.socket_path));
 
     checks.push(guix_integration_check());
 
@@ -314,6 +306,69 @@ fn path_check(
         severity: if exists { DiagnosticSeverity::Ok } else { missing_severity },
         summary: if exists { ok_summary } else { missing_summary }.to_string(),
         detail: if exists { path.display().to_string() } else { missing_detail.to_string() },
+    }
+}
+
+#[cfg(unix)]
+fn daemon_socket_check(socket_path: &str) -> DiagnosticCheck {
+    use std::os::unix::{fs::FileTypeExt, net::UnixStream};
+
+    let path = Path::new(socket_path);
+    let metadata = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return DiagnosticCheck {
+                id: "daemon",
+                severity: DiagnosticSeverity::Error,
+                summary: "guix-p2p daemon is not running".to_string(),
+                detail: format!(
+                    "daemon socket {} is not present: {error}; start guix-p2p --daemon with the \
+                     configured socket path",
+                    path.display()
+                ),
+            };
+        },
+    };
+
+    if !metadata.file_type().is_socket() {
+        return DiagnosticCheck {
+            id: "daemon",
+            severity: DiagnosticSeverity::Error,
+            summary: "daemon socket path is not a Unix socket".to_string(),
+            detail: format!(
+                "{} exists but is not a Unix socket; remove it and restart guix-p2p --daemon",
+                path.display()
+            ),
+        };
+    }
+
+    match UnixStream::connect(path) {
+        Ok(_) => DiagnosticCheck {
+            id: "daemon",
+            severity: DiagnosticSeverity::Ok,
+            summary: "guix-p2p daemon accepts relay connections".to_string(),
+            detail: path.display().to_string(),
+        },
+        Err(error) => DiagnosticCheck {
+            id: "daemon",
+            severity: DiagnosticSeverity::Error,
+            summary: "guix-p2p daemon is not accepting relay connections".to_string(),
+            detail: format!(
+                "failed to connect to {}: {error}; the socket may be stale or the daemon may be \
+                 stopped",
+                path.display()
+            ),
+        },
+    }
+}
+
+#[cfg(not(unix))]
+fn daemon_socket_check(socket_path: &str) -> DiagnosticCheck {
+    DiagnosticCheck {
+        id: "daemon",
+        severity: DiagnosticSeverity::Error,
+        summary: "guix-p2p daemon check requires Unix sockets".to_string(),
+        detail: format!("{socket_path} cannot be checked on this platform"),
     }
 }
 
@@ -600,7 +655,7 @@ pub fn format_diagnostics_with_color(checks: &[DiagnosticCheck], color: bool) ->
                 "nat-address",
             ],
         ),
-        ("Runtime", &["cache-dir", "socket"]),
+        ("Runtime", &["cache-dir", "daemon"]),
     ];
 
     for (title, ids) in sections {
@@ -901,6 +956,45 @@ mod tests {
 
         assert!(formatted.contains("\x1b["));
         assert!(formatted.contains("identity"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn daemon_socket_check_accepts_live_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guix-p2p.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+
+        let check = daemon_socket_check(path.to_str().unwrap());
+
+        assert_eq!(check.id, "daemon");
+        assert_eq!(check.severity, DiagnosticSeverity::Ok);
+    }
+
+    #[test]
+    fn daemon_socket_check_errors_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.sock");
+
+        let check = daemon_socket_check(path.to_str().unwrap());
+
+        assert_eq!(check.id, "daemon");
+        assert_eq!(check.severity, DiagnosticSeverity::Error);
+        assert!(check.summary.contains("not running"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn daemon_socket_check_rejects_regular_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guix-p2p.sock");
+        std::fs::write(&path, "not a socket").unwrap();
+
+        let check = daemon_socket_check(path.to_str().unwrap());
+
+        assert_eq!(check.id, "daemon");
+        assert_eq!(check.severity, DiagnosticSeverity::Error);
+        assert!(check.summary.contains("not a Unix socket"));
     }
 
     #[test]

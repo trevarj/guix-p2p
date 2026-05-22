@@ -66,9 +66,10 @@ Use:
 Check:
 
 - `guix-p2p --daemon` is running.
-- the configured `socket_path` exists.
+- the configured `socket_path` is a Unix socket that accepts connections.
 - the wrapper or Guix extension is active in the daemon environment.
 - `GUIX_EXTENSIONS_PATH` includes the extension path when using the raw daemon
   integration.
 
-`--doctor` reports whether the socket path exists at the time it runs.
+`--doctor` reports whether the daemon socket is live at the time it runs. A
+stale socket file is reported as an error.

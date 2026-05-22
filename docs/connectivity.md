@@ -25,7 +25,9 @@ The command checks local prerequisites:
 - configured external address multiaddrs are valid
 - external addresses can produce a shareable `/p2p/<peer-id>` multiaddr
 - private or loopback external addresses are flagged
-- cache directory, daemon socket, ACL path, and substitute URLs are visible
+- cache directory, ACL path, and substitute URLs are visible
+- the configured daemon socket exists, is a Unix socket, and accepts a relay
+  connection
 - running `guix-daemon` environment appears to have the guix-p2p substitute
   extension or legacy wrapper enabled
 

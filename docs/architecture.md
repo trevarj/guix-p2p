@@ -82,7 +82,8 @@ guix-p2p (Rust, libp2p)
   ├─► Diagnostics
   │    `--doctor` and dashboard `/api/status` connectivity summary
   │    Flags missing bootstrap peers, missing shareable addresses, private
-  │    external addresses, missing socket, missing ACL, and substitute URL setup
+  │    external addresses, stopped daemon socket, missing ACL, and substitute
+  │    URL setup
   │
   └─► HTTP Narinfo Client (reqwest)
        Narinfo fetch from official substitute URLs

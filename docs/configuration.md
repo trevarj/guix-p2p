@@ -15,8 +15,9 @@ guix-p2p --doctor
 ```
 
 `--doctor` loads the same config and reports bootstrap, shareable address,
-cache, socket, ACL, and substitute URL readiness. It is a local setup check, not
-a remote dialability proof. Add `--json` for machine-readable output.
+cache, live daemon socket, ACL, and substitute URL readiness. It is a local
+setup check, not a remote dialability proof. Add `--json` for machine-readable
+output.
 
 Create the starter config with:
 
