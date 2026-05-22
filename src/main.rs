@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Context;
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use guix_p2p::{
     bandwidth::{BandwidthConfig, BandwidthLimiter},
     channel::{SwarmCommand, SwarmNotification},
@@ -13,6 +13,7 @@ use guix_p2p::{
 
 #[derive(Parser)]
 #[command(name = "guix-p2p", version)]
+#[command(group(ArgGroup::new("json_output_mode").args(["doctor", "share_info"])))]
 struct Cli {
     /// Run in query mode (driven by guix-daemon --query)
     #[arg(long, conflicts_with_all = ["substitute", "daemon"])]
@@ -27,16 +28,20 @@ struct Cli {
     daemon: bool,
 
     /// Run local readiness checks for tester rollout and connectivity setup
-    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "init"])]
+    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "init", "share_info"])]
     doctor: bool,
 
-    /// Emit machine-readable JSON for --doctor
-    #[arg(long, requires = "doctor")]
+    /// Emit machine-readable JSON for --doctor or --share-info
+    #[arg(long, requires = "json_output_mode")]
     json: bool,
 
     /// Create a starter config file without overwriting an existing one
-    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor"])]
+    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor", "share_info"])]
     init: bool,
+
+    /// Print shareable bootstrap information for testers
+    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor", "init"])]
+    share_info: bool,
 
     /// Comma-separated list of bootstrap peer multiaddrs
     #[arg(long, global = true)]
@@ -102,7 +107,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let default_log_filter = if cli.doctor || cli.init { "warn" } else { "info" };
+    let default_log_filter = if cli.doctor || cli.init || cli.share_info { "warn" } else { "info" };
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -211,6 +216,17 @@ async fn main() -> anyhow::Result<()> {
         }
         if report.has_errors {
             std::process::exit(2);
+        }
+        return Ok(());
+    }
+
+    if cli.share_info {
+        let peer_id = peer_id.to_string();
+        let bundle = guix_p2p::diagnostics::bootstrap_bundle(&config, &peer_id);
+        if cli.json {
+            println!("{}", serde_json::to_string_pretty(&bundle)?);
+        } else {
+            print!("{}", guix_p2p::diagnostics::format_bootstrap_bundle(&bundle));
         }
         return Ok(());
     }

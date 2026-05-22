@@ -39,6 +39,19 @@ pub struct DiagnosticReport {
     pub has_warnings: bool,
 }
 
+/// Shareable peer information for onboarding testers and bootstrap nodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BootstrapBundle {
+    pub peer_id: String,
+    pub connectivity: ConnectivitySummary,
+    pub shareable_addresses: Vec<String>,
+    pub bootstrap_peers: Vec<String>,
+    pub dashboard_url: Option<String>,
+    pub has_errors: bool,
+    pub has_warnings: bool,
+    pub config_snippet: String,
+}
+
 /// Compact connectivity status shown by the dashboard and `--doctor`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConnectivitySummary {
@@ -226,6 +239,22 @@ pub fn diagnostic_report(config: &Config, peer_id: &str) -> DiagnosticReport {
     }
 }
 
+/// Build the shareable bootstrap bundle for this node.
+pub fn bootstrap_bundle(config: &Config, peer_id: &str) -> BootstrapBundle {
+    let report = diagnostic_report(config, peer_id);
+    let shareable_addresses = report.connectivity.shareable_addresses.clone();
+    BootstrapBundle {
+        peer_id: peer_id.to_string(),
+        connectivity: report.connectivity,
+        bootstrap_peers: shareable_addresses.clone(),
+        shareable_addresses: shareable_addresses.clone(),
+        dashboard_url: dashboard_url(config),
+        has_errors: report.has_errors,
+        has_warnings: report.has_warnings,
+        config_snippet: bootstrap_config_snippet(&shareable_addresses),
+    }
+}
+
 /// Return true when any diagnostic check is an error.
 pub fn has_diagnostic_errors(checks: &[DiagnosticCheck]) -> bool {
     checks.iter().any(|check| check.severity == DiagnosticSeverity::Error)
@@ -321,6 +350,25 @@ fn bootstrap_peers_without_peer_id(values: &[String]) -> Vec<String> {
         .collect()
 }
 
+fn dashboard_url(config: &Config) -> Option<String> {
+    if !config.dashboard_enabled {
+        return None;
+    }
+    let host = match config.dashboard_bind.as_str() {
+        "0.0.0.0" | "::" => "127.0.0.1",
+        bind => bind,
+    };
+    Some(format!("http://{host}:{}", config.dashboard_port))
+}
+
+fn bootstrap_config_snippet(bootstrap_peers: &[String]) -> String {
+    if bootstrap_peers.is_empty() {
+        "# Set external_addresses first, then run guix-p2p --share-info again.".to_string()
+    } else {
+        format!("bootstrap_peers = \"{}\"", bootstrap_peers.join(","))
+    }
+}
+
 fn ipv4_is_private_or_loopback(ip: Ipv4Addr) -> bool {
     ip.is_private() || ip.is_loopback() || ip.is_link_local()
 }
@@ -342,6 +390,37 @@ pub fn format_diagnostics(checks: &[DiagnosticCheck]) -> String {
             "{marker:5} {:20} {}\n      {}\n",
             check.id, check.summary, check.detail
         ));
+    }
+    out
+}
+
+/// Format the bootstrap bundle as a terminal-friendly report.
+pub fn format_bootstrap_bundle(bundle: &BootstrapBundle) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("peer id: {}\n", bundle.peer_id));
+    out.push_str(&format!(
+        "network: {} ({})\n",
+        bundle.connectivity.state, bundle.connectivity.detail
+    ));
+    if let Some(url) = &bundle.dashboard_url {
+        out.push_str(&format!("dashboard: {url}\n"));
+    }
+    out.push_str("shareable addresses:\n");
+    if bundle.shareable_addresses.is_empty() {
+        out.push_str("  none\n");
+    } else {
+        for address in &bundle.shareable_addresses {
+            out.push_str(&format!("  {address}\n"));
+        }
+    }
+    out.push_str("tester config:\n");
+    out.push_str(&format!("  {}\n", bundle.config_snippet));
+    if bundle.has_errors {
+        out.push_str("status: diagnostics have errors; run guix-p2p --doctor\n");
+    } else if bundle.has_warnings {
+        out.push_str("status: diagnostics have warnings; run guix-p2p --doctor\n");
+    } else {
+        out.push_str("status: ready\n");
     }
     out
 }
@@ -467,5 +546,35 @@ mod tests {
         assert!(report.has_errors);
         assert!(report.has_warnings);
         assert_eq!(report.connectivity.state, "local-only");
+    }
+
+    #[test]
+    fn bootstrap_bundle_includes_paste_ready_config() {
+        let peer = libp2p::PeerId::random().to_string();
+        let config = config_with_addresses(
+            vec!["/dns4/node.example.org/udp/6881/quic-v1".to_string()],
+            vec![],
+        );
+
+        let bundle = bootstrap_bundle(&config, &peer);
+
+        assert_eq!(bundle.bootstrap_peers, bundle.shareable_addresses);
+        assert_eq!(
+            bundle.config_snippet,
+            format!("bootstrap_peers = \"/dns4/node.example.org/udp/6881/quic-v1/p2p/{peer}\"")
+        );
+    }
+
+    #[test]
+    fn bootstrap_bundle_includes_dashboard_url_when_enabled() {
+        let peer = libp2p::PeerId::random().to_string();
+        let mut config = config_with_addresses(vec![], vec![]);
+        config.dashboard_enabled = true;
+        config.dashboard_bind = "0.0.0.0".to_string();
+        config.dashboard_port = 3030;
+
+        let bundle = bootstrap_bundle(&config, &peer);
+
+        assert_eq!(bundle.dashboard_url.as_deref(), Some("http://127.0.0.1:3030"));
     }
 }

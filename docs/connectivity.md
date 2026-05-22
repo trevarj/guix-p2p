@@ -26,6 +26,22 @@ The command checks local prerequisites:
 `--doctor` does not prove that another machine can dial the node. It catches
 the common local setup mistakes before testers start transferring data.
 
+## Bootstrap Bundle
+
+```sh
+guix-p2p --share-info
+```
+
+`--share-info` prints the local PeerId, derived shareable multiaddrs, dashboard
+URL when enabled, and a paste-ready `bootstrap_peers = "..."` TOML line for
+other testers.
+
+Use JSON for scripts or issue templates:
+
+```sh
+guix-p2p --share-info --json
+```
+
 ## NAT And Firewalls
 
 For remote peers to dial a home node:

@@ -136,6 +136,28 @@ mod cli_contract {
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("required"));
     }
+
+    #[test]
+    fn share_info_json_outputs_bootstrap_bundle() {
+        let cache_dir = format!("/tmp/guix-p2p-share-info-{}", std::process::id());
+        let output = Command::new(binary())
+            .args([
+                "--share-info",
+                "--json",
+                "--cache-dir",
+                &cache_dir,
+                "--external-addresses",
+                "/dns4/node.example.org/udp/6881/quic-v1",
+            ])
+            .output()
+            .unwrap();
+
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("\"peer_id\""));
+        assert!(stdout.contains("\"bootstrap_peers\""));
+        assert!(stdout.contains("bootstrap_peers ="));
+    }
 }
 
 // ======================================================================
