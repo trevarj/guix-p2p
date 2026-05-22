@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Policy controlling how substitutes are sourced when both P2P and HTTP are available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Default)]
@@ -114,6 +114,23 @@ pub struct Config {
     pub local_narinfo_path: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct InitConfigOptions {
+    pub bootstrap_peers: Option<String>,
+    pub external_addresses: Option<String>,
+    pub listen_addr: Option<String>,
+    pub cache_dir: Option<String>,
+    pub substitute_urls: Option<String>,
+    pub substitute_policy: Option<SubstitutePolicy>,
+    pub socket_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InitConfigResult {
+    Created,
+    AlreadyExists,
+}
+
 impl Config {
     pub fn load(
         cli_bootstrap: Option<String>,
@@ -192,6 +209,10 @@ impl Config {
     }
 }
 
+pub fn user_config_path() -> PathBuf {
+    config_dir().join("config.toml")
+}
+
 fn config_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("XDG_CONFIG_HOME") {
         PathBuf::from(dir).join("guix-p2p")
@@ -202,7 +223,7 @@ fn config_dir() -> PathBuf {
 }
 
 fn load_config_file() -> ConfigFile {
-    let path = config_dir().join("config.toml");
+    let path = user_config_path();
     match std::fs::read_to_string(&path) {
         Ok(content) => match toml::from_str(&content) {
             Ok(cfg) => {
@@ -216,6 +237,73 @@ fn load_config_file() -> ConfigFile {
         },
         Err(_) => ConfigFile::default(),
     }
+}
+
+pub fn write_initial_config(
+    path: &Path,
+    options: InitConfigOptions,
+) -> anyhow::Result<InitConfigResult> {
+    if path.exists() {
+        return Ok(InitConfigResult::AlreadyExists);
+    }
+    let parent = path.parent().ok_or_else(|| anyhow::anyhow!("config path has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    std::fs::write(path, initial_config_template(options))?;
+    Ok(InitConfigResult::Created)
+}
+
+fn initial_config_template(options: InitConfigOptions) -> String {
+    let listen_addr =
+        options.listen_addr.unwrap_or_else(|| "/ip4/0.0.0.0/udp/6881/quic-v1".to_string());
+    let cache_dir = options.cache_dir.unwrap_or_else(|| dirs_cache_dir().display().to_string());
+    let socket_path = options
+        .socket_path
+        .unwrap_or_else(|| PathBuf::from(&cache_dir).join("guix-p2p.sock").display().to_string());
+    let substitute_urls =
+        options.substitute_urls.unwrap_or_else(|| default_substitute_urls().join(","));
+    let policy = options.substitute_policy.unwrap_or_default();
+    let bootstrap_peers = options.bootstrap_peers.unwrap_or_default();
+    let external_addresses = options.external_addresses.unwrap_or_default();
+
+    format!(
+        r#"# guix-p2p tester configuration
+# Run `guix-p2p --doctor` after editing this file.
+
+listen_addr = {listen_addr}
+bootstrap_peers = {bootstrap_peers}
+enable_default_bootstrap_peers = true
+peer_store_enabled = true
+peer_store_max_entries = 100
+
+# Set this when peers outside your LAN should dial this node.
+# Example: "/dns4/node.example.org/udp/6881/quic-v1"
+external_addresses = {external_addresses}
+
+cache_dir = {cache_dir}
+socket_path = {socket_path}
+
+substitute_policy = {policy}
+substitute_urls = {substitute_urls}
+min_providers = 3
+
+dashboard_enabled = true
+dashboard_bind = "127.0.0.1"
+dashboard_port = 3030
+
+seed_paths = []
+"#,
+        listen_addr = toml_string(&listen_addr),
+        bootstrap_peers = toml_string(&bootstrap_peers),
+        external_addresses = toml_string(&external_addresses),
+        cache_dir = toml_string(&cache_dir),
+        socket_path = toml_string(&socket_path),
+        policy = toml_string(&policy.to_string()),
+        substitute_urls = toml_string(&substitute_urls),
+    )
+}
+
+fn toml_string(value: &str) -> String {
+    toml_edit::Value::from(value).to_string()
 }
 
 fn dirs_cache_dir() -> PathBuf {
@@ -315,5 +403,36 @@ mod tests {
         assert_eq!(peers.len(), 2);
         assert_eq!(peers[0], "/ip4/127.0.0.1/tcp/1/p2p/a");
         assert_eq!(peers[1], "/ip4/127.0.0.1/tcp/2/p2p/b");
+    }
+
+    #[test]
+    fn init_config_creates_template_without_overwriting() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("guix-p2p/config.toml");
+
+        let result = write_initial_config(
+            &path,
+            InitConfigOptions {
+                bootstrap_peers: Some(
+                    "/dns4/bootstrap.example.org/udp/6881/quic-v1/p2p/12D3KooWboot".to_string(),
+                ),
+                external_addresses: Some("/dns4/node.example.org/udp/6881/quic-v1".to_string()),
+                substitute_policy: Some(SubstitutePolicy::HttpFirst),
+                ..InitConfigOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result, InitConfigResult::Created);
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("bootstrap.example.org"));
+        assert!(content.contains("node.example.org"));
+        assert!(content.contains("substitute_policy = \"http-first\""));
+
+        std::fs::write(&path, "sentinel = true\n").unwrap();
+        let result = write_initial_config(&path, InitConfigOptions::default()).unwrap();
+
+        assert_eq!(result, InitConfigResult::AlreadyExists);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "sentinel = true\n");
     }
 }

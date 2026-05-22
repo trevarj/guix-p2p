@@ -15,6 +15,16 @@ export GUIX_P2P_CACHE="$HOME/.cache/guix-p2p"
 
 ## Check Readiness
 
+Create a starter config:
+
+```sh
+guix-p2p --init
+```
+
+This writes `$XDG_CONFIG_HOME/guix-p2p/config.toml`, or
+`~/.config/guix-p2p/config.toml` when `XDG_CONFIG_HOME` is unset. It does not
+overwrite an existing file.
+
 ```sh
 guix-p2p --doctor --cache-dir "$GUIX_P2P_CACHE"
 ```

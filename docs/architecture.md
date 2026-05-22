@@ -27,6 +27,8 @@ The binary runs in three operational modes plus diagnostics:
 - **Doctor** (`--doctor`): Local readiness checks for tester rollout. It loads
   config and identity, then reports bootstrap peer, shareable address, cache,
   socket, ACL, and substitute URL readiness without starting the swarm.
+- **Init** (`--init`): Non-destructive first-run helper that writes a starter
+  `$XDG_CONFIG_HOME/guix-p2p/config.toml` when no config exists.
 
 ## Data Flow
 

@@ -23,12 +23,16 @@ struct Cli {
     substitute: bool,
 
     /// Run as a persistent background daemon
-    #[arg(long, conflicts_with_all = ["query", "substitute", "doctor"])]
+    #[arg(long, conflicts_with_all = ["query", "substitute", "doctor", "init"])]
     daemon: bool,
 
     /// Run local readiness checks for tester rollout and connectivity setup
-    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon"])]
+    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "init"])]
     doctor: bool,
+
+    /// Create a starter config file without overwriting an existing one
+    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor"])]
+    init: bool,
 
     /// Comma-separated list of bootstrap peer multiaddrs
     #[arg(long, global = true)]
@@ -100,6 +104,35 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
+
+    if cli.init {
+        let path = config::user_config_path();
+        let result = config::write_initial_config(
+            &path,
+            config::InitConfigOptions {
+                bootstrap_peers: cli.bootstrap_peers.clone(),
+                external_addresses: cli.external_addresses.clone(),
+                listen_addr: cli.listen_addr.clone(),
+                cache_dir: cli.cache_dir.clone(),
+                substitute_urls: cli.substitute_urls.clone(),
+                substitute_policy: cli.policy,
+                socket_path: cli.socket.clone(),
+            },
+        )?;
+        match result {
+            config::InitConfigResult::Created => {
+                println!("created {}", path.display());
+                println!(
+                    "next: edit bootstrap_peers/external_addresses, then run guix-p2p --doctor"
+                );
+            },
+            config::InitConfigResult::AlreadyExists => {
+                println!("exists {}", path.display());
+                println!("not overwriting existing config");
+            },
+        }
+        return Ok(());
+    }
 
     let mut config = config::Config::load(
         cli.bootstrap_peers,
@@ -360,7 +393,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .await?
     } else {
-        tracing::error!("No mode specified. Use --query, --substitute, --daemon, or --doctor.");
+        tracing::error!(
+            "No mode specified. Use --query, --substitute, --daemon, --doctor, or --init."
+        );
         std::process::exit(1);
     }
 

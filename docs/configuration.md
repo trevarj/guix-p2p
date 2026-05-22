@@ -18,6 +18,17 @@ guix-p2p --doctor
 cache, socket, ACL, and substitute URL readiness. It is a local setup check, not
 a remote dialability proof.
 
+Create the starter config with:
+
+```sh
+guix-p2p --init
+```
+
+`--init` writes the config path above and refuses to overwrite an existing file.
+CLI values such as `--bootstrap-peers`, `--external-addresses`, `--listen-addr`,
+`--cache-dir`, `--socket`, `--substitute-urls`, and `--policy` are copied into
+the generated template.
+
 ## Example
 
 ```toml
