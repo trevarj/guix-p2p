@@ -2,6 +2,7 @@ use std::{
     cmp::Reverse,
     collections::HashSet,
     fs,
+    net::IpAddr,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -60,7 +61,7 @@ impl PeerStore {
 
     /// Record a reachable address for a peer.
     pub fn record_address(&mut self, peer: PeerId, address: &Multiaddr) {
-        let Some(address) = clean_address(address) else {
+        let Some(address) = clean_peer_address(address) else {
             return;
         };
         let now = now_unix();
@@ -88,7 +89,7 @@ impl PeerStore {
 
     /// Remove a failed address for a peer from the persistent peer store.
     pub fn remove_address(&mut self, peer: PeerId, address: &Multiaddr) {
-        let Some(address) = clean_address(address) else {
+        let Some(address) = normalize_address(address) else {
             return;
         };
         let peer_id = peer.to_string();
@@ -130,19 +131,37 @@ impl PeerStoreEntry {
     fn full_multiaddr(&self) -> Option<Multiaddr> {
         let peer_id = self.peer_id.parse::<PeerId>().ok()?;
         let address = self.address.parse::<Multiaddr>().ok()?;
-        clean_address(&address).map(|addr| addr.with(Protocol::P2p(peer_id)))
+        clean_peer_address(&address).map(|addr| addr.with(Protocol::P2p(peer_id)))
     }
 }
 
-fn clean_address(address: &Multiaddr) -> Option<Multiaddr> {
+fn normalize_address(address: &Multiaddr) -> Option<Multiaddr> {
     let mut addr = address.clone();
     if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
         addr.pop();
     }
+    Some(addr)
+}
+
+fn clean_address(address: &Multiaddr) -> Option<Multiaddr> {
+    let addr = normalize_address(address)?;
     if is_unspecified(&addr) {
         return None;
     }
     if is_loopback(&addr) {
+        return None;
+    }
+    Some(addr)
+}
+
+/// Return true when an address can be learned as a remote peer address.
+pub fn is_peer_address(address: &Multiaddr) -> bool {
+    clean_peer_address(address).is_some()
+}
+
+fn clean_peer_address(address: &Multiaddr) -> Option<Multiaddr> {
+    let addr = clean_address(address)?;
+    if is_local_interface_address(&addr) {
         return None;
     }
     Some(addr)
@@ -162,6 +181,26 @@ fn is_loopback(address: &Multiaddr) -> bool {
         Protocol::Ip6(ip) => ip.is_loopback(),
         _ => false,
     })
+}
+
+fn is_local_interface_address(address: &Multiaddr) -> bool {
+    let Some(ip) = multiaddr_ip(address) else {
+        return false;
+    };
+    local_interface_ips().is_ok_and(|ips| ips.contains(&ip))
+}
+
+fn multiaddr_ip(address: &Multiaddr) -> Option<IpAddr> {
+    address.iter().find_map(|protocol| match protocol {
+        Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+        Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+        _ => None,
+    })
+}
+
+fn local_interface_ips() -> std::io::Result<HashSet<IpAddr>> {
+    let interfaces = if_addrs::get_if_addrs()?;
+    Ok(interfaces.into_iter().map(|iface| iface.ip()).collect())
 }
 
 fn now_unix() -> u64 {
@@ -241,6 +280,24 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let peer = PeerId::random();
         let addr: Multiaddr = "/ip4/127.0.0.1/tcp/6881".parse().unwrap();
+        let mut store = PeerStore::load(tmp.path(), 8);
+
+        store.record_address(peer, &addr);
+
+        assert!(store.bootstrap_peers().is_empty());
+    }
+
+    #[test]
+    fn peer_store_skips_local_interface_addresses() {
+        let Some(ip) = local_interface_ips()
+            .ok()
+            .and_then(|ips| ips.into_iter().find(|ip| !ip.is_loopback() && ip.is_ipv4()))
+        else {
+            return;
+        };
+        let tmp = tempfile::TempDir::new().unwrap();
+        let peer = PeerId::random();
+        let addr: Multiaddr = format!("/ip4/{ip}/tcp/6881").parse().unwrap();
         let mut store = PeerStore::load(tmp.path(), 8);
 
         store.record_address(peer, &addr);

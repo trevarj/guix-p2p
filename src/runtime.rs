@@ -14,7 +14,7 @@ use crate::{
     connection::ConnectionManager,
     dashboard, dht,
     nar_store::NarStore,
-    peer_store::PeerStore,
+    peer_store::{self, PeerStore},
     reputation::ReputationTracker,
     swarm::codec::{BlockRequest, BlockResponse},
 };
@@ -64,17 +64,33 @@ pub async fn run_swarm_task(
                     SwarmEvent::Behaviour(GuixP2PEvent::Mdns(libp2p::mdns::Event::Discovered(list))) => {
                         for (peer_id, addr) in list {
                             tracing::info!("Discovered LAN peer {} at {}", peer_id, addr);
-                            record_peer_address(&peer_store, peer_id, &addr);
-                            swarm.behaviour_mut().kad.add_address(&peer_id, addr);
+                            if peer_store::is_peer_address(&addr) {
+                                record_peer_address(&peer_store, peer_id, &addr);
+                                swarm.behaviour_mut().kad.add_address(&peer_id, addr);
+                            } else {
+                                tracing::debug!(
+                                    "ignored non-dialable discovered peer address {} for {}",
+                                    addr,
+                                    peer_id
+                                );
+                            }
                         }
                     },
                     SwarmEvent::Behaviour(GuixP2PEvent::Identify(e)) => {
                         if let libp2p::identify::Event::Received { peer_id, info, .. } = *e {
                             for addr in info.listen_addrs {
                                 tracing::debug!("Identify learned peer {} at {}", peer_id, addr);
-                                conn_mgr.lock().unwrap().add_address(peer_id, addr.to_string());
-                                record_peer_address(&peer_store, peer_id, &addr);
-                                swarm.behaviour_mut().kad.add_address(&peer_id, addr);
+                                if peer_store::is_peer_address(&addr) {
+                                    conn_mgr.lock().unwrap().add_address(peer_id, addr.to_string());
+                                    record_peer_address(&peer_store, peer_id, &addr);
+                                    swarm.behaviour_mut().kad.add_address(&peer_id, addr);
+                                } else {
+                                    tracing::debug!(
+                                        "ignored non-dialable identify address {} for {}",
+                                        addr,
+                                        peer_id
+                                    );
+                                }
                             }
                         }
                     },

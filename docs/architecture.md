@@ -380,6 +380,7 @@ Narinfo flow:
 | `zstd` | Zstd decompression for HTTP nar downloads |
 | `lzma-rust2` | Lzip decompression for HTTP nar downloads |
 | `leaky-bucket` | Shared async upload/download rate limiting |
+| `if-addrs` | Local interface address detection for peer-address pruning |
 | `serde_bytes` | Efficient byte slice serialization for protocol messages |
 | `clap` | CLI argument parsing |
 | `tracing` / `tracing-subscriber` | Structured logging with env-filter |

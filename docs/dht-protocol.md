@@ -72,11 +72,13 @@ added later without changing user config. Users can add known peers via the
 `--bootstrap-peers` CLI flag or `bootstrap_peers` in the config file.
 
 Reachable peers learned from successful dials, identify, and mDNS are persisted
-under `cache_dir` when `peer_store_enabled = true`. Loopback and unspecified
-addresses are not persisted. Persisted peers are merged into the next startup
-bootstrap set and do not rewrite the user's TOML config. If a persisted address
-fails during an outbound dial, that address is removed from the peer store and
-the active Kademlia routing table.
+under `cache_dir` when `peer_store_enabled = true`. Loopback, unspecified, and
+local-interface addresses are not persisted or inserted into the active
+Kademlia routing table. This avoids remembering stale peers from local test
+daemons or VPN/TUN interfaces on the same host. Persisted peers are merged into
+the next startup bootstrap set and do not rewrite the user's TOML config. If a
+persisted address fails during an outbound dial, that address is removed from
+the peer store and the active Kademlia routing table.
 
 Nodes can also set `external_addresses` or `--external-addresses` when the
 dialable address differs from the local listen address. Those addresses are
