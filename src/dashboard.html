@@ -693,7 +693,7 @@ function openDiagnosticsDetail(){
 }
 
 function eventCategory(cls){
-  if(cls==='peer-conn'||cls==='peer-disc')return'peer';
+  if(cls==='peer-conn'||cls==='peer-disc'||cls==='peer-dial'||cls==='peer-fail')return'peer';
   if(cls==='seed-add')return'seed';
   if(cls==='providers'||cls==='catalog')return'discovery';
   if(cls==='dl-fail')return'failure';
@@ -1274,8 +1274,24 @@ function handleEvent(e,meta){
 
     case 'PeerDisconnected':
       if(PEERS[e.peer_id])PEERS[e.peer_id].connected=false;
-      addEvent('peer-disc','-','Peer '+peerIdShort(e.peer_id)+' disconnected',meta);
+      addEvent('peer-disc','-','Peer '+peerIdShort(e.peer_id)+' disconnected'+(e.reason?': '+e.reason:''),meta);
       renderPeers();
+      break;
+
+    case 'PeerDialStarted':
+      addEvent('peer-dial','>','Dialing peer '+(e.peer_id?peerIdShort(e.peer_id):'unknown'),meta);
+      break;
+
+    case 'PeerDialFailed':
+      addEvent('peer-fail','x','Dial failed for '+(e.peer_id?peerIdShort(e.peer_id):'unknown')+': '+(e.reason||'unknown'),meta);
+      break;
+
+    case 'PeerInboundStarted':
+      addEvent('peer-dial','<','Inbound peer attempt from '+(e.address||'unknown'),meta);
+      break;
+
+    case 'PeerInboundFailed':
+      addEvent('peer-fail','x','Inbound peer failed from '+(e.peer_id?peerIdShort(e.peer_id):e.address||'unknown')+': '+(e.reason||'unknown'),meta);
       break;
 
     case 'ProvidersFound':

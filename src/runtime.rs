@@ -98,12 +98,43 @@ pub async fn run_swarm_task(
                         });
                         tracing::debug!("Connection established with {}", peer_id);
                     },
-                    SwarmEvent::ConnectionClosed { peer_id, .. } => {
+                    SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                         conn_mgr.lock().unwrap().on_disconnected(peer_id);
+                        let reason = cause.as_ref().map(|cause| cause.to_string());
                         let _ = event_tx.send(dashboard::DashboardEvent::PeerDisconnected {
                             peer_id: peer_id.to_string(),
+                            reason,
                         });
                         tracing::debug!("Connection closed with {}", peer_id);
+                    },
+                    SwarmEvent::Dialing { peer_id, .. } => {
+                        let _ = event_tx.send(dashboard::DashboardEvent::PeerDialStarted {
+                            peer_id: peer_id.map(|peer_id| peer_id.to_string()),
+                        });
+                    },
+                    SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                        let _ = event_tx.send(dashboard::DashboardEvent::PeerDialFailed {
+                            peer_id: peer_id.map(|peer_id| peer_id.to_string()),
+                            reason: error.to_string(),
+                        });
+                        tracing::debug!("Outgoing connection failed: {}", error);
+                    },
+                    SwarmEvent::IncomingConnection { send_back_addr, .. } => {
+                        let _ = event_tx.send(dashboard::DashboardEvent::PeerInboundStarted {
+                            address: send_back_addr.to_string(),
+                        });
+                    },
+                    SwarmEvent::IncomingConnectionError {
+                        peer_id,
+                        send_back_addr,
+                        error,
+                        ..
+                    } => {
+                        let _ = event_tx.send(dashboard::DashboardEvent::PeerInboundFailed {
+                            peer_id: peer_id.map(|peer_id| peer_id.to_string()),
+                            address: send_back_addr.to_string(),
+                            reason: error.to_string(),
+                        });
                     },
                     other => handle_swarm_event(other),
                 }

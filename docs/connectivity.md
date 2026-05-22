@@ -107,6 +107,9 @@ The dashboard header includes:
 Open `NET` to inspect the full diagnostic report without leaving the dashboard.
 Use `copy peer` to copy the same bootstrap bundle as `guix-p2p --share-info
 --json`.
+The events panel records outbound dial attempts, dial failures, inbound
+connection attempts, inbound handshake failures, successful peer connections,
+and disconnect reasons when libp2p reports one.
 
 Use `/api/status` for machine-readable state. It includes `connectivity`,
 `bootstrap_peer_count`, `shareable_addresses`, and the local PeerId.

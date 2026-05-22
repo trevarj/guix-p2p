@@ -756,7 +756,10 @@ Dashboard API endpoints:
   downloaded block counts, downloaded bytes, served block counts, and peer-level
   contribution summaries.
 - `/api/events` returns the latest 500 dashboard events with a monotonic
-  in-memory id, timestamp, and serialized event payload.
+  in-memory id, timestamp, and serialized event payload. Connection events
+  include outbound dial attempts, dial failures, inbound attempts, inbound
+  failures, successful connects, and disconnect reasons when libp2p provides
+  one.
 - `/api/packages` returns installed system and Guix Home packages with seed
   state.
 - `POST /api/seeds` seeds an existing local store path and persists it for

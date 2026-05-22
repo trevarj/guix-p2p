@@ -46,12 +46,28 @@ pub type EventBus = tokio::sync::broadcast::Sender<DashboardEvent>;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum DashboardEvent {
+    PeerDialStarted {
+        peer_id: Option<String>,
+    },
+    PeerDialFailed {
+        peer_id: Option<String>,
+        reason: String,
+    },
+    PeerInboundStarted {
+        address: String,
+    },
+    PeerInboundFailed {
+        peer_id: Option<String>,
+        address: String,
+        reason: String,
+    },
     PeerConnected {
         peer_id: String,
         addresses: Vec<String>,
     },
     PeerDisconnected {
         peer_id: String,
+        reason: Option<String>,
     },
     ProvidersFound {
         nar_hash: String,
@@ -1089,13 +1105,53 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn events_api_returns_connection_attempt_history() {
+        let (state, _tmp) = dashboard_state();
+        record_event_history(
+            &state.event_history,
+            DashboardEvent::PeerDialStarted { peer_id: Some("peer-a".to_string()) },
+        );
+        record_event_history(
+            &state.event_history,
+            DashboardEvent::PeerDialFailed {
+                peer_id: Some("peer-a".to_string()),
+                reason: "transport error".to_string(),
+            },
+        );
+        record_event_history(
+            &state.event_history,
+            DashboardEvent::PeerInboundFailed {
+                peer_id: None,
+                address: "/ip4/198.51.100.10/tcp/1234".to_string(),
+                reason: "handshake failed".to_string(),
+            },
+        );
+
+        let events = api_events(State(state)).await.0;
+
+        assert_eq!(events.len(), 3);
+        match &events[1].event {
+            DashboardEvent::PeerDialFailed { reason, .. } => {
+                assert_eq!(reason, "transport error");
+            },
+            other => panic!("unexpected dashboard event: {other:?}"),
+        }
+        match &events[2].event {
+            DashboardEvent::PeerInboundFailed { address, .. } => {
+                assert_eq!(address, "/ip4/198.51.100.10/tcp/1234");
+            },
+            other => panic!("unexpected dashboard event: {other:?}"),
+        }
+    }
+
     #[test]
     fn event_history_keeps_newest_500_entries() {
         let history = Arc::new(Mutex::new(EventHistory::default()));
         for idx in 0..(EVENT_HISTORY_LIMIT + 3) {
             record_event_history(
                 &history,
-                DashboardEvent::PeerDisconnected { peer_id: format!("peer-{idx}") },
+                DashboardEvent::PeerDisconnected { peer_id: format!("peer-{idx}"), reason: None },
             );
         }
 
