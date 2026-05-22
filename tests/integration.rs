@@ -158,6 +158,26 @@ mod cli_contract {
         assert!(stdout.contains("\"bootstrap_peers\""));
         assert!(stdout.contains("bootstrap_peers ="));
     }
+
+    #[test]
+    fn test_connectivity_json_requires_multiaddr() {
+        let output = Command::new(binary()).arg("--test-connectivity").output().unwrap();
+
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("a value is required"));
+    }
+
+    #[test]
+    fn test_connectivity_rejects_invalid_multiaddr() {
+        let cache_dir = format!("/tmp/guix-p2p-test-connectivity-{}", std::process::id());
+        let output = Command::new(binary())
+            .args(["--test-connectivity", "not-a-multiaddr", "--cache-dir", &cache_dir])
+            .output()
+            .unwrap();
+
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("invalid multiaddr"));
+    }
 }
 
 // ======================================================================

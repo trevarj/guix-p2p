@@ -13,7 +13,7 @@ use guix_p2p::{
 
 #[derive(Parser)]
 #[command(name = "guix-p2p", version)]
-#[command(group(ArgGroup::new("json_output_mode").args(["doctor", "share_info"])))]
+#[command(group(ArgGroup::new("json_output_mode").args(["doctor", "share_info", "test_connectivity"])))]
 struct Cli {
     /// Run in query mode (driven by guix-daemon --query)
     #[arg(long, conflicts_with_all = ["substitute", "daemon"])]
@@ -28,7 +28,7 @@ struct Cli {
     daemon: bool,
 
     /// Run local readiness checks for tester rollout and connectivity setup
-    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "init", "share_info"])]
+    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "init", "share_info", "test_connectivity"])]
     doctor: bool,
 
     /// Emit machine-readable JSON for --doctor or --share-info
@@ -36,12 +36,16 @@ struct Cli {
     json: bool,
 
     /// Create a starter config file without overwriting an existing one
-    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor", "share_info"])]
+    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor", "share_info", "test_connectivity"])]
     init: bool,
 
     /// Print shareable bootstrap information for testers
-    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor", "init"])]
+    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor", "init", "test_connectivity"])]
     share_info: bool,
+
+    /// Actively dial a peer multiaddr and report whether the connection succeeds
+    #[arg(long, value_name = "MULTIADDR", conflicts_with_all = ["query", "substitute", "daemon", "doctor", "init", "share_info"])]
+    test_connectivity: Option<String>,
 
     /// Comma-separated list of bootstrap peer multiaddrs
     #[arg(long, global = true)]
@@ -107,7 +111,12 @@ struct Cli {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let default_log_filter = if cli.doctor || cli.init || cli.share_info { "warn" } else { "info" };
+    let default_log_filter =
+        if cli.doctor || cli.init || cli.share_info || cli.test_connectivity.is_some() {
+            "warn"
+        } else {
+            "info"
+        };
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -227,6 +236,24 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&bundle)?);
         } else {
             print!("{}", guix_p2p::diagnostics::format_bootstrap_bundle(&bundle));
+        }
+        return Ok(());
+    }
+
+    if let Some(peer_addr) = cli.test_connectivity.as_deref() {
+        let report = guix_p2p::connectivity::test_peer_connectivity(
+            &keypair,
+            peer_addr,
+            std::time::Duration::from_secs(config.request_timeout_secs),
+        )
+        .await?;
+        if cli.json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            print!("{}", guix_p2p::connectivity::format_connectivity_test(&report));
+        }
+        if !report.success {
+            std::process::exit(2);
         }
         return Ok(());
     }
@@ -417,7 +444,8 @@ async fn main() -> anyhow::Result<()> {
         .await?
     } else {
         tracing::error!(
-            "No mode specified. Use --query, --substitute, --daemon, --doctor, or --init."
+            "No mode specified. Use --query, --substitute, --daemon, --doctor, --share-info, \
+             --test-connectivity, or --init."
         );
         std::process::exit(1);
     }

@@ -42,6 +42,20 @@ Use JSON for scripts or issue templates:
 guix-p2p --share-info --json
 ```
 
+## Active Connectivity Test
+
+```sh
+guix-p2p --test-connectivity /dns4/bootstrap.example.org/udp/6881/quic-v1/p2p/12D3KooW...
+```
+
+This starts a temporary libp2p swarm and tries to dial the given multiaddr. It
+exits with status `0` when the connection is established and `2` when the dial
+fails. Use JSON for issue reports:
+
+```sh
+guix-p2p --test-connectivity /dns4/bootstrap.example.org/udp/6881/quic-v1/p2p/12D3KooW... --json
+```
+
 ## NAT And Firewalls
 
 For remote peers to dial a home node:

@@ -3,6 +3,7 @@ pub mod behaviour;
 pub mod channel;
 pub mod config;
 pub mod connection;
+pub mod connectivity;
 pub mod daemon;
 pub mod dashboard;
 pub mod dht;
