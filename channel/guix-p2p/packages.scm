@@ -17,6 +17,7 @@
   #:use-module (ice-9 rdelim)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-13)
+  #:use-module (srfi srfi-14)
   #:export (guix-p2p))
 
 (define %guix-p2p-channel-root
@@ -80,9 +81,25 @@
         (if commit (string-take commit (min 12 (string-length commit))) "unknown")))
      (else (string-take head (min 12 (string-length head)))))))
 
+(define (guix-p2p-store-path-commit root)
+  ;; Guix channel checkouts are materialized without .git, but their store item
+  ;; name includes the authenticated channel commit, e.g. guix-p2p-0a5c0c1.
+  (let* ((base (basename root))
+         (parts (string-tokenize base (char-set-complement (char-set #\-))))
+         (last-part (and (pair? parts) (last parts))))
+    (and last-part
+         (>= (string-length last-part) 7)
+         (string-every (lambda (char)
+                         (char-set-contains? char-set:hex-digit char))
+                       last-part)
+         (string-take last-part (min 12 (string-length last-part))))))
+
 (define %guix-p2p-commit
   (or (getenv "GUIX_P2P_BUILD_COMMIT")
-      (guix-p2p-current-commit %guix-p2p-checkout-root)))
+      (let ((commit (guix-p2p-current-commit %guix-p2p-checkout-root)))
+        (if (string=? commit "unknown")
+            (or (guix-p2p-store-path-commit %guix-p2p-checkout-root) commit)
+            commit))))
 
 (define (guix-p2p-generated-path? file)
   (any (lambda (part)
@@ -96,7 +113,7 @@
       (string-contains file "/guix/extensions/")))
 
 (define (guix-p2p-source-predicate root)
-  (let ((git-file? (git-predicate root)))
+  (let ((git-file? (and (guix-p2p-git-dir root) (git-predicate root))))
     (lambda (file stat)
       (and (not (guix-p2p-generated-path? file))
            (or (guix-p2p-extension-source? file)
