@@ -60,7 +60,7 @@ seed_paths = ["/gnu/store/...-hello"]
 |-----|---------|--------------|---------|
 | `bootstrap_peers` | empty | `--bootstrap-peers` | Comma-separated community or private peer multiaddrs used for initial DHT connectivity. |
 | `enable_default_bootstrap_peers` | `true` | none | Include built-in project bootstrap peers when they are available. The current built-in list is empty. |
-| `peer_store_enabled` | `true` | none | Persist reachable peers under `cache_dir` and reuse them on later starts. |
+| `peer_store_enabled` | `true` | none | Persist reachable non-loopback peers under `cache_dir` and reuse them on later starts; failed dial addresses are pruned. |
 | `peer_store_max_entries` | `100` | none | Maximum persisted peer address entries. |
 | `external_addresses` | empty | `--external-addresses` | Comma-separated listener addresses advertised to peers and provider records when autodetection is insufficient. |
 | `listen_addr` | `/ip4/0.0.0.0/udp/6881/quic-v1` | `--listen-addr` | libp2p listen multiaddr. TCP and QUIC are both supported by the binary. |

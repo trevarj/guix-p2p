@@ -1,7 +1,11 @@
 use std::{sync::Arc, time::Duration};
 
 use futures::StreamExt;
-use libp2p::{SwarmBuilder, noise, quic, request_response, swarm::SwarmEvent, tcp, yamux};
+use libp2p::{
+    Multiaddr, SwarmBuilder, noise, quic, request_response,
+    swarm::{DialError, SwarmEvent},
+    tcp, yamux,
+};
 
 use crate::{
     bandwidth::BandwidthLimiter,
@@ -113,9 +117,19 @@ pub async fn run_swarm_task(
                         });
                     },
                     SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                        let reason = error.to_string();
+                        if let Some(peer_id) = peer_id {
+                            remove_failed_dial_addresses(
+                                &peer_store,
+                                &conn_mgr,
+                                &mut swarm,
+                                peer_id,
+                                &error,
+                            );
+                        }
                         let _ = event_tx.send(dashboard::DashboardEvent::PeerDialFailed {
                             peer_id: peer_id.map(|peer_id| peer_id.to_string()),
-                            reason: error.to_string(),
+                            reason,
                         });
                         tracing::debug!("Outgoing connection failed: {}", error);
                     },
@@ -167,6 +181,35 @@ fn record_peer_address(
 ) {
     if let Some(store) = peer_store {
         store.lock().unwrap().record_address(peer_id, address);
+    }
+}
+
+fn remove_failed_dial_addresses(
+    peer_store: &Option<Arc<std::sync::Mutex<PeerStore>>>,
+    conn_mgr: &Arc<std::sync::Mutex<ConnectionManager>>,
+    swarm: &mut libp2p::Swarm<GuixP2PBehaviour>,
+    peer_id: libp2p::PeerId,
+    error: &DialError,
+) {
+    for address in failed_dial_addresses(error) {
+        if let Some(store) = peer_store {
+            store.lock().unwrap().remove_address(peer_id, &address);
+        }
+        conn_mgr.lock().unwrap().remove_address(peer_id, &address.to_string());
+        swarm.behaviour_mut().kad.remove_address(&peer_id, &address);
+    }
+}
+
+fn failed_dial_addresses(error: &DialError) -> Vec<Multiaddr> {
+    match error {
+        DialError::LocalPeerId { address } | DialError::WrongPeerId { address, .. } => {
+            vec![address.clone()]
+        },
+        DialError::Transport(errors) => errors.iter().map(|(address, _)| address.clone()).collect(),
+        DialError::NoAddresses
+        | DialError::DialPeerConditionFalse(_)
+        | DialError::Aborted
+        | DialError::Denied { .. } => Vec::new(),
     }
 }
 

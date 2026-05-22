@@ -107,6 +107,14 @@ impl ConnectionManager {
         state.last_active = Instant::now();
     }
 
+    /// Drop a failed address from a peer's in-memory address set.
+    pub fn remove_address(&mut self, peer: PeerId, address: &str) {
+        if let Some(state) = self.peers.get_mut(&peer) {
+            state.addresses.remove(address);
+            state.last_active = Instant::now();
+        }
+    }
+
     pub fn peer_count(&self) -> usize {
         self.peers.len()
     }

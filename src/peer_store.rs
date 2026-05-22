@@ -86,6 +86,23 @@ impl PeerStore {
         }
     }
 
+    /// Remove a failed address for a peer from the persistent peer store.
+    pub fn remove_address(&mut self, peer: PeerId, address: &Multiaddr) {
+        let Some(address) = clean_address(address) else {
+            return;
+        };
+        let peer_id = peer.to_string();
+        let before = self.entries.len();
+        self.entries
+            .retain(|entry| !(entry.peer_id == peer_id && entry.address == address.to_string()));
+
+        if self.entries.len() != before
+            && let Err(e) = self.save()
+        {
+            tracing::warn!("failed to save peer store {}: {}", self.path.display(), e);
+        }
+    }
+
     fn prune(&mut self) {
         let min_seen = now_unix().saturating_sub(MAX_PEER_AGE_SECS);
         let mut seen = HashSet::new();
@@ -125,6 +142,9 @@ fn clean_address(address: &Multiaddr) -> Option<Multiaddr> {
     if is_unspecified(&addr) {
         return None;
     }
+    if is_loopback(&addr) {
+        return None;
+    }
     Some(addr)
 }
 
@@ -132,6 +152,14 @@ fn is_unspecified(address: &Multiaddr) -> bool {
     address.iter().any(|protocol| match protocol {
         Protocol::Ip4(ip) => ip.is_unspecified(),
         Protocol::Ip6(ip) => ip.is_unspecified(),
+        _ => false,
+    })
+}
+
+fn is_loopback(address: &Multiaddr) -> bool {
+    address.iter().any(|protocol| match protocol {
+        Protocol::Ip4(ip) => ip.is_loopback(),
+        Protocol::Ip6(ip) => ip.is_loopback(),
         _ => false,
     })
 }
@@ -186,7 +214,7 @@ mod tests {
     fn peer_store_round_trips_full_multiaddr() {
         let tmp = tempfile::TempDir::new().unwrap();
         let peer = PeerId::random();
-        let addr: Multiaddr = "/ip4/127.0.0.1/tcp/6881".parse().unwrap();
+        let addr: Multiaddr = "/ip4/192.0.2.1/tcp/6881".parse().unwrap();
         let mut store = PeerStore::load(tmp.path(), 8);
 
         store.record_address(peer, &addr);
@@ -199,12 +227,37 @@ mod tests {
     fn peer_store_prunes_invalid_and_deduplicates_entries() {
         let tmp = tempfile::TempDir::new().unwrap();
         let peer = PeerId::random();
-        let addr: Multiaddr = "/ip4/127.0.0.1/tcp/6881".parse().unwrap();
+        let addr: Multiaddr = "/ip4/192.0.2.1/tcp/6881".parse().unwrap();
         let mut store = PeerStore::load(tmp.path(), 8);
 
         store.record_address(peer, &addr);
         store.record_address(peer, &addr);
 
         assert_eq!(store.bootstrap_peers().len(), 1);
+    }
+
+    #[test]
+    fn peer_store_skips_loopback_addresses() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let peer = PeerId::random();
+        let addr: Multiaddr = "/ip4/127.0.0.1/tcp/6881".parse().unwrap();
+        let mut store = PeerStore::load(tmp.path(), 8);
+
+        store.record_address(peer, &addr);
+
+        assert!(store.bootstrap_peers().is_empty());
+    }
+
+    #[test]
+    fn peer_store_removes_failed_address() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let peer = PeerId::random();
+        let addr: Multiaddr = "/ip4/192.0.2.1/tcp/6881".parse().unwrap();
+        let mut store = PeerStore::load(tmp.path(), 8);
+
+        store.record_address(peer, &addr);
+        store.remove_address(peer, &addr);
+
+        assert!(store.bootstrap_peers().is_empty());
     }
 }
