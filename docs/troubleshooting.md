@@ -10,7 +10,11 @@ guix-p2p --doctor
 
 Check:
 
+- `listen-address`, `bootstrap-peers`, and `external-addresses` do not report
+  invalid multiaddrs.
 - `bootstrap-peers` is not empty for remote tests.
+- bootstrap peers end in `/p2p/<peer-id>` so they can seed the DHT routing
+  table.
 - `shareable-address` is present if other testers should dial this node.
 - the router/firewall allows the listen port and transport.
 - dashboard `NET` is not `local` unless this is a LAN-only test.

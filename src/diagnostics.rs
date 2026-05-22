@@ -54,6 +54,10 @@ pub struct ConnectivitySummary {
 pub fn run_config_diagnostics(config: &Config, peer_id: &str) -> Vec<DiagnosticCheck> {
     let mut checks = Vec::new();
     let summary = connectivity_summary(config, peer_id);
+    let listen_addr_error = multiaddr_parse_error(&config.listen_addr);
+    let invalid_bootstrap_peers = invalid_multiaddrs(&config.bootstrap_peers);
+    let bootstrap_without_peer_id = bootstrap_peers_without_peer_id(&config.bootstrap_peers);
+    let invalid_external_addresses = invalid_multiaddrs(&config.external_addresses);
 
     checks.push(DiagnosticCheck {
         id: "identity",
@@ -63,23 +67,73 @@ pub fn run_config_diagnostics(config: &Config, peer_id: &str) -> Vec<DiagnosticC
     });
 
     checks.push(DiagnosticCheck {
+        id: "listen-address",
+        severity: if listen_addr_error.is_none() {
+            DiagnosticSeverity::Ok
+        } else {
+            DiagnosticSeverity::Error
+        },
+        summary: if listen_addr_error.is_none() {
+            "listen address is valid".to_string()
+        } else {
+            "listen address is invalid".to_string()
+        },
+        detail: listen_addr_error
+            .map(|err| format!("{}: {err}", config.listen_addr))
+            .unwrap_or_else(|| config.listen_addr.clone()),
+    });
+
+    checks.push(DiagnosticCheck {
         id: "bootstrap-peers",
-        severity: if summary.has_bootstrap_peers {
+        severity: if !invalid_bootstrap_peers.is_empty() {
+            DiagnosticSeverity::Error
+        } else if !bootstrap_without_peer_id.is_empty() {
+            DiagnosticSeverity::Warning
+        } else if summary.has_bootstrap_peers {
             DiagnosticSeverity::Ok
         } else {
             DiagnosticSeverity::Warning
         },
-        summary: if summary.has_bootstrap_peers {
+        summary: if !invalid_bootstrap_peers.is_empty() {
+            "invalid bootstrap peer address".to_string()
+        } else if !bootstrap_without_peer_id.is_empty() {
+            "bootstrap peer missing /p2p peer id".to_string()
+        } else if summary.has_bootstrap_peers {
             "bootstrap peers configured".to_string()
         } else {
             "no bootstrap peers configured".to_string()
         },
-        detail: if summary.has_bootstrap_peers {
+        detail: if !invalid_bootstrap_peers.is_empty() {
+            invalid_bootstrap_peers.join(", ")
+        } else if !bootstrap_without_peer_id.is_empty() {
+            format!("{} should end in /p2p/<peer-id>", bootstrap_without_peer_id.join(", "))
+        } else if summary.has_bootstrap_peers {
             format!("{} bootstrap peer(s)", config.bootstrap_peers.len())
         } else {
             "configure bootstrap_peers or rely on LAN mDNS only".to_string()
         },
     });
+
+    if !config.external_addresses.is_empty() {
+        checks.push(DiagnosticCheck {
+            id: "external-addresses",
+            severity: if invalid_external_addresses.is_empty() {
+                DiagnosticSeverity::Ok
+            } else {
+                DiagnosticSeverity::Error
+            },
+            summary: if invalid_external_addresses.is_empty() {
+                "external addresses are valid".to_string()
+            } else {
+                "invalid external address".to_string()
+            },
+            detail: if invalid_external_addresses.is_empty() {
+                config.external_addresses.join(", ")
+            } else {
+                invalid_external_addresses.join(", ")
+            },
+        });
+    }
 
     checks.push(DiagnosticCheck {
         id: "shareable-address",
@@ -242,6 +296,31 @@ fn multiaddr_has_private_ip(value: &str) -> bool {
     })
 }
 
+fn multiaddr_parse_error(value: &str) -> Option<String> {
+    value.parse::<Multiaddr>().err().map(|err| err.to_string())
+}
+
+fn invalid_multiaddrs(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .filter_map(|value| multiaddr_parse_error(value).map(|err| format!("{value}: {err}")))
+        .collect()
+}
+
+fn bootstrap_peers_without_peer_id(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .filter_map(|value| {
+            let addr = value.parse::<Multiaddr>().ok()?;
+            if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+                None
+            } else {
+                Some(value.clone())
+            }
+        })
+        .collect()
+}
+
 fn ipv4_is_private_or_loopback(ip: Ipv4Addr) -> bool {
     ip.is_private() || ip.is_loopback() || ip.is_link_local()
 }
@@ -318,6 +397,61 @@ mod tests {
         let checks = run_config_diagnostics(&config, &peer);
 
         assert!(checks.iter().any(|check| check.id == "nat-address"));
+    }
+
+    #[test]
+    fn diagnostics_reject_invalid_listen_address() {
+        let peer = libp2p::PeerId::random().to_string();
+        let mut config = config_with_addresses(vec![], vec![]);
+        config.listen_addr = "not-a-multiaddr".to_string();
+
+        let checks = run_config_diagnostics(&config, &peer);
+
+        let check = checks.iter().find(|check| check.id == "listen-address").unwrap();
+        assert_eq!(check.severity, DiagnosticSeverity::Error);
+        assert!(check.summary.contains("invalid"));
+    }
+
+    #[test]
+    fn diagnostics_reject_invalid_bootstrap_peer() {
+        let peer = libp2p::PeerId::random().to_string();
+        let config = config_with_addresses(
+            vec![],
+            vec!["/dns4/bootstrap.example.org/not-a-transport".to_string()],
+        );
+
+        let checks = run_config_diagnostics(&config, &peer);
+
+        let check = checks.iter().find(|check| check.id == "bootstrap-peers").unwrap();
+        assert_eq!(check.severity, DiagnosticSeverity::Error);
+        assert!(check.summary.contains("invalid"));
+    }
+
+    #[test]
+    fn diagnostics_warn_when_bootstrap_peer_lacks_peer_id() {
+        let peer = libp2p::PeerId::random().to_string();
+        let config = config_with_addresses(
+            vec![],
+            vec!["/dns4/bootstrap.example.org/udp/6881/quic-v1".to_string()],
+        );
+
+        let checks = run_config_diagnostics(&config, &peer);
+
+        let check = checks.iter().find(|check| check.id == "bootstrap-peers").unwrap();
+        assert_eq!(check.severity, DiagnosticSeverity::Warning);
+        assert!(check.detail.contains("/p2p/<peer-id>"));
+    }
+
+    #[test]
+    fn diagnostics_reject_invalid_external_address() {
+        let peer = libp2p::PeerId::random().to_string();
+        let config = config_with_addresses(vec!["not-a-multiaddr".to_string()], vec![]);
+
+        let checks = run_config_diagnostics(&config, &peer);
+
+        let check = checks.iter().find(|check| check.id == "external-addresses").unwrap();
+        assert_eq!(check.severity, DiagnosticSeverity::Error);
+        assert!(check.summary.contains("invalid"));
     }
 
     #[test]

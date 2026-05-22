@@ -15,7 +15,10 @@ feeding readiness checks into automation.
 The command checks local prerequisites:
 
 - identity can be loaded or generated
+- `listen_addr` is a valid libp2p multiaddr
 - bootstrap peers are configured
+- configured bootstrap peer multiaddrs are valid and include `/p2p/<peer-id>`
+- configured external address multiaddrs are valid
 - external addresses can produce a shareable `/p2p/<peer-id>` multiaddr
 - private or loopback external addresses are flagged
 - cache directory, daemon socket, ACL path, and substitute URLs are visible
