@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     env,
+    ffi::OsString,
     path::{Path as FsPath, PathBuf},
     process::Command,
 };
@@ -41,7 +42,7 @@ pub(super) fn installed_packages_from_profile(
         return Vec::new();
     }
 
-    let output = match Command::new("guix")
+    let output = match Command::new(guix_binary())
         .arg("package")
         .arg("--list-installed")
         .arg(format!("--profile={}", profile.display()))
@@ -55,6 +56,10 @@ pub(super) fn installed_packages_from_profile(
                 profile.display(),
                 output.status,
             );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.trim().is_empty() {
+                tracing::warn!("guix package stderr: {}", stderr.trim());
+            }
             return Vec::new();
         },
         Err(e) => {
@@ -72,6 +77,15 @@ pub(super) fn installed_packages_from_profile(
         .lines()
         .filter_map(|line| parse_installed_package(source, line, seeded_store_paths))
         .collect()
+}
+
+pub(super) fn guix_binary() -> OsString {
+    let system_guix = FsPath::new("/run/current-system/profile/bin/guix");
+    if system_guix.exists() {
+        return system_guix.as_os_str().to_owned();
+    }
+
+    OsString::from("guix")
 }
 
 pub(super) fn parse_installed_package(

@@ -655,9 +655,11 @@ locally-seeded nars in real time:
 - The `/api/packages` endpoint lists installed packages from
   `/run/current-system/profile`, `/run/current-system/kernel`, and
   `$HOME/.guix-home/profile` using
-  `guix package --list-installed --profile=<profile>`. Each entry includes the
-  source profile, package name, version, output, store path, and whether that
-  store path is already seeded by the local NAR store.
+  `guix package --list-installed --profile=<profile>`. The daemon prefers
+  `/run/current-system/profile/bin/guix` so system services do not depend on a
+  shell `PATH`, then falls back to `guix`. Each entry includes the source
+  profile, package name, version, output, store path, and whether that store
+  path is already seeded by the local NAR store.
 - The dashboard package panel consumes `/api/packages`, supports fuzzy search
   across package name, version, and store path, and shows source, output, store
   path, and seed state. Its row-level seed control calls `POST /api/seeds`.

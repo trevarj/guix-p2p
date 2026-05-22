@@ -1264,6 +1264,13 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_package_discovery_has_guix_command() {
+        let command = packages::guix_binary();
+
+        assert!(!command.is_empty());
+    }
+
+    #[test]
     fn seed_mutation_requires_loopback_bind_address() {
         assert!(seed_mutation_allowed_for_bind("127.0.0.1"));
         assert!(seed_mutation_allowed_for_bind("::1"));
