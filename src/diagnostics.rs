@@ -567,19 +567,106 @@ fn ipv6_is_private_or_loopback(ip: Ipv6Addr) -> bool {
 
 /// Format diagnostics as a terminal-friendly report.
 pub fn format_diagnostics(checks: &[DiagnosticCheck]) -> String {
+    format_diagnostics_with_color(checks, false)
+}
+
+/// Format diagnostics as a terminal-friendly report, optionally using ANSI color.
+pub fn format_diagnostics_with_color(checks: &[DiagnosticCheck], color: bool) -> String {
     let mut out = String::new();
-    for check in checks {
-        let marker = match check.severity {
-            DiagnosticSeverity::Ok => "ok",
-            DiagnosticSeverity::Warning => "warn",
-            DiagnosticSeverity::Error => "error",
-        };
-        out.push_str(&format!(
-            "{marker:5} {:20} {}\n      {}\n",
-            check.id, check.summary, check.detail
-        ));
+    let errors = checks.iter().filter(|check| check.severity == DiagnosticSeverity::Error).count();
+    let warnings =
+        checks.iter().filter(|check| check.severity == DiagnosticSeverity::Warning).count();
+    let ok = checks.iter().filter(|check| check.severity == DiagnosticSeverity::Ok).count();
+    let status = if errors > 0 {
+        paint("not ready", AnsiColor::Red, color)
+    } else if warnings > 0 {
+        paint("ready with warnings", AnsiColor::Yellow, color)
+    } else {
+        paint("ready", AnsiColor::Green, color)
+    };
+
+    out.push_str(&format!("{}\n", paint("guix-p2p doctor", AnsiColor::Bold, color)));
+    out.push_str(&format!("status: {status}  {ok} ok, {warnings} warning(s), {errors} error(s)\n"));
+
+    let sections: &[(&str, &[&str])] = &[
+        ("Guix substitute path", &["identity", "guix-integration", "substitute-urls", "acl"]),
+        (
+            "Connectivity",
+            &[
+                "listen-address",
+                "bootstrap-peers",
+                "external-addresses",
+                "shareable-address",
+                "nat-address",
+            ],
+        ),
+        ("Runtime", &["cache-dir", "socket"]),
+    ];
+
+    for (title, ids) in sections {
+        let section_checks: Vec<&DiagnosticCheck> =
+            ids.iter().filter_map(|id| checks.iter().find(|check| check.id == *id)).collect();
+        if section_checks.is_empty() {
+            continue;
+        }
+
+        out.push('\n');
+        out.push_str(&format!("{}\n", paint(title, AnsiColor::Bold, color)));
+        for check in section_checks {
+            out.push_str(&format_diagnostic_check(check, color));
+        }
+    }
+
+    let known_ids: Vec<&str> = sections.iter().flat_map(|(_, ids)| ids.iter().copied()).collect();
+    let other_checks: Vec<&DiagnosticCheck> =
+        checks.iter().filter(|check| !known_ids.contains(&check.id)).collect();
+    if !other_checks.is_empty() {
+        out.push('\n');
+        out.push_str(&format!("{}\n", paint("Other", AnsiColor::Bold, color)));
+        for check in other_checks {
+            out.push_str(&format_diagnostic_check(check, color));
+        }
     }
     out
+}
+
+fn format_diagnostic_check(check: &DiagnosticCheck, color: bool) -> String {
+    let marker_text = match check.severity {
+        DiagnosticSeverity::Ok => "ok",
+        DiagnosticSeverity::Warning => "warn",
+        DiagnosticSeverity::Error => "error",
+    };
+    let marker_color = match check.severity {
+        DiagnosticSeverity::Ok => AnsiColor::Green,
+        DiagnosticSeverity::Warning => AnsiColor::Yellow,
+        DiagnosticSeverity::Error => AnsiColor::Red,
+    };
+    let marker = paint(&format!("{marker_text:5}"), marker_color, color);
+    let id = paint(&format!("{:<20}", check.id), AnsiColor::Cyan, color);
+    format!("  {marker} {id} {}\n        {}\n", check.summary, check.detail)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AnsiColor {
+    Bold,
+    Cyan,
+    Green,
+    Red,
+    Yellow,
+}
+
+fn paint(value: &str, color: AnsiColor, enabled: bool) -> String {
+    if !enabled {
+        return value.to_string();
+    }
+    let code = match color {
+        AnsiColor::Bold => "1",
+        AnsiColor::Cyan => "36",
+        AnsiColor::Green => "32",
+        AnsiColor::Red => "31",
+        AnsiColor::Yellow => "33",
+    };
+    format!("\x1b[{code}m{value}\x1b[0m")
 }
 
 /// Format the bootstrap bundle as a terminal-friendly report.
@@ -767,6 +854,53 @@ mod tests {
         if check.summary == "Guix substitute integration not confirmed" {
             assert_eq!(check.severity, DiagnosticSeverity::Error);
         }
+    }
+
+    #[test]
+    fn diagnostics_format_groups_checks_with_summary() {
+        let checks = vec![
+            DiagnosticCheck {
+                id: "identity",
+                severity: DiagnosticSeverity::Ok,
+                summary: "identity loaded".to_string(),
+                detail: "peer id: example".to_string(),
+            },
+            DiagnosticCheck {
+                id: "guix-integration",
+                severity: DiagnosticSeverity::Error,
+                summary: "Guix substitute integration not confirmed".to_string(),
+                detail: "missing daemon environment".to_string(),
+            },
+            DiagnosticCheck {
+                id: "shareable-address",
+                severity: DiagnosticSeverity::Warning,
+                summary: "no shareable peer address".to_string(),
+                detail: "set external_addresses".to_string(),
+            },
+        ];
+
+        let formatted = format_diagnostics(&checks);
+
+        assert!(formatted.contains("guix-p2p doctor"));
+        assert!(formatted.contains("status: not ready  1 ok, 1 warning(s), 1 error(s)"));
+        assert!(formatted.contains("Guix substitute path"));
+        assert!(formatted.contains("Connectivity"));
+        assert!(formatted.contains("error guix-integration"));
+    }
+
+    #[test]
+    fn diagnostics_format_can_emit_ansi_color() {
+        let checks = vec![DiagnosticCheck {
+            id: "identity",
+            severity: DiagnosticSeverity::Ok,
+            summary: "identity loaded".to_string(),
+            detail: "peer id: example".to_string(),
+        }];
+
+        let formatted = format_diagnostics_with_color(&checks, true);
+
+        assert!(formatted.contains("\x1b["));
+        assert!(formatted.contains("identity"));
     }
 
     #[test]

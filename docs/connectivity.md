@@ -12,6 +12,10 @@ guix-p2p --doctor
 Use `guix-p2p --doctor --json` when attaching diagnostics to an issue or
 feeding readiness checks into automation.
 
+The human report groups checks by substitute integration, connectivity, and
+runtime state. It uses ANSI color when stdout is a terminal; set `NO_COLOR=1`
+or use `--json` for plain machine-readable output.
+
 The command checks local prerequisites:
 
 - identity can be loaded or generated

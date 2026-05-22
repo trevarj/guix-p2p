@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, io::IsTerminal, sync::Arc};
 
 use anyhow::Context;
 use clap::{ArgGroup, Parser};
@@ -221,7 +221,13 @@ async fn main() -> anyhow::Result<()> {
         if cli.json {
             println!("{}", serde_json::to_string_pretty(&report)?);
         } else {
-            print!("{}", guix_p2p::diagnostics::format_diagnostics(&report.checks));
+            print!(
+                "{}",
+                guix_p2p::diagnostics::format_diagnostics_with_color(
+                    &report.checks,
+                    stdout_color_enabled()
+                )
+            );
         }
         if report.has_errors {
             std::process::exit(2);
@@ -453,6 +459,10 @@ async fn main() -> anyhow::Result<()> {
     let _ = reputation.lock().unwrap().save(&rep_path);
 
     Ok(())
+}
+
+fn stdout_color_enabled() -> bool {
+    std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
 }
 
 #[derive(Debug, serde::Deserialize)]
