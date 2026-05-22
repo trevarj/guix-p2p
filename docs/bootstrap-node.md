@@ -122,7 +122,7 @@ Publish the first `shareable_addresses` value exactly as clients should dial it:
 Current project bootstrap node:
 
 ```toml
-bootstrap_peers = "/dns4/guix-p2p.trevs.site/udp/6881/quic-v1/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"
+bootstrap_peers = "/ip4/104.223.122.157/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"
 ```
 
 ```toml

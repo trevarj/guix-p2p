@@ -63,7 +63,7 @@ Use the current project bootstrap node unless you are testing an isolated LAN
 or VM setup:
 
 ```toml
-bootstrap_peers = "/dns4/guix-p2p.trevs.site/udp/6881/quic-v1/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"
+bootstrap_peers = "/ip4/104.223.122.157/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"
 ```
 
 ```sh
