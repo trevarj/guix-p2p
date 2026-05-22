@@ -4151,6 +4151,10 @@ fn print_vm_dashboard_evidence(
     }
 
     let seed_node = registry.node(&target.from)?;
+    assert_dashboard_current_api(seed_node)
+        .with_context(|| format!("{} dashboard is not serving the current API", seed_node.name))?;
+    assert_dashboard_current_api(fetch_node)
+        .with_context(|| format!("{} dashboard is not serving the current API", fetch_node.name))?;
     let seeds = dashboard_json(seed_node.dashboard_port, "/api/seeds")
         .with_context(|| format!("failed to read {} /api/seeds", seed_node.name))?;
     let seed_entry = matching_seed_entry(&seeds, &target.store_path).ok_or_else(|| {
@@ -4179,6 +4183,73 @@ fn print_vm_dashboard_evidence(
     println!("catalog_entry={}", serde_json::to_string(catalog_entry)?);
     println!("DASHBOARD_EVIDENCE_END");
     Ok(())
+}
+
+fn assert_dashboard_current_api(node: &VmNode) -> anyhow::Result<()> {
+    let status = dashboard_json(node.dashboard_port, "/api/status")
+        .with_context(|| format!("failed to read {} /api/status", node.name))?;
+    anyhow::ensure!(
+        dashboard_status_has_current_shape(&status),
+        "{} /api/status is missing dashboard connectivity fields; VM may be running a stale \
+         guix-p2p binary",
+        node.name
+    );
+
+    let share_info = dashboard_json(node.dashboard_port, "/api/share-info")
+        .with_context(|| format!("failed to read {} /api/share-info", node.name))?;
+    anyhow::ensure!(
+        dashboard_share_info_has_current_shape(&share_info),
+        "{} /api/share-info is missing bootstrap bundle fields",
+        node.name
+    );
+
+    let diagnostics = dashboard_json(node.dashboard_port, "/api/diagnostics")
+        .with_context(|| format!("failed to read {} /api/diagnostics", node.name))?;
+    anyhow::ensure!(
+        dashboard_diagnostics_has_current_shape(&diagnostics),
+        "{} /api/diagnostics is missing diagnostic report fields",
+        node.name
+    );
+
+    let html = http_get_body(node.dashboard_port, "/")
+        .with_context(|| format!("failed to read {} dashboard HTML", node.name))?;
+    anyhow::ensure!(
+        dashboard_html_has_current_shape(&html),
+        "{} dashboard HTML is missing the peer sharing controls",
+        node.name
+    );
+
+    println!(
+        "DASHBOARD_API_OK node={} dashboard=http://127.0.0.1:{}",
+        node.name, node.dashboard_port
+    );
+    Ok(())
+}
+
+fn dashboard_status_has_current_shape(status: &serde_json::Value) -> bool {
+    status.get("connectivity").is_some_and(|connectivity| {
+        connectivity.get("state").and_then(serde_json::Value::as_str).is_some()
+            && connectivity
+                .get("shareable_addresses")
+                .and_then(serde_json::Value::as_array)
+                .is_some()
+    }) && status.get("shareable_addresses").and_then(serde_json::Value::as_array).is_some()
+}
+
+fn dashboard_share_info_has_current_shape(share_info: &serde_json::Value) -> bool {
+    share_info.get("connectivity").is_some()
+        && share_info.get("bootstrap_peers").and_then(serde_json::Value::as_array).is_some()
+        && share_info.get("shareable_addresses").and_then(serde_json::Value::as_array).is_some()
+        && share_info.get("config_snippet").and_then(serde_json::Value::as_str).is_some()
+}
+
+fn dashboard_diagnostics_has_current_shape(diagnostics: &serde_json::Value) -> bool {
+    diagnostics.get("connectivity").is_some()
+        && diagnostics.get("checks").and_then(serde_json::Value::as_array).is_some()
+}
+
+fn dashboard_html_has_current_shape(html: &str) -> bool {
+    html.contains("copy peer") && html.contains("/api/share-info")
 }
 
 fn print_vm_system_build_evidence(
@@ -6098,6 +6169,54 @@ mod tests {
 
         assert_eq!(json_string(seed_entry, "nar_hash").as_deref(), Some("deadbeef"));
         assert_eq!(json_string(catalog_entry, "hash_part").as_deref(), Some("abcd"));
+    }
+
+    #[test]
+    fn dashboard_shape_checks_accept_current_api() {
+        let status = serde_json::json!({
+            "peer_id": "12D3KooWnode",
+            "connectivity": {
+                "state": "shareable",
+                "shareable_addresses": ["/ip4/127.0.0.1/udp/6881/quic-v1/p2p/12D3KooWnode"]
+            },
+            "shareable_addresses": ["/ip4/127.0.0.1/udp/6881/quic-v1/p2p/12D3KooWnode"]
+        });
+        let share_info = serde_json::json!({
+            "connectivity": {"state": "shareable"},
+            "bootstrap_peers": ["/ip4/127.0.0.1/udp/6881/quic-v1/p2p/12D3KooWnode"],
+            "shareable_addresses": ["/ip4/127.0.0.1/udp/6881/quic-v1/p2p/12D3KooWnode"],
+            "config_snippet": "bootstrap_peers = [...]"
+        });
+        let diagnostics = serde_json::json!({
+            "connectivity": {"state": "shareable"},
+            "checks": [{"id": "external-addresses", "severity": "ok"}]
+        });
+
+        assert!(dashboard_status_has_current_shape(&status));
+        assert!(dashboard_share_info_has_current_shape(&share_info));
+        assert!(dashboard_diagnostics_has_current_shape(&diagnostics));
+        assert!(dashboard_html_has_current_shape(
+            r#"<button>copy peer</button><script>fetch('/api/share-info')</script>"#
+        ));
+    }
+
+    #[test]
+    fn dashboard_shape_checks_reject_legacy_api() {
+        let legacy_status = serde_json::json!({
+            "peer_id": "12D3KooWnode",
+            "bootstrap_peers": []
+        });
+        let legacy_share_info = serde_json::json!({
+            "peer_id": "12D3KooWnode"
+        });
+        let legacy_diagnostics = serde_json::json!({
+            "ok": true
+        });
+
+        assert!(!dashboard_status_has_current_shape(&legacy_status));
+        assert!(!dashboard_share_info_has_current_shape(&legacy_share_info));
+        assert!(!dashboard_diagnostics_has_current_shape(&legacy_diagnostics));
+        assert!(!dashboard_html_has_current_shape("<html></html>"));
     }
 
     #[test]

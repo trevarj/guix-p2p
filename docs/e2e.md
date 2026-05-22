@@ -133,8 +133,12 @@ advertised address from the DHT.
 When dashboard forwarding is enabled, `fetch` also prints a
 `DASHBOARD_EVIDENCE` block after the import proof. The block includes the
 matching seed-node `/api/seeds` entry, the matching fetch-node `/api/catalog`
-entry, and entry counts for both dashboard snapshots. If dashboard forwarding
-is disabled, the command prints `DASHBOARD_EVIDENCE_SKIPPED`.
+entry, and entry counts for both dashboard snapshots. Before printing
+evidence, the proof also verifies that the seed and fetch dashboards expose the
+current `/api/status`, `/api/share-info`, `/api/diagnostics`, and peer sharing
+UI. This catches stale VM binaries that can still transfer blocks but do not
+serve the current dashboard. If dashboard forwarding is disabled, the command
+prints `DASHBOARD_EVIDENCE_SKIPPED`.
 
 Verify the imported output by SSHing into the fetcher and running the store
 path directly. The proof imports the output; it does not install `hello` into
