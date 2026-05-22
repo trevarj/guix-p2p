@@ -19,6 +19,16 @@ After every task — feature, bug fix, refactor, or protocol change:
 - Use bullet points in body if more detail needed.
 - Never commit secrets, tokens, or credentials.
 
+## Versioning
+
+- Follow SemVer for every release-visible code, packaging, protocol, CLI, config, service, or behavior change.
+- Bump `Cargo.toml` before committing those changes:
+  - PATCH for bug fixes and backward-compatible behavior corrections.
+  - MINOR for backward-compatible features, CLI/config additions, protocol extensions, or service capabilities.
+  - MAJOR for incompatible CLI/config/protocol/API changes.
+- Keep Guix package metadata and version references in docs aligned with `Cargo.toml` when a version changes.
+- Docs-only, comment-only, test-only, CI-only, and formatting-only changes do not require a version bump.
+
 ## Rust Conventions
 
 ### Formatting
