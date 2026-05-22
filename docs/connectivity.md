@@ -71,6 +71,8 @@ The dashboard header includes:
 - `DHT`: local provider records.
 - `NET`: static connectivity readiness.
 
+Open `NET` to inspect the full diagnostic report without leaving the dashboard.
+
 Use `/api/status` for machine-readable state. It includes `connectivity`,
 `bootstrap_peer_count`, `shareable_addresses`, and the local PeerId.
 

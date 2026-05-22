@@ -57,6 +57,9 @@ header .id{font-size:11px;opacity:.6}
 header .stats{display:grid;grid-template-columns:repeat(8,auto);gap:8px;font-size:11px}
 header .stats div{border:1px solid var(--line);background:var(--panel);padding:4px 7px;min-width:74px}
 header .stats span{display:block;color:var(--acc);font-weight:bold;font-size:14px;line-height:1.1}
+header .stats .stat-action{cursor:pointer}
+header .stats .stat-action:hover{border-color:var(--acc)}
+header .stats .stat-action:focus-visible{outline:1px solid var(--acc);outline-offset:2px}
 header button,.theme-select{
   background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
   padding:5px 10px;font-family:var(--font);font-size:11px;cursor:pointer;border-radius:4px
@@ -250,6 +253,16 @@ main{
 .detail .field{margin-bottom:6px;font-size:12px}
 .detail .field label{color:var(--dim);display:inline-block;min-width:100px}
 .detail .field .val{color:var(--fg)}
+.diagnostic-row{
+  display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px;
+  border-top:1px solid var(--line);padding:8px 0;font-size:11px
+}
+.diagnostic-row .sev{text-transform:uppercase;font-size:10px;letter-spacing:.8px}
+.diagnostic-row.ok .sev{color:var(--ok)}
+.diagnostic-row.warning .sev{color:var(--warn)}
+.diagnostic-row.error .sev{color:var(--err)}
+.diagnostic-row .summary{color:var(--fg)}
+.diagnostic-row .detail{grid-column:2;color:var(--dim);word-break:break-word}
 .detail h3{color:var(--acc);font-size:12px;margin:16px 0 8px;text-transform:uppercase;letter-spacing:1px}
 .detail .narinfo-toggle{
   color:var(--acc);cursor:pointer;font-size:12px;margin-top:12px;user-select:none
@@ -350,7 +363,7 @@ main{
     <div data-tip="Installed packages discovered from system, kernel, and Guix Home profiles.">PACKAGES <span id="package-count">0</span></div>
     <div data-tip="Store paths observed through substitute/narinfo lookups.">CATALOG <span id="catalog-count">0</span></div>
     <div data-tip="NARs currently cached locally and available for block serving.">SEEDS <span id="seed-count">0</span></div>
-    <div data-tip="Static reachability readiness based on bootstrap peers and shareable external addresses.">NET <span id="connectivity-state">local</span></div>
+    <div id="network-diagnostics" class="stat-action" role="button" tabindex="0" data-tip="Static reachability readiness based on bootstrap peers and shareable external addresses. Open diagnostics detail.">NET <span id="connectivity-state">local</span></div>
     <div data-tip="Daemon dashboard uptime since this process started.">UPTIME <span id="uptime">00:00:00</span></div>
   </div>
   <div class="theme-control">
@@ -628,6 +641,41 @@ function copyDiagnostics(){
     addEvent('providers','i','Copied dashboard diagnostics')
   }).catch(function(){
     addEvent('dl-fail','x','Failed to copy dashboard diagnostics')
+  })
+}
+
+function severityLabel(sev){
+  if(sev==='warning')return'warn';
+  return sev||'unknown'
+}
+
+function openDiagnosticsDetail(){
+  fetch('/api/diagnostics').then(function(r){
+    if(!r.ok)throw r;
+    return r.json()
+  }).then(function(report){
+    var c=document.getElementById('detail-content');
+    var checks=(report.checks||[]).map(function(check){
+      var sev=check.severity||'unknown';
+      return '<div class="diagnostic-row '+attr(sev)+'">'
+        +'<div class="sev">'+esc(severityLabel(sev))+'</div>'
+        +'<div class="summary">'+esc(check.id+': '+check.summary)+'</div>'
+        +'<div class="detail">'+esc(check.detail||'')+'</div>'
+        +'</div>'
+    }).join('');
+    var conn=report.connectivity||{};
+    var share=(conn.shareable_addresses||[]).join('\n')||'none';
+    c.innerHTML='<h2>network diagnostics</h2>'
+      +'<div class="field"><label>state</label><span class="val">'+esc(conn.state||'unknown')+'</span></div>'
+      +'<div class="field"><label>detail</label><span class="val">'+esc(conn.detail||'?')+'</span></div>'
+      +'<div class="field"><label>shareable</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(share)+'</span></div>'
+      +'<div class="field"><label>errors</label><span class="val">'+esc(report.has_errors?'yes':'no')+'</span></div>'
+      +'<div class="field"><label>warnings</label><span class="val">'+esc(report.has_warnings?'yes':'no')+'</span></div>'
+      +'<h3>checks</h3>'
+      +(checks||'<div class="empty">no checks reported</div>');
+    document.getElementById('overlay').classList.remove('hidden')
+  }).catch(function(){
+    addEvent('dl-fail','x','Failed to load diagnostics')
   })
 }
 
@@ -1416,11 +1464,18 @@ document.addEventListener('click',function(ev){
     diag.textContent='copied';
     setTimeout(function(){diag.textContent='copy diag'},900)
   }
+  if(ev.target.closest('#network-diagnostics')){
+    openDiagnosticsDetail()
+  }
 });
 document.addEventListener('keydown',function(ev){
   if(ev.key==='Escape'){
     closeHelp();
     closeDetail()
+  }
+  if((ev.key==='Enter'||ev.key===' ')&&ev.target&&ev.target.closest('#network-diagnostics')){
+    ev.preventDefault();
+    openDiagnosticsDetail()
   }
 });
 
