@@ -111,12 +111,17 @@ struct Cli {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let default_log_filter =
-        if cli.doctor || cli.init || cli.share_info || cli.test_connectivity.is_some() {
-            "warn"
-        } else {
-            "info"
-        };
+    let relay_mode = (cli.query || cli.substitute) && cli.socket.is_some();
+    let default_log_filter = if relay_mode
+        || cli.doctor
+        || cli.init
+        || cli.share_info
+        || cli.test_connectivity.is_some()
+    {
+        "warn"
+    } else {
+        "info"
+    };
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -193,10 +198,6 @@ async fn main() -> anyhow::Result<()> {
         config.min_providers = min_providers;
     }
 
-    tracing::info!("Starting guix-p2p");
-    tracing::info!("Cache directory: {}", config.cache_dir.display());
-    tracing::info!("Substitute policy: {}", config.substitute_policy);
-
     match (cli.query, cli.substitute, &cli.socket) {
         (true, false, Some(sock)) => {
             guix_p2p::relay::forward(sock, guix_p2p::relay::RelayMode::Query).await?;
@@ -213,7 +214,18 @@ async fn main() -> anyhow::Result<()> {
         .context("failed to load or generate identity")?;
 
     let peer_id = identity::peer_id_from_keypair(&keypair);
-    tracing::info!("Peer ID: {}", peer_id);
+    tracing::info!(
+        version = %guix_p2p::version::VERSION,
+        peer_id = %peer_id,
+        cache_dir = %config.cache_dir.display(),
+        policy = %config.substitute_policy,
+        listen_addr = %config.listen_addr,
+        socket = %config.socket_path,
+        dashboard = config.dashboard_enabled,
+        dashboard_bind = %config.dashboard_bind,
+        dashboard_port = config.dashboard_port,
+        "Starting guix-p2p"
+    );
 
     if cli.doctor {
         let peer_id = peer_id.to_string();

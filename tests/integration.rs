@@ -112,7 +112,21 @@ mod cli_contract {
         assert!(output.status.success());
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("guix-p2p"));
-        assert!(stdout.contains("0.1.1 ("));
+        assert!(stdout.contains("0.1.2 ("));
+    }
+
+    #[test]
+    fn relay_mode_does_not_print_startup_info_by_default() {
+        let output = Command::new(binary())
+            .args(["--query", "--socket", "/tmp/guix-p2p-test-missing.sock"])
+            .output()
+            .unwrap();
+
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!stderr.contains("Starting guix-p2p"));
+        assert!(!stderr.contains("Cache directory"));
+        assert!(!stderr.contains("Substitute policy"));
     }
 
     #[test]

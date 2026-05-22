@@ -124,7 +124,7 @@
 (define-public guix-p2p
   (package
     (name "guix-p2p")
-    (version "0.1.1")
+    (version "0.1.2")
     (source (local-file %guix-p2p-checkout-root "guix-p2p-checkout"
                         #:recursive? #t
                         #:select? (guix-p2p-source-predicate

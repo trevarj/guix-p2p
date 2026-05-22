@@ -46,8 +46,13 @@ so it only reflects fixes after `guix pull`, `guix system reconfigure`, and
 service restart.
 
 `guix-p2p --version` prints the crate version and embedded Git commit, for
-example `guix-p2p 0.1.1 (abcdef123456)`. Include this value in tester reports
+example `guix-p2p 0.1.2 (abcdef123456)`. Include this value in tester reports
 while releases are still using the same package version.
+
+Substitute relay invocations default to warning-only logs so Guix commands do
+not print repeated startup lines. The daemon still emits one startup line with
+version, peer id, cache directory, policy, listen address, socket, and dashboard
+settings.
 
 From a checkout, use the manifest for contributor shells:
 
