@@ -48,7 +48,7 @@ pub async fn run_swarm_task(
             event = swarm.select_next_some() => {
                 match event {
                     SwarmEvent::Behaviour(GuixP2PEvent::Kad(ref e)) => {
-                        dht::handle_kad_event(&cache, &notify_tx, e);
+                        dht::handle_kad_event(&cache, &notify_tx, &event_tx, e);
                     },
                     SwarmEvent::Behaviour(GuixP2PEvent::BlockExchange(e)) => {
                         let ctx = BlockExchangeContext {
@@ -108,7 +108,7 @@ pub async fn run_swarm_task(
                             peer_id: peer_id.to_string(),
                             addresses: vec![address.to_string()],
                         });
-                        announce_seeded_nars(&mut swarm, &nar_store, "peer-connected");
+                        announce_seeded_nars(&mut swarm, &nar_store, &event_tx, "peer-connected");
                         tracing::debug!("Connection established with {}", peer_id);
                     },
                     SwarmEvent::ConnectionEstablished { peer_id, .. } => {
@@ -117,7 +117,7 @@ pub async fn run_swarm_task(
                             peer_id: peer_id.to_string(),
                             addresses: vec![],
                         });
-                        announce_seeded_nars(&mut swarm, &nar_store, "peer-connected");
+                        announce_seeded_nars(&mut swarm, &nar_store, &event_tx, "peer-connected");
                         tracing::debug!("Connection established with {}", peer_id);
                     },
                     SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
@@ -172,7 +172,7 @@ pub async fn run_swarm_task(
                 }
             }
             Some(cmd) = cmd_rx.next() => {
-                handle_swarm_command(&mut swarm, cmd);
+                handle_swarm_command(&mut swarm, cmd, &event_tx);
             }
             Some(pending) = response_rx.recv() => {
                 let _ = swarm
@@ -185,6 +185,9 @@ pub async fn run_swarm_task(
             }
             Some(hash) = query_rx.recv() => {
                 let key = libp2p::kad::RecordKey::new(&dht::extract_hash_bytes(&hash));
+                let _ = event_tx.send(dashboard::DashboardEvent::ProviderLookupStarted {
+                    nar_hash: hash.clone(),
+                });
                 swarm.behaviour_mut().kad.get_providers(key);
                 tracing::debug!("DHT get_providers for hash={}", hash);
             }
@@ -195,18 +198,33 @@ pub async fn run_swarm_task(
 fn announce_seeded_nars(
     swarm: &mut libp2p::Swarm<GuixP2PBehaviour>,
     nar_store: &Arc<std::sync::Mutex<NarStore>>,
+    event_tx: &dashboard::EventBus,
     reason: &str,
 ) {
     let hashes = nar_store.lock().unwrap().seeded_hashes();
     for hash in hashes {
-        announce_nar(swarm, &hash, reason);
+        announce_nar(swarm, &hash, event_tx, reason);
     }
 }
 
-fn announce_nar(swarm: &mut libp2p::Swarm<GuixP2PBehaviour>, hash: &str, reason: &str) {
+fn announce_nar(
+    swarm: &mut libp2p::Swarm<GuixP2PBehaviour>,
+    hash: &str,
+    event_tx: &dashboard::EventBus,
+    reason: &str,
+) {
     if let Ok(bytes) = hex::decode(hash) {
+        let _ = event_tx.send(dashboard::DashboardEvent::ProviderAnnounceStarted {
+            nar_hash: hash.to_string(),
+            reason: reason.to_string(),
+        });
         let key = libp2p::kad::RecordKey::new(&bytes);
         if let Err(e) = swarm.behaviour_mut().kad.start_providing(key) {
+            let _ = event_tx.send(dashboard::DashboardEvent::ProviderAnnounceFinished {
+                nar_hash: hash.to_string(),
+                result: "failed".to_string(),
+                reason: Some(e.to_string()),
+            });
             tracing::warn!(
                 reason = %reason,
                 "failed to announce nar {}: {}",
@@ -262,11 +280,17 @@ fn failed_dial_addresses(error: &DialError) -> Vec<Multiaddr> {
     }
 }
 
-fn handle_swarm_command(swarm: &mut libp2p::Swarm<GuixP2PBehaviour>, cmd: SwarmCommand) {
+fn handle_swarm_command(
+    swarm: &mut libp2p::Swarm<GuixP2PBehaviour>,
+    cmd: SwarmCommand,
+    event_tx: &dashboard::EventBus,
+) {
     match cmd {
         SwarmCommand::GetProviders { hash } => {
             let key_bytes = dht::extract_hash_bytes(&hash);
             let key = libp2p::kad::RecordKey::new(&key_bytes);
+            let _ = event_tx
+                .send(dashboard::DashboardEvent::ProviderLookupStarted { nar_hash: hash.clone() });
             swarm.behaviour_mut().kad.get_providers(key);
             tracing::debug!("DHT get_providers for hash={}", hash);
         },
@@ -275,7 +299,7 @@ fn handle_swarm_command(swarm: &mut libp2p::Swarm<GuixP2PBehaviour>, cmd: SwarmC
             tracing::debug!("Sent block request {:?} to peer={}", req_id, peer);
         },
         SwarmCommand::StartProviding { hash } => {
-            announce_nar(swarm, &hash, "post-download");
+            announce_nar(swarm, &hash, event_tx, "post-download");
         },
     }
 }

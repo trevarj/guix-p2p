@@ -2,13 +2,14 @@ use std::{collections::HashMap, sync::Arc};
 
 use libp2p::{
     Multiaddr, PeerId,
-    kad::{Event as KadEvent, GetProvidersOk, QueryResult},
+    kad::{Event as KadEvent, GetProvidersError, GetProvidersOk, QueryResult},
     multiaddr::Protocol,
 };
 
 use crate::{
     behaviour::GuixP2PBehaviour,
     channel::{NotifyTx, SwarmNotification},
+    dashboard,
 };
 
 pub type ProviderCache = Arc<tokio::sync::Mutex<HashMap<String, Vec<libp2p::PeerId>>>>;
@@ -49,17 +50,47 @@ pub fn extract_hash_bytes(hex_hash: &str) -> [u8; 32] {
     }
 }
 
-pub fn handle_kad_event(cache: &ProviderCache, notify_tx: &NotifyTx, event: &KadEvent) {
-    let (key_hex, _key_bytes, providers) = match event {
+pub fn handle_kad_event(
+    cache: &ProviderCache,
+    notify_tx: &NotifyTx,
+    event_tx: &dashboard::EventBus,
+    event: &KadEvent,
+) {
+    let (key_hex, providers, lookup_result) = match event {
         KadEvent::OutboundQueryProgressed {
-            result:
-                QueryResult::GetProviders(Ok(GetProvidersOk::FoundProviders { key, providers, .. })),
+            result: QueryResult::GetProviders(Ok(GetProvidersOk::FoundProviders { key, providers })),
             ..
         } => {
-            let raw = key.as_ref().to_vec();
-            let k = hex::encode(&raw);
             let peers: Vec<libp2p::PeerId> = providers.iter().copied().collect();
-            (k, raw, peers)
+            (record_key_hex(key), peers, "found")
+        },
+        KadEvent::OutboundQueryProgressed {
+            result:
+                QueryResult::GetProviders(Ok(GetProvidersOk::FinishedWithNoAdditionalRecord { .. })),
+            ..
+        } => {
+            // libp2p does not include the key in this event. The requester-side
+            // timeout still records the empty result for the requested hash.
+            return;
+        },
+        KadEvent::OutboundQueryProgressed {
+            result: QueryResult::GetProviders(Err(GetProvidersError::Timeout { key, .. })),
+            ..
+        } => (record_key_hex(key), Vec::new(), "timeout"),
+        KadEvent::OutboundQueryProgressed {
+            result: QueryResult::StartProviding(result) | QueryResult::RepublishProvider(result),
+            ..
+        } => {
+            let (key_hex, result, reason) = match result {
+                Ok(ok) => (record_key_hex(&ok.key), "succeeded", None),
+                Err(err) => (record_key_hex(err.key()), "failed", Some(err.to_string())),
+            };
+            let _ = event_tx.send(dashboard::DashboardEvent::ProviderAnnounceFinished {
+                nar_hash: key_hex,
+                result: result.to_string(),
+                reason,
+            });
+            return;
         },
         _ => return,
     };
@@ -73,6 +104,7 @@ pub fn handle_kad_event(cache: &ProviderCache, notify_tx: &NotifyTx, event: &Kad
     let cache_clone = cache.clone();
     let hex_clone = key_hex.clone();
     let peers_clone = providers.clone();
+    let provider_count = providers.len();
     tokio::spawn(async move {
         let mut guard = cache_clone.lock().await;
         let entry = guard.entry(hex_clone).or_default();
@@ -83,7 +115,17 @@ pub fn handle_kad_event(cache: &ProviderCache, notify_tx: &NotifyTx, event: &Kad
         }
     });
 
-    let _ = notify_tx.send(SwarmNotification::ProvidersFound { hash: key_hex, peers: providers });
+    let _ = notify_tx
+        .send(SwarmNotification::ProvidersFound { hash: key_hex.clone(), peers: providers });
+    let _ = event_tx.send(dashboard::DashboardEvent::ProviderLookupFinished {
+        nar_hash: key_hex,
+        provider_count,
+        result: lookup_result.to_string(),
+    });
+}
+
+fn record_key_hex(key: &libp2p::kad::RecordKey) -> String {
+    hex::encode(key.as_ref())
 }
 
 pub fn bootstrap(

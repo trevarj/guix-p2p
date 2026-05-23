@@ -73,6 +73,23 @@ pub enum DashboardEvent {
         nar_hash: String,
         provider_count: usize,
     },
+    ProviderLookupStarted {
+        nar_hash: String,
+    },
+    ProviderLookupFinished {
+        nar_hash: String,
+        provider_count: usize,
+        result: String,
+    },
+    ProviderAnnounceStarted {
+        nar_hash: String,
+        reason: String,
+    },
+    ProviderAnnounceFinished {
+        nar_hash: String,
+        result: String,
+        reason: Option<String>,
+    },
     BuildDiscovered {
         nar_hash: String,
         store_path: Option<String>,
@@ -94,6 +111,7 @@ pub enum DashboardEvent {
         store_path: String,
         size: u64,
         elapsed_ms: u64,
+        source: String,
     },
     DownloadFailed {
         nar_hash: String,

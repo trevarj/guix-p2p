@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use libp2p::PeerId;
+use libp2p::{Multiaddr, PeerId, multiaddr::Protocol};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -36,12 +36,18 @@ struct DownloadedNar {
     data: Vec<u8>,
     trace_url: String,
     source: DownloadSource,
+    detail_source: &'static str,
 }
 
 #[derive(Debug, Clone, Copy)]
 enum DownloadSource {
     P2p,
     Http,
+}
+
+struct P2pDownloadedNar {
+    data: Vec<u8>,
+    source: &'static str,
 }
 
 mod protocol;
@@ -536,10 +542,11 @@ async fn try_swarm_substitute(
                 narinfo_cache,
             )
             .await
-            .map(|data| DownloadedNar {
-                data,
+            .map(|download| DownloadedNar {
+                data: download.data,
                 trace_url: p2p_trace_url.clone(),
                 source: DownloadSource::P2p,
+                detail_source: download.source,
             })
         },
         SubstitutePolicy::P2pFirst => {
@@ -562,10 +569,11 @@ async fn try_swarm_substitute(
             )
             .await
             {
-                Ok(data) => Ok(DownloadedNar {
-                    data,
+                Ok(download) => Ok(DownloadedNar {
+                    data: download.data,
                     trace_url: p2p_trace_url.clone(),
                     source: DownloadSource::P2p,
+                    detail_source: download.source,
                 }),
                 Err(_) => {
                     tracing::info!(
@@ -636,10 +644,11 @@ async fn try_swarm_substitute(
                         narinfo_cache,
                     )
                     .await
-                    .map(|data| DownloadedNar {
-                        data,
+                    .map(|download| DownloadedNar {
+                        data: download.data,
                         trace_url: p2p_trace_url.clone(),
                         source: DownloadSource::P2p,
+                        detail_source: download.source,
                     })
                 },
             }
@@ -797,6 +806,7 @@ async fn try_swarm_substitute(
                 store_path: store_path.clone(),
                 size,
                 elapsed_ms: 0,
+                source: download.detail_source.to_string(),
             });
 
             let _ =
@@ -836,7 +846,7 @@ async fn try_p2p_download(
     event_tx: &dashboard::EventBus,
     _client: &reqwest::Client,
     _narinfo_cache: &Arc<Mutex<NarinfoCache>>,
-) -> Result<Vec<u8>, String> {
+) -> Result<P2pDownloadedNar, String> {
     tracing::info!(hash = %nar_hash, size = nar_size, "Attempting P2P download");
 
     let _ = event_tx.send(DashboardEvent::DownloadStarted {
@@ -849,29 +859,26 @@ async fn try_p2p_download(
     let _ = cmd_tx.send(SwarmCommand::GetProviders { hash: dht_key.clone() });
 
     let providers = wait_for_providers(cache, notify_rx, &dht_key, config).await;
-
     if providers.len() < config.min_providers {
-        return Err(format!(
-            "not enough P2P providers ({}/{})",
-            providers.len(),
-            config.min_providers
-        ));
+        let _ = event_tx.send(DashboardEvent::ProviderLookupFinished {
+            nar_hash: dht_key.clone(),
+            provider_count: providers.len(),
+            result: "insufficient".to_string(),
+        });
     }
 
-    tracing::info!("Found {} P2P providers for {}", providers.len(), nar_hash);
-
     let discovered_providers = providers;
-    let mut providers = select_provider_candidates(
+    let mut selected_providers = select_provider_candidates(
         &discovered_providers,
         reputation,
         conn_mgr,
         config.max_peers_per_download,
     );
 
-    if providers.len() < config.min_providers {
+    if selected_providers.len() < config.min_providers {
         tracing::debug!(
             "Only {} usable cached P2P providers for {}; waiting for fresh DHT results",
-            providers.len(),
+            selected_providers.len(),
             nar_hash
         );
         let refreshed = wait_for_providers_for_duration(
@@ -881,41 +888,71 @@ async fn try_p2p_download(
         )
         .await;
         let merged = merge_provider_lists(&discovered_providers, &refreshed);
-        providers = select_provider_candidates(
+        selected_providers = select_provider_candidates(
             &merged,
             reputation,
             conn_mgr,
             config.max_peers_per_download,
         );
+    }
 
-        if providers.len() < config.min_providers {
-            return Err(format!(
-                "not enough usable P2P providers after reputation/backoff filtering ({}/{})",
-                providers.len(),
-                config.min_providers
-            ));
+    let mut handshakes = Vec::new();
+    let mut source = "p2p-dht";
+    if selected_providers.len() >= config.min_providers {
+        tracing::info!("Found {} usable DHT providers for {}", selected_providers.len(), nar_hash);
+        handshakes = handshake_with_providers(
+            cmd_tx,
+            notify_rx,
+            &selected_providers,
+            *nar_hash_bytes,
+            config.max_peers_per_download,
+            reputation,
+            conn_mgr,
+        )
+        .await;
+    }
+
+    if handshakes.len() < config.min_providers {
+        let fallback_candidates = select_provider_candidates(
+            &fallback_peer_candidates(
+                config,
+                conn_mgr,
+                &merge_provider_lists(&selected_providers, &handshake_peers(&handshakes)),
+            ),
+            reputation,
+            conn_mgr,
+            config.max_peers_per_download,
+        );
+        if !fallback_candidates.is_empty() {
+            tracing::info!(
+                "Trying {} connected/bootstrap fallback peers for {}",
+                fallback_candidates.len(),
+                nar_hash
+            );
+            let fallback_handshakes = handshake_with_providers(
+                cmd_tx,
+                notify_rx,
+                &fallback_candidates,
+                *nar_hash_bytes,
+                config.max_peers_per_download,
+                reputation,
+                conn_mgr,
+            )
+            .await;
+            if !fallback_handshakes.is_empty() {
+                source = "p2p-connected-fallback";
+                handshakes.extend(fallback_handshakes);
+            }
         }
     }
 
-    let handshakes = handshake_with_providers(
-        cmd_tx,
-        notify_rx,
-        &providers,
-        *nar_hash_bytes,
-        config.max_peers_per_download,
-        reputation,
-        conn_mgr,
-    )
-    .await;
-
-    if handshakes.is_empty() {
-        return Err("no successful P2P handshakes".into());
-    }
-    if handshakes.len() < config.min_providers {
+    let min_successful_handshakes =
+        if source == "p2p-connected-fallback" { 1 } else { config.min_providers };
+    if handshakes.len() < min_successful_handshakes {
         return Err(format!(
             "not enough successful P2P handshakes ({}/{})",
             handshakes.len(),
-            config.min_providers
+            min_successful_handshakes
         ));
     }
 
@@ -960,14 +997,14 @@ async fn try_p2p_download(
                 }
             }
 
-            let _ = event_tx.send(DashboardEvent::DownloadSucceeded {
-                nar_hash: nar_hash.to_string(),
-                store_path: store_path.to_string(),
-                size: bytes,
+            tracing::info!(
+                source = %source,
                 elapsed_ms,
-            });
+                bytes,
+                "P2P nar download succeeded"
+            );
 
-            Ok(nar_data)
+            Ok(P2pDownloadedNar { data: nar_data, source })
         },
         Err(e) => Err(format!("P2P swarm download failed: {}", e)),
     }
@@ -1010,6 +1047,7 @@ async fn try_http_download(
                 data: download.data,
                 trace_url: download.source_url,
                 source: DownloadSource::Http,
+                detail_source: "http-fallback",
             })
         },
         Err(HttpClientError::NotFound) => Err("HTTP nar not found on any substitute server".into()),
@@ -1096,6 +1134,41 @@ async fn wait_for_providers_for_duration(
 fn merge_provider_lists(left: &[PeerId], right: &[PeerId]) -> Vec<PeerId> {
     let mut seen = HashSet::new();
     left.iter().chain(right.iter()).copied().filter(|peer| seen.insert(*peer)).collect()
+}
+
+fn handshake_peers(handshakes: &[PeerHandshake]) -> Vec<PeerId> {
+    handshakes.iter().map(|handshake| handshake.peer).collect()
+}
+
+fn fallback_peer_candidates(
+    config: &Config,
+    conn_mgr: &Arc<Mutex<ConnectionManager>>,
+    exclude: &[PeerId],
+) -> Vec<PeerId> {
+    let connected = conn_mgr.lock().unwrap().connected_peers();
+    let bootstrap = bootstrap_peer_ids(&config.bootstrap_peers);
+    let excluded: HashSet<_> = exclude.iter().copied().collect();
+    merge_provider_lists(&connected, &bootstrap)
+        .into_iter()
+        .filter(|peer| !excluded.contains(peer))
+        .collect()
+}
+
+fn bootstrap_peer_ids(addrs: &[String]) -> Vec<PeerId> {
+    let mut seen = HashSet::new();
+    addrs
+        .iter()
+        .filter_map(|addr| bootstrap_peer_id(addr))
+        .filter(|peer| seen.insert(*peer))
+        .collect()
+}
+
+fn bootstrap_peer_id(addr: &str) -> Option<PeerId> {
+    let addr = addr.parse::<Multiaddr>().ok()?;
+    match addr.iter().last() {
+        Some(Protocol::P2p(peer)) => Some(peer),
+        _ => None,
+    }
 }
 
 /// Provider candidates that survived reputation and connection-backoff filters.
@@ -2229,6 +2302,38 @@ mod tests {
         let merged = merge_provider_lists(&[first, second], &[second, third]);
 
         assert_eq!(merged, vec![first, second, third]);
+    }
+
+    #[test]
+    fn bootstrap_peer_ids_extracts_p2p_suffixes() {
+        let first = PeerId::random();
+        let second = PeerId::random();
+        let addrs = vec![
+            format!("/dns4/bootstrap.example/tcp/443/p2p/{first}"),
+            "/dns4/bootstrap.example/tcp/443".to_string(),
+            format!("/ip4/198.51.100.10/tcp/443/p2p/{second}"),
+            format!("/dns4/bootstrap.example/tcp/443/p2p/{first}"),
+        ];
+
+        assert_eq!(bootstrap_peer_ids(&addrs), vec![first, second]);
+    }
+
+    #[test]
+    fn fallback_peer_candidates_include_connected_and_bootstrap_peers() {
+        let connected = PeerId::random();
+        let excluded = PeerId::random();
+        let bootstrap = PeerId::random();
+        let conn_mgr = Arc::new(Mutex::new(ConnectionManager::new(Default::default())));
+        conn_mgr.lock().unwrap().on_connected(connected);
+        conn_mgr.lock().unwrap().on_connected(excluded);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut config =
+            Config::load(None, None, None, Some(tmp.path().display().to_string()), None, None);
+        config.bootstrap_peers = vec![format!("/dns4/bootstrap.example/tcp/443/p2p/{bootstrap}")];
+
+        let candidates = fallback_peer_candidates(&config, &conn_mgr, &[excluded]);
+
+        assert_eq!(candidates, vec![connected, bootstrap]);
     }
 
     #[test]

@@ -34,6 +34,20 @@ Returns:
 - `providers`: Vec<PeerId> of peers that have called `start_providing()` for this key
 - `closest_peers`: routing table fallback if no providers found
 
+Downloader discovery is hybrid:
+
+1. Query Kad provider records for the NAR hash.
+2. Handshake returned providers and only use peers that prove they have block
+   metadata for the NAR.
+3. If Kad returns too few usable providers, handshake currently connected peers
+   and configured bootstrap peer IDs.
+4. Fall back to HTTP only if those P2P handshakes cannot produce a usable peer.
+
+The connected/bootstrap fallback is intentionally not a trust shortcut. The
+same block handshake, block-hash verification, and final NAR hash verification
+apply. It exists so a small early network with one public bootstrap/seeder can
+work before provider records are reliably discoverable through a larger DHT.
+
 ### Bootstrap
 
 ```rust
@@ -150,6 +164,8 @@ Current approach (MVP):
    mark peer as failed
 3. Failed or connection-backoff peers are skipped when building later
    handshake candidate lists
+4. Bootstrap and connected-peer fallback candidates must also pass the same
+   handshake before block download starts.
 
 Enhanced approach (Phase 5 hardening):
 1. After receiving providers list, challenge a random subset with proof-block requests
@@ -164,6 +180,11 @@ happens via libp2p's identify protocol and dialing.
 
 For MVP: peers behind NAT can connect outbound (to providers with open ports)
 but cannot be dialed inbound. libp2p's relay protocol (post-MVP) solves this.
+
+Private testers do not need to set `external_addresses` to download from the
+network. Without a public external address, they should be treated as
+client-only for Internet tests: they can dial the bootstrap node and public
+seeders, but other Internet peers should not expect to dial them.
 
 ## Relationship to Existing Substitute Infrastructure
 
@@ -194,6 +215,8 @@ swarm.select_next_some().await match {
 Key metrics to track:
 - Connected peer count
 - Kademlia k-bucket occupancy
+- Provider announce started/succeeded/failed counts
 - Provider lookups per second
 - Provider lookup latency (P50/P95)
 - Provider lookup success rate
+- Download source split: `p2p-dht`, `p2p-connected-fallback`, `http-fallback`

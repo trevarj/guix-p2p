@@ -123,6 +123,17 @@ impl ConnectionManager {
         self.peers.values().filter(|state| state.connected).count()
     }
 
+    /// Return connected peer IDs in a stable order for fallback handshakes.
+    pub fn connected_peers(&self) -> Vec<PeerId> {
+        let mut peers: Vec<_> = self
+            .peers
+            .iter()
+            .filter_map(|(peer, state)| state.connected.then_some(*peer))
+            .collect();
+        peers.sort_by_key(|peer| peer.to_string());
+        peers
+    }
+
     /// Return a read-only dashboard/API snapshot sorted by each caller as needed.
     pub fn peer_snapshots(&self) -> Vec<PeerConnectionSnapshot> {
         let now = Instant::now();
@@ -281,6 +292,19 @@ mod tests {
         assert!(
             snapshots.iter().any(|snapshot| snapshot.peer == disconnected && !snapshot.connected)
         );
+    }
+
+    #[test]
+    fn connected_peers_returns_only_active_peers() {
+        let mut mgr = ConnectionManager::new(ConnectionConfig::default());
+        let connected = PeerId::random();
+        let disconnected = PeerId::random();
+
+        mgr.on_connected(connected);
+        mgr.on_connected(disconnected);
+        mgr.on_disconnected(disconnected);
+
+        assert_eq!(mgr.connected_peers(), vec![connected]);
     }
 
     #[test]

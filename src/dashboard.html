@@ -1363,11 +1363,27 @@ function handleEvent(e,meta){
     case 'DownloadSucceeded':
       mergeTransfer({nar_hash:e.nar_hash,store_path:e.store_path,nar_size:e.size});
       markTransfer(e.nar_hash,e.store_path,e.size,'verified','imported in '+(e.elapsed_ms/1000).toFixed(1)+'s');
-      addEvent('dl-ok','^','Download succeeded: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.size)+', '+(e.elapsed_ms/1000).toFixed(1)+'s)',meta);
+      addEvent('dl-ok','^','Download succeeded ['+(e.source||'unknown')+']: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.size)+', '+(e.elapsed_ms/1000).toFixed(1)+'s)',meta);
       break;
 
     case 'DownloadFailed':
       addEvent('dl-fail','x','Download failed: '+(e.store_path||e.nar_hash)+' ('+e.reason+')',meta);
+      break;
+
+    case 'ProviderLookupStarted':
+      addEvent('providers','?','DHT lookup started: '+e.nar_hash.slice(0,16)+'...',meta);
+      break;
+
+    case 'ProviderLookupFinished':
+      addEvent('providers','i','DHT lookup '+e.result+': '+e.nar_hash.slice(0,16)+'... ('+(e.provider_count||0)+' provider'+((e.provider_count||0)===1?'':'s')+')',meta);
+      break;
+
+    case 'ProviderAnnounceStarted':
+      addEvent('providers','>','DHT announce started: '+e.nar_hash.slice(0,16)+'... ('+(e.reason||'announce')+')',meta);
+      break;
+
+    case 'ProviderAnnounceFinished':
+      addEvent('providers',e.result==='succeeded'?'+':'x','DHT announce '+e.result+': '+e.nar_hash.slice(0,16)+'...'+(e.reason?' ('+e.reason+')':''),meta);
       break;
 
     case 'CatalogEntry':

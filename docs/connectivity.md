@@ -114,6 +114,13 @@ Full relay/AutoNAT/DCUtR behavior is not yet treated as a tester guarantee.
 Until that is implemented and surfaced in diagnostics, the dashboard `NET`
 state should be read as local readiness, not a remote reachability proof.
 
+The early public network can run with one VPS bootstrap node. In that layout,
+home/VPN users should leave `external_addresses` empty unless they explicitly
+want to publish a reachable address. They can still download from the VPS and
+other reachable seeders. If Kad provider discovery is sparse, the downloader
+will try a normal block handshake against connected/bootstrap peers before HTTP
+fallback; this does not reveal a private user's address as a public seeder.
+
 ## Dashboard Signals
 
 The dashboard header includes:
@@ -128,7 +135,8 @@ Use `copy peer` to copy the same bootstrap bundle as `guix-p2p --share-info
 --json`.
 The events panel records outbound dial attempts, dial failures, inbound
 connection attempts, inbound handshake failures, successful peer connections,
-and disconnect reasons when libp2p reports one.
+disconnect reasons, DHT provider lookup results, provider announce results,
+and the final download source when libp2p reports one.
 
 Use `/api/status` for machine-readable state. It includes `connectivity`,
 `bootstrap_peer_count`, `shareable_addresses`, and the local PeerId.

@@ -673,6 +673,10 @@ serving, and seed provenance labels.
 - In daemon mode, a background health monitor periodically queries provider
   counts for local seeds, emits provider-count dashboard events, and
   re-announces local seeds when known providers fall below `min_providers`.
+- Downloads query Kad first, then handshake the returned providers. If Kad has
+  too few usable providers, the downloader handshakes connected peers and
+  configured bootstrap peer IDs before falling back to HTTP. A fallback peer is
+  only used after it returns a normal block handshake for the requested NAR.
 
 ### `--seed` CLI flag
 
@@ -709,6 +713,9 @@ locally-seeded nars in real time:
   `BlockServed` events are aggregated by peer, so the transfer path shows
   which peers contributed downloaded blocks and which requesters received
   served blocks.
+- **DHT evidence**: provider lookup and provider announce events are retained
+  in the event stream. Successful downloads include a source label:
+  `p2p-dht`, `p2p-connected-fallback`, or `http-fallback`.
 - **Seed count** in the header bar updates as nars are seeded or auto-saved
   after downloads.
 - The `/api/seeds` endpoint returns the full list of seeded nars with size,

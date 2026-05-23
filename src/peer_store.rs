@@ -55,7 +55,7 @@ impl PeerStore {
     pub fn bootstrap_peers(&self) -> Vec<String> {
         self.entries
             .iter()
-            .filter_map(|entry| entry.full_multiaddr().map(|addr| addr.to_string()))
+            .filter_map(|entry| entry.public_full_multiaddr().map(|addr| addr.to_string()))
             .collect()
     }
 
@@ -132,6 +132,12 @@ impl PeerStoreEntry {
         let peer_id = self.peer_id.parse::<PeerId>().ok()?;
         let address = self.address.parse::<Multiaddr>().ok()?;
         clean_peer_address(&address).map(|addr| addr.with(Protocol::P2p(peer_id)))
+    }
+
+    fn public_full_multiaddr(&self) -> Option<Multiaddr> {
+        let peer_id = self.peer_id.parse::<PeerId>().ok()?;
+        let address = self.address.parse::<Multiaddr>().ok()?;
+        is_public_peer_address(&address).then(|| address.with(Protocol::P2p(peer_id)))
     }
 }
 
@@ -316,6 +322,18 @@ mod tests {
         assert!(!is_public_peer_address(&loopback));
         assert!(is_public_peer_address(&documentation_public));
         assert!(is_public_peer_address(&dns));
+    }
+
+    #[test]
+    fn peer_store_bootstrap_peers_skip_private_addresses() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let peer = PeerId::random();
+        let private: Multiaddr = "/ip4/10.1.29.35/tcp/6881".parse().unwrap();
+        let mut store = PeerStore::load(tmp.path(), 8);
+
+        store.record_address(peer, &private);
+
+        assert!(store.bootstrap_peers().is_empty());
     }
 
     #[test]
