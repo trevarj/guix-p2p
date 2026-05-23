@@ -27,6 +27,7 @@ use crate::{
     diagnostics::{self, BootstrapBundle, ConnectivitySummary, DiagnosticReport},
     nar_store::NarStore,
     reputation::{PeerScore, ReputationTracker},
+    version,
 };
 
 mod catalog;
@@ -198,9 +199,11 @@ struct ApiPeer {
 
 #[derive(Debug, Clone, Serialize)]
 struct ApiStatus {
+    version: String,
     peer_id: String,
     listen_addr: String,
     external_addresses: Vec<String>,
+    bootstrap_peers: Vec<String>,
     bootstrap_peer_count: usize,
     connectivity: ConnectivitySummary,
     shareable_addresses: Vec<String>,
@@ -380,9 +383,11 @@ async fn api_status(State(state): State<DashboardState>) -> Json<ApiStatus> {
     );
 
     let status = ApiStatus {
+        version: version::VERSION.to_string(),
         peer_id: state.peer_id.clone(),
         listen_addr: state.listen_addr.clone(),
         external_addresses: state.external_addresses.clone(),
+        bootstrap_peers: state.bootstrap_peers.clone(),
         bootstrap_peer_count: state.bootstrap_peers.len(),
         shareable_addresses: connectivity.shareable_addresses.clone(),
         connectivity,

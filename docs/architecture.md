@@ -742,12 +742,15 @@ locally-seeded nars in real time:
 - The dashboard package panel consumes `/api/packages`, supports fuzzy search
   across package name, version, and store path, and shows source, output, store
   path, and seed state. Its row-level seed control calls `POST /api/seeds`.
-- The dashboard layout is organized around the known-tester seeding workflow:
-  transfer evidence is the primary proof surface, packages and active seeds
-  are the main workspace, peers/catalog/builds are secondary diagnostics, and
-  the filtered event history stays full-width at the bottom. The package list
-  uses a narrower column while Active Seeds spans the remaining workspace width
-  so seeded item text has more room.
+- The dashboard layout starts with operational readiness for the known-tester
+  workflow: node health, daemon version/commit, connectivity role,
+  shareable/bootstrap addresses, and a tester checklist are shown before the
+  transfer proof path, packages, active seeds, peers, catalog, builds, and
+  filtered event history.
+- The tester checklist summarizes the setup gates needed for a real first-run
+  P2P substitute test: dashboard API, Guix integration, bootstrap peers,
+  connected peers, installed package discovery, observed transfer activity,
+  active seeds, and whether the node is directly shareable or client-only.
 - The dashboard header uses an inline `guix-p2p` SVG wordmark so the embedded
   dashboard can render the logo without a separate static asset route.
 - The main dashboard grid scrolls as a whole when zoom or viewport height makes
@@ -791,11 +794,14 @@ locally-seeded nars in real time:
   download source, even when no browser WebSocket is connected.
 - The dashboard server indexes the latest 500 events internally, so
   `/api/events` restores recent history after browser reloads. The live
-  WebSocket remains the source for newly-arriving events.
+  WebSocket remains the source for newly-arriving events. The browser view
+  compacts repeated near-identical events, especially repeated dial failures,
+  so the event stream stays readable during connectivity problems.
 - The peer panel is backed by connection-manager snapshots plus reputation
   records. Connected peers are shown even before they have reputation history,
   disconnected reputation-only peers remain visible, and peer rows use backend
-  address, country, and last-active data instead of browser-only guesses.
+  address, country, last-active data, and bootstrap/source labels instead of
+  browser-only guesses.
 - The embedded dashboard also understands the `demo` flag returned by the e2e
   demo server and marks the header status as demo data when present.
 
@@ -822,9 +828,10 @@ whether P2P providers are available.
 
 Dashboard API endpoints:
 
-- `/api/status` returns the local peer id, listen address, configured external
-  addresses, shareable multiaddrs, uptime, currently connected peer count, DHT
-  entry count, observed build count, and seed count.
+- `/api/status` returns the daemon version string, local peer id, listen
+  address, configured external addresses, configured bootstrap peers, shareable
+  multiaddrs, uptime, currently connected peer count, DHT entry count, observed
+  build count, and seed count.
 - `/api/share-info` returns the same bootstrap bundle as `guix-p2p
   --share-info --json`: PeerId, shareable multiaddrs, optional dashboard URL,
   diagnostic summary flags, and a paste-ready bootstrap config snippet.

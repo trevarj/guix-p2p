@@ -78,9 +78,10 @@ button:focus-visible,input:focus-visible,.theme-select:focus-visible{outline:1px
 .status-pill.offline::before{background:var(--err);box-shadow:0 0 8px rgba(210,75,75,.45)}
 .status-pill.demo{color:var(--warn)}
 main{
-  display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:minmax(150px,.58fr) minmax(260px,1.15fr) minmax(210px,.85fr) minmax(150px,.45fr);
+  display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:minmax(130px,.42fr) minmax(150px,.5fr) minmax(260px,1.1fr) minmax(210px,.85fr) minmax(150px,.45fr);
   grid-template-areas:
-    "transfer transfer transfer"
+    "overview overview connectivity"
+    "transfer transfer tester"
     "packages seeds seeds"
     "peers catalog builds"
     "events events events";
@@ -93,6 +94,9 @@ main{
 .packages-panel{grid-area:packages}
 .seeds-panel{grid-area:seeds}
 .transfer-panel{grid-area:transfer}
+.overview-panel{grid-area:overview}
+.connectivity-panel{grid-area:connectivity}
+.tester-panel{grid-area:tester}
 .peers-panel{grid-area:peers}
 .catalog-panel{grid-area:catalog}
 .builds-panel{grid-area:builds}
@@ -127,6 +131,7 @@ main{
 .events .entry .ts{color:var(--dim);margin-right:8px}
 .events .entry .kind{color:var(--muted);text-transform:uppercase;font-size:10px}
 .events .entry .msg{min-width:0;white-space:normal;overflow-wrap:anywhere}
+.events .entry .repeat{color:var(--acc);font-size:10px;margin-left:6px}
 .events .entry.peer-conn .sym{color:var(--ok)}
 .events .entry.peer-disc .sym{color:var(--dim)}
 .events .entry.providers .sym{color:var(--acc)}
@@ -153,6 +158,7 @@ main{
 .peer-row .bar,.build-row .bar{height:6px;background:var(--bg3);align-self:center}
 .peer-row .bar-inner,.build-row .bar-inner{height:100%;background:var(--acc)}
 .peer-row .meta{text-align:right;font-size:10px;opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.peer-row .peer-source{color:var(--dim);font-size:9px;text-transform:uppercase;margin-left:5px}
 .peer-row .status{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:4px}
 .peer-row.offline .status{background:var(--dim)}
 .peer-row.offline{opacity:.55}
@@ -206,6 +212,38 @@ main{
 .package-row .seed-action:hover{border-color:var(--acc)}
 .package-row.seeded .seed-action{color:var(--dim)}
 .package-row .seed-action:disabled{cursor:not-allowed;opacity:.55;border-color:var(--line)}
+.overview-grid{display:grid;grid-template-columns:1.15fr repeat(4,minmax(86px,.6fr));gap:8px;align-items:stretch}
+.health-card,.info-card,.check-card{
+  border:1px solid var(--line);background:var(--bg2);border-radius:6px;padding:9px;min-width:0
+}
+.health-card{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center}
+.health-dot{width:14px;height:14px;border-radius:50%;background:var(--warn);box-shadow:0 0 16px rgba(216,166,66,.4)}
+.health-dot.ready{background:var(--ok);box-shadow:0 0 16px rgba(103,200,121,.45)}
+.health-dot.error{background:var(--err);box-shadow:0 0 16px rgba(227,106,106,.45)}
+.health-title{font-size:15px;color:var(--fg)}
+.health-detail{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.info-card .k,.check-card .k{display:block;color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:.8px}
+.info-card .v{display:block;color:var(--fg);font-size:15px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.info-card .sub{display:block;color:var(--muted);font-size:10px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.connectivity-stack{display:grid;gap:8px}
+.connectivity-state{display:flex;align-items:center;gap:8px}
+.connectivity-state .label{font-size:16px;color:var(--fg)}
+.connectivity-state .detail{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.addr-box{border:1px solid var(--line);background:var(--bg3);border-radius:4px;padding:7px;font-size:10px;color:var(--muted);word-break:break-all}
+.tester-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.check-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px;align-items:center;padding:7px}
+.check-card .mark{width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;font-size:11px;background:var(--bg3);color:var(--warn);border:1px solid var(--line)}
+.check-card.ok .mark{color:var(--ok);border-color:rgba(103,200,121,.5)}
+.check-card.warn .mark{color:var(--warn)}
+.check-card.error .mark{color:var(--err);border-color:rgba(227,106,106,.5)}
+.check-card .v{display:block;color:var(--fg);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-badge{
+  display:inline-block;border:1px solid var(--line);background:var(--bg3);color:var(--muted);
+  padding:1px 5px;border-radius:3px;font-size:9px;text-transform:uppercase;letter-spacing:.5px
+}
+.source-badge.p2p,.source-badge.ready{color:var(--ok);border-color:rgba(103,200,121,.5)}
+.source-badge.http,.source-badge.warn{color:var(--warn);border-color:rgba(216,166,66,.5)}
+.source-badge.error{color:var(--err);border-color:rgba(227,106,106,.5)}
 .transfer-card{
   display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:12px;align-items:center;
   border:1px solid var(--line);background:var(--bg2);padding:8px;border-radius:4px;
@@ -323,9 +361,10 @@ main{
   header{align-items:flex-start;flex-wrap:wrap}
   header .stats{flex-wrap:wrap;gap:10px 16px}
   main{
-    grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,.7fr) minmax(0,1fr) minmax(0,1fr) minmax(0,.8fr) auto;
+    grid-template-columns:1fr 1fr;grid-template-rows:auto auto minmax(0,.7fr) minmax(0,1fr) minmax(0,1fr) minmax(0,.8fr) auto;
     grid-template-areas:
-      "transfer transfer"
+      "overview connectivity"
+      "transfer tester"
       "packages packages"
       "seeds peers"
       "catalog builds"
@@ -336,6 +375,8 @@ main{
   .transfer-open{text-align:left}
   .transfer-compact-stages{grid-template-columns:repeat(3,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:repeat(3,1fr)}
+  .overview-grid{grid-template-columns:1fr 1fr}
+  .tester-grid{grid-template-columns:1fr 1fr}
 }
 @media (max-width:720px){
   body{overflow:auto}
@@ -349,6 +390,7 @@ main{
   .transfer-compact-stages{grid-template-columns:repeat(2,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:1fr 1fr}
   .transfer-peers{grid-template-columns:1fr}
+  .overview-grid,.tester-grid{grid-template-columns:1fr}
   .events .entry{grid-template-columns:62px 18px 1fr}
   .events .entry .kind{display:none}
 }
@@ -398,6 +440,56 @@ main{
   </div>
 </header>
 <main>
+  <div class="panel overview-panel" data-help="overview">
+    <h2 data-tip="Readiness summary for the local daemon.">node health</h2>
+    <div class="overview-grid">
+      <div class="health-card" id="health-card">
+        <span class="health-dot" id="health-dot"></span>
+        <span>
+          <span class="health-title" id="health-title">checking</span>
+          <span class="health-detail" id="health-detail">waiting for dashboard API</span>
+        </span>
+      </div>
+      <div class="info-card" data-tip="guix-p2p version and embedded commit.">
+        <span class="k">version</span>
+        <span class="v" id="node-version">--</span>
+        <span class="sub">daemon binary</span>
+      </div>
+      <div class="info-card" data-tip="Connected peers available to this daemon right now.">
+        <span class="k">connected</span>
+        <span class="v" id="overview-connected">0</span>
+        <span class="sub" id="overview-known">0 known</span>
+      </div>
+      <div class="info-card" data-tip="Active local NAR seeds this node can serve.">
+        <span class="k">seeding</span>
+        <span class="v" id="overview-seeds">0</span>
+        <span class="sub" id="overview-dht">0 dht records</span>
+      </div>
+      <div class="info-card" data-tip="Latest transfer source, if a transfer has been observed.">
+        <span class="k">latest source</span>
+        <span class="v" id="overview-source">none</span>
+        <span class="sub" id="overview-transfer">no transfer</span>
+      </div>
+    </div>
+  </div>
+  <div class="panel connectivity-panel" data-help="connectivity-panel">
+    <h2 data-tip="Network role and reachable addresses.">connectivity</h2>
+    <div class="connectivity-stack">
+      <div class="connectivity-state">
+        <span class="source-badge" id="connectivity-badge">unknown</span>
+        <span>
+          <span class="label" id="connectivity-title">checking</span>
+          <span class="detail" id="connectivity-detail">waiting for status</span>
+        </span>
+      </div>
+      <div class="addr-box" id="connectivity-address">no shareable address</div>
+      <div class="addr-box" id="connectivity-bootstrap">no bootstrap peer configured</div>
+    </div>
+  </div>
+  <div class="panel tester-panel" data-help="tester">
+    <h2 data-tip="First-run checks for a real tester node.">tester checklist</h2>
+    <div class="tester-grid" id="tester-checks"></div>
+  </div>
   <div class="panel packages-panel" data-help="packages">
     <h2 data-tip="Installed store paths that can be seeded into the local P2P cache.">packages <span class="badge" id="package-badge">0</span></h2>
     <div class="package-tools">
@@ -474,12 +566,17 @@ var SEEDS={};
 var TRANSFER=null;
 var TRANSFERS={};
 var CONNECTIVITY=null;
+var LAST_STATUS=null;
+var LAST_DIAGNOSTICS=null;
 var WS=null;
 var WS_RETRY=1000;
 var SERVER_STARTED=null;
 var DEMO_MODE=false;
 var HELP_TEXT={
   dashboard:['Dashboard','This page is the local operational view for a guix-p2p daemon. It combines seed inventory, transfer proof evidence, peer health, discovered substitute metadata, and recent daemon events.'],
+  overview:['Node Health','A compact readiness summary for the local daemon: version, peer connectivity, seeding inventory, DHT records, and latest transfer source.\n\nReady means the dashboard API is reachable, Guix integration has no reported error, and the node has at least one bootstrap peer or shareable address.'],
+  'connectivity-panel':['Connectivity','Shows the network role this daemon is currently configured for.\n\nClient-only nodes can download through bootstrap peers but are not directly dialable. Shareable nodes have a public multiaddr that other peers can use. Local-only nodes rely on LAN discovery unless bootstrap peers are added.'],
+  tester:['Tester Checklist','A short first-run checklist for onboarding real testers. It highlights the setup problems that usually block a P2P substitute test: daemon/API reachability, Guix integration, bootstrap configuration, peer connection, package discovery, transfer activity, and seeding.'],
   connected:['Connected Peers','The number of currently connected swarm peers reported by the daemon connection manager. A low value can be normal before discovery or when only bootstrap forwarding is available.'],
   'known-peers':['Known Peers','Peers that have reputation records. This can include disconnected peers if the daemon has seen successful or failed work from them before.'],
   dht:['DHT Records','Provider records currently known in the local DHT cache. These records help the node find peers that claim they can serve a desired NAR.'],
@@ -596,9 +693,14 @@ function setStatus(text,state){
   el.classList.remove('live','offline','demo');
   el.classList.add(state||'offline');
   if(DEMO_MODE)el.classList.add('demo')
+  if(state==='offline'&&!LAST_STATUS){
+    renderOverview();
+    renderTesterChecklist()
+  }
 }
 
 function renderConnectivityStatus(status){
+  LAST_STATUS=status;
   CONNECTIVITY=status.connectivity||null;
   var el=document.getElementById('connectivity-state');
   if(!el)return;
@@ -618,6 +720,112 @@ function renderConnectivityStatus(status){
     +'\nbootstrap peers: '+(status.bootstrap_peer_count||0)
     +'\nshareable addresses: '+((CONNECTIVITY.shareable_addresses||[]).length)
     +(CONNECTIVITY.has_private_external_addresses?'\nprivate external address configured':'')
+  renderConnectivityPanel();
+  renderOverview();
+  renderTesterChecklist();
+}
+
+function checkSeverity(id){
+  var checks=(LAST_DIAGNOSTICS&&LAST_DIAGNOSTICS.checks)||[];
+  for(var i=0;i<checks.length;i++){
+    if(checks[i].id===id)return checks[i].severity||'unknown'
+  }
+  return'unknown'
+}
+
+function checkOk(id){return checkSeverity(id)==='ok'}
+function checkError(id){return checkSeverity(id)==='error'}
+
+function healthState(){
+  if(!LAST_STATUS)return{level:'error',title:'offline',detail:'dashboard API is unreachable'};
+  if(LAST_DIAGNOSTICS&&LAST_DIAGNOSTICS.has_errors)return{level:'error',title:'not ready',detail:'diagnostics report errors'};
+  if(LAST_DIAGNOSTICS&&LAST_DIAGNOSTICS.has_warnings)return{level:'warn',title:'ready with warnings',detail:'review bootstrap or shareable address warnings'};
+  if((LAST_STATUS.bootstrap_peer_count||0)>0||(LAST_STATUS.shareable_addresses||[]).length>0)return{level:'ready',title:'ready',detail:'node has bootstrap or shareable address'};
+  return{level:'warn',title:'local only',detail:'LAN discovery only; configure bootstrap peers for testers'}
+}
+
+function sourceDisplay(source){
+  if(!source)return'none';
+  if(source.indexOf('connected-fallback')>=0)return'p2p fallback';
+  if(source.indexOf('p2p')>=0)return'p2p';
+  if(source.indexOf('http')>=0)return'http fallback';
+  return source
+}
+
+function latestTransfer(){
+  if(TRANSFER)return TRANSFER;
+  var keys=Object.keys(TRANSFERS);
+  if(!keys.length)return null;
+  return TRANSFERS[keys[keys.length-1]]
+}
+
+function renderOverview(){
+  var health=healthState();
+  var dot=document.getElementById('health-dot');
+  if(dot){
+    dot.classList.remove('ready','error');
+    if(health.level==='ready')dot.classList.add('ready');
+    if(health.level==='error')dot.classList.add('error')
+  }
+  var title=document.getElementById('health-title');
+  var detail=document.getElementById('health-detail');
+  if(title)title.textContent=health.title;
+  if(detail)detail.textContent=health.detail;
+  if(!LAST_STATUS)return;
+  var transfer=latestTransfer();
+  document.getElementById('node-version').textContent=LAST_STATUS.version||'unknown';
+  document.getElementById('overview-connected').textContent=LAST_STATUS.connected_peers||0;
+  document.getElementById('overview-known').textContent=Object.keys(PEERS).length+' known';
+  document.getElementById('overview-seeds').textContent=LAST_STATUS.seed_count||0;
+  document.getElementById('overview-dht').textContent=(LAST_STATUS.dht_entries||0)+' dht records';
+  document.getElementById('overview-source').textContent=sourceDisplay(transfer&&transfer.source);
+  document.getElementById('overview-transfer').textContent=transfer?transferSubjectName(transfer):'no transfer'
+}
+
+function renderConnectivityPanel(){
+  if(!LAST_STATUS||!CONNECTIVITY)return;
+  var state=CONNECTIVITY.state||'unknown';
+  var role={
+    'shareable':'public seeder',
+    'shareable-no-bootstrap':'public seeder',
+    'client-only':'client-only',
+    'local-only':'local-only'
+  }[state]||state;
+  var badge=document.getElementById('connectivity-badge');
+  badge.textContent=role;
+  badge.className='source-badge '+(state==='local-only'?'warn':'ready');
+  document.getElementById('connectivity-title').textContent=role;
+  document.getElementById('connectivity-detail').textContent=CONNECTIVITY.detail||'unknown';
+  var share=(CONNECTIVITY.shareable_addresses||[]).join('\n')||'no shareable address; this node can still download through bootstrap peers';
+  var boot=(LAST_STATUS.bootstrap_peers||[]).join('\n')||'no bootstrap peer configured';
+  document.getElementById('connectivity-address').textContent=share;
+  document.getElementById('connectivity-bootstrap').textContent=boot
+}
+
+function testerItem(label,state,detail){
+  var cls=state==='ok'?'ok':(state==='error'?'error':'warn');
+  var mark=state==='ok'?'✓':(state==='error'?'!':'?');
+  return '<div class="check-card '+cls+'" data-tip="'+attr(detail||label)+'">'
+    +'<span class="mark">'+esc(mark)+'</span>'
+    +'<span><span class="k">'+esc(label)+'</span><span class="v">'+esc(detail||state)+'</span></span>'
+    +'</div>'
+}
+
+function renderTesterChecklist(){
+  var el=document.getElementById('tester-checks');
+  if(!el)return;
+  var status=LAST_STATUS||{};
+  var items=[
+    ['daemon','ok','dashboard API reachable'],
+    ['guix',checkOk('guix-integration')?'ok':(checkError('guix-integration')?'error':'warn'),checkOk('guix-integration')?'integration enabled':'check doctor integration'],
+    ['bootstrap',(status.bootstrap_peer_count||0)>0?'ok':'warn',(status.bootstrap_peer_count||0)+' configured'],
+    ['peer',(status.connected_peers||0)>0?'ok':'warn',(status.connected_peers||0)+' connected'],
+    ['packages',PACKAGES.length>0?'ok':'warn',PACKAGES.length+' discovered'],
+    ['transfer',latestTransfer()?'ok':'warn',latestTransfer()?sourceDisplay(latestTransfer().source):'none observed'],
+    ['seeding',(status.seed_count||0)>0?'ok':'warn',(status.seed_count||0)+' active'],
+    ['share',(status.shareable_addresses||[]).length>0?'ok':'warn',(status.shareable_addresses||[]).length?'dialable address':'client-only or LAN']
+  ];
+  el.innerHTML=items.map(function(item){return testerItem(item[0],item[1],item[2])}).join('')
 }
 
 function applyTheme(themeId){
@@ -727,12 +935,23 @@ function addEvent(cls,sym,msg,meta){
   var timestamp=meta.timestamp_ms!=null?meta.timestamp_ms:Date.now();
   var duplicate=EVENTS.some(function(e){return e.id===id});
   if(!duplicate){
+    var key=eventCompactKey(cls,msg);
+    var last=EVENTS[EVENTS.length-1];
+    if(last&&last.compact_key===key&&(timestamp-(last.timestamp_ms||0))<120000){
+      last.timestamp_ms=timestamp;
+      last.repeat_count=(last.repeat_count||1)+1;
+      last.added=!meta.persisted;
+      renderEvents();
+      return
+    }
     EVENTS.push({
       id:id,
       timestamp_ms:timestamp,
       cls:cls,
       sym:sym,
       msg:msg,
+      compact_key:key,
+      repeat_count:1,
       category:eventCategory(cls),
       added:!meta.persisted
     });
@@ -742,6 +961,17 @@ function addEvent(cls,sym,msg,meta){
     while(EVENTS.length>500)EVENTS.shift()
   }
   renderEvents()
+}
+
+function eventCompactKey(cls,msg){
+  var text=String(msg||'');
+  if(cls==='peer-fail'){
+    text=text.replace(/: .*/,'');
+  }
+  if(cls==='providers'){
+    text=text.replace(/\([0-9]+ providers?\)/,'(# providers)')
+  }
+  return cls+'|'+text
 }
 
 function setEventFilter(filter){
@@ -768,7 +998,7 @@ function renderEvents(){
       +'<span class="ts">'+esc(ts)+'</span>'
       +'<span class="sym">'+esc(e.sym)+'</span>'
       +'<span class="kind">'+esc(e.category)+'</span>'
-      +'<span class="msg" data-tip="'+attr(e.msg)+'">'+esc(e.msg)+'</span>'
+      +'<span class="msg" data-tip="'+attr(e.msg)+'">'+esc(e.msg)+(e.repeat_count>1?'<span class="repeat">x'+esc(e.repeat_count)+'</span>':'')+'</span>'
       +'</div>'
   }).join('');
   el.scrollTop=0;
@@ -805,15 +1035,27 @@ function renderPeers(){
     var addr=(p.addresses&&p.addresses.length)?p.addresses[0]:(p.ip||'no address');
     var activity=fmtAge(p.last_active_secs_ago);
     var counters=(p.completed||0)+' ok / '+(p.failed||0)+' fail';
+    var source=peerSource(k,p);
     var tip=k+'\n'+addr+'\n'+counters+'\n'+fmtBytes(p.bytes_served||0)+' served\nlast active '+activity;
     h+='<div class="peer-row '+(p.connected?'':'offline')+'">'
       +'<span class="flag">'+esc(flag)+'</span>'
-      +'<span class="peer-id" data-tip="'+attr(tip)+'"><span class="status"></span>'+esc(peerIdShort(k))+'</span>'
+      +'<span class="peer-id" data-tip="'+attr(tip)+'"><span class="status"></span>'+esc(peerIdShort(k))+'<span class="peer-source">'+esc(source)+'</span></span>'
       +'<span class="bar"><span class="bar-inner" style="width:'+w+'%"></span></span>'
       +'<span class="meta" data-tip="'+attr(addr)+'">'+esc((p.connected?'up ':'idle ')+fmtScore(sc)+' / '+activity)+'</span>'
       +'</div>';
   });
   el.innerHTML=h;
+  renderOverview();
+  renderTesterChecklist();
+}
+
+function peerSource(peerId,p){
+  var boot=(LAST_STATUS&&LAST_STATUS.bootstrap_peers)||[];
+  for(var i=0;i<boot.length;i++){
+    if(boot[i].indexOf(peerId)>=0)return'bootstrap'
+  }
+  if(p&&p.connected)return'swarm';
+  return'known'
 }
 
 function renderBuilds(){
@@ -872,6 +1114,7 @@ function renderPackages(){
   var arr=PACKAGES.filter(function(pkg){return packageMatches(pkg,q)});
   document.getElementById('package-count').textContent=PACKAGES.length;
   document.getElementById('package-badge').textContent=arr.length;
+  renderTesterChecklist();
   if(!PACKAGES.length){el.innerHTML='<div class="empty">no installed packages found</div>';return}
   if(!arr.length){el.innerHTML='<div class="empty">no packages match</div>';return}
   arr.sort(function(a,b){
@@ -911,6 +1154,7 @@ function ensureTransfer(narHash,storePath,narSize){
       nar_hash:narHash||'',
       store_path:storePath||null,
       nar_size:narSize||null,
+      source:null,
       stages:{observed:false,trusted:false,providers:false,blocks:false,verified:false,reseeded:false},
       values:{observed:'pending',trusted:'pending',providers:'pending',blocks:'pending',verified:'pending',reseeded:'pending'},
       total_blocks_received:0,
@@ -933,6 +1177,7 @@ function mergeTransfer(t){
     nar_hash:t.nar_hash,
     store_path:null,
     nar_size:null,
+    source:null,
     total_blocks_received:0,
     total_bytes_received:0,
     total_blocks_served:0,
@@ -941,6 +1186,7 @@ function mergeTransfer(t){
   };
   if(t.store_path)cur.store_path=t.store_path;
   if(t.nar_size!=null)cur.nar_size=t.nar_size;
+  if(t.source)cur.source=t.source;
   if(t.total_blocks_received!=null)cur.total_blocks_received=t.total_blocks_received;
   if(t.total_bytes_received!=null)cur.total_bytes_received=t.total_bytes_received;
   if(t.total_blocks_served!=null)cur.total_blocks_served=t.total_blocks_served;
@@ -950,6 +1196,8 @@ function mergeTransfer(t){
   if(TRANSFER&&TRANSFER.nar_hash===t.nar_hash){
     Object.assign(TRANSFER,cur)
   }
+  renderOverview();
+  renderTesterChecklist();
 }
 
 function normalizeTransferPeers(peers,current){
@@ -1067,6 +1315,7 @@ function renderTransferPath(){
     +'<div class="transfer-name">'+esc(transferSubjectName(TRANSFER))+'</div>'
     +'<div class="transfer-hash">'+esc(TRANSFER.nar_hash||'?')+'</div>'
     +'<div class="transfer-meta">'+esc(TRANSFER.nar_size!=null?fmtSize(TRANSFER.nar_size):'size unknown')+'</div>'
+    +'<div class="transfer-meta"><span class="source-badge '+attr((TRANSFER.source||'').indexOf('http')>=0?'http':'p2p')+'">'+esc(sourceDisplay(TRANSFER.source))+'</span></div>'
     +'<div class="transfer-meta">'+esc((TRANSFER.total_blocks_received||0)+' blocks down / '+(TRANSFER.total_blocks_served||0)+' blocks up')+'</div>'
     +'</div>'
     +'<div class="transfer-compact-stages">'+renderTransferStageDots(TRANSFER)+'</div>'
@@ -1164,6 +1413,8 @@ function renderSeeds(){
   var count=keys.length;
   document.getElementById('seed-count').textContent=count;
   document.getElementById('seed-badge').textContent=count;
+  renderOverview();
+  renderTesterChecklist();
   if(!count){el.innerHTML='<div class="empty">not seeding</div>';return}
   var arr=keys.map(function(k){var s=SEEDS[k];s._key=k;return s});
   arr.sort(function(a,b){return(b.nar_size||0)-(a.nar_size||0)});
@@ -1369,7 +1620,7 @@ function handleEvent(e,meta){
       break;
 
     case 'DownloadSucceeded':
-      mergeTransfer({nar_hash:e.nar_hash,store_path:e.store_path,nar_size:e.size});
+      mergeTransfer({nar_hash:e.nar_hash,store_path:e.store_path,nar_size:e.size,source:e.source});
       markTransfer(e.nar_hash,e.store_path,e.size,'verified','imported in '+(e.elapsed_ms/1000).toFixed(1)+'s');
       addEvent('dl-ok','^','Download succeeded ['+(e.source||'unknown')+']: '+(e.store_path||e.nar_hash)+' ('+fmtSize(e.size)+', '+(e.elapsed_ms/1000).toFixed(1)+'s)',meta);
       break;
@@ -1607,11 +1858,26 @@ document.addEventListener('keydown',function(ev){
       }
       setStatus(WS?'live':'api ok',WS?'live':'offline')
     }).catch(function(){
+      LAST_STATUS=null;
       setStatus('api offline','offline')
     })
   }
   setInterval(refreshStatus,5000);
   refreshStatus();
+
+  function loadDiagnosticsSummary(){
+    fetch('/api/diagnostics').then(function(r){return r.json()}).then(function(report){
+      LAST_DIAGNOSTICS=report||null;
+      renderOverview();
+      renderTesterChecklist()
+    }).catch(function(){
+      LAST_DIAGNOSTICS=null;
+      renderOverview();
+      renderTesterChecklist()
+    })
+  }
+  setInterval(loadDiagnosticsSummary,10000);
+  loadDiagnosticsSummary();
 
   function loadPeers(){
     fetch('/api/peers').then(function(r){return r.json()}).then(function(ps){
