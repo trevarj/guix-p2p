@@ -715,8 +715,10 @@ locally-seeded nars in real time:
   momentarily.
 - **Reload-safe event history**: dashboard events are retained in a daemon
   memory ring buffer and exposed through `/api/events`, so browser reloads
-  restore the latest operational history. This history is intentionally not
-  persisted across daemon restarts.
+  restore the latest operational history. The web dashboard renders this
+  history newest-first, keeps the event filters pinned above the list, and
+  scrolls the event list from the top so recent failures remain visible. This
+  history is intentionally not persisted across daemon restarts.
 - **Transfer evidence**: accepted `BlockReceived` events and non-empty
   `BlockServed` events are aggregated by peer, so the transfer path shows
   which peers contributed downloaded blocks and which requesters received

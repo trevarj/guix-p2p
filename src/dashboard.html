@@ -109,8 +109,14 @@ main{
   padding:0 5px;margin-left:6px;font-size:10px;border-radius:2px;vertical-align:middle
 }
 .panel>.help-btn{position:absolute;top:8px;right:8px;z-index:3}
-.events{border-top:1px solid var(--line)}
-.event-tools{display:flex;gap:4px;align-items:center;margin:-2px 0 8px;flex-wrap:wrap}
+.events{border-top:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden}
+.events-header{
+  position:sticky;top:-10px;z-index:2;background:var(--panel);
+  padding:8px 26px 8px 0;margin:-2px 0 8px;border-bottom:1px solid var(--line)
+}
+.events-header h2{position:static;top:auto;margin:0 0 8px;padding:0;background:transparent}
+.event-tools{display:flex;gap:4px;align-items:center;margin:0;flex-wrap:wrap}
+#events-list{flex:1;min-height:0;overflow-y:auto;padding-right:4px}
 .event-filter{
   background:var(--bg3);border:1px solid var(--line);color:var(--muted);
   font-family:var(--font);font-size:10px;padding:3px 7px;cursor:pointer;border-radius:4px
@@ -120,7 +126,7 @@ main{
 .events .entry.added{animation:slidein .3s ease}
 .events .entry .ts{color:var(--dim);margin-right:8px}
 .events .entry .kind{color:var(--muted);text-transform:uppercase;font-size:10px}
-.events .entry .msg{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.events .entry .msg{min-width:0;white-space:normal;overflow-wrap:anywhere}
 .events .entry.peer-conn .sym{color:var(--ok)}
 .events .entry.peer-disc .sym{color:var(--dim)}
 .events .entry.providers .sym{color:var(--acc)}
@@ -421,14 +427,16 @@ main{
     <div id="builds-list"><div class="empty">no builds observed</div></div>
   </div>
   <div class="panel events" data-help="events">
-    <h2 data-tip="Daemon event history. Reloading the page keeps the latest 500 events from daemon memory.">events</h2>
-    <div class="event-tools">
-      <button class="event-filter active" data-filter="all" onclick="setEventFilter('all')" data-tip="Show every persisted and live dashboard event.">all</button>
-      <button class="event-filter" data-filter="transfer" onclick="setEventFilter('transfer')" data-tip="Downloads, block movement, transfer success, and transfer failures.">transfers</button>
-      <button class="event-filter" data-filter="seed" onclick="setEventFilter('seed')" data-tip="Seed creation/removal and local seed actions.">seeds</button>
-      <button class="event-filter" data-filter="peer" onclick="setEventFilter('peer')" data-tip="Peer connection and disconnection activity.">peers</button>
-      <button class="event-filter" data-filter="discovery" onclick="setEventFilter('discovery')" data-tip="Narinfo, catalog, and provider discovery events.">discovery</button>
-      <button class="event-filter" data-filter="failure" onclick="setEventFilter('failure')" data-tip="Only failed downloads and local dashboard action failures.">failures</button>
+    <div class="events-header">
+      <h2 data-tip="Daemon event history. Reloading the page keeps the latest 500 events from daemon memory.">events</h2>
+      <div class="event-tools">
+        <button class="event-filter active" data-filter="all" onclick="setEventFilter('all')" data-tip="Show every persisted and live dashboard event.">all</button>
+        <button class="event-filter" data-filter="transfer" onclick="setEventFilter('transfer')" data-tip="Downloads, block movement, transfer success, and transfer failures.">transfers</button>
+        <button class="event-filter" data-filter="seed" onclick="setEventFilter('seed')" data-tip="Seed creation/removal and local seed actions.">seeds</button>
+        <button class="event-filter" data-filter="peer" onclick="setEventFilter('peer')" data-tip="Peer connection and disconnection activity.">peers</button>
+        <button class="event-filter" data-filter="discovery" onclick="setEventFilter('discovery')" data-tip="Narinfo, catalog, and provider discovery events.">discovery</button>
+        <button class="event-filter" data-filter="failure" onclick="setEventFilter('failure')" data-tip="Only failed downloads and local dashboard action failures.">failures</button>
+      </div>
     </div>
     <div id="events-list"></div>
   </div>
@@ -753,7 +761,7 @@ function renderEvents(){
     el.innerHTML='<div class="empty">no matching events</div>';
     return
   }
-  el.innerHTML=visible.slice(-500).map(function(e){
+  el.innerHTML=visible.slice(-500).reverse().map(function(e){
     var d=new Date(e.timestamp_ms||Date.now());
     var ts=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0');
     return '<div class="entry '+esc(e.cls)+(e.added?' added':'')+'">'
@@ -763,7 +771,7 @@ function renderEvents(){
       +'<span class="msg" data-tip="'+attr(e.msg)+'">'+esc(e.msg)+'</span>'
       +'</div>'
   }).join('');
-  el.scrollTop=el.scrollHeight;
+  el.scrollTop=0;
 }
 
 function peerIdShort(pid){return pid.slice(0,12)+'...'}
