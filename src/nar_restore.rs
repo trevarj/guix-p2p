@@ -1,97 +1,82 @@
-use std::process::Stdio;
-
 use anyhow::Context;
 
-/// Restore a NAR into a Guix store destination path.
+/// Write a NAR to the destination path requested by Guix.
 ///
-/// Guix's substitute protocol passes a destination path to the substituter and
-/// expects the substituter to materialize the NAR contents there. Writing raw
-/// NAR bytes at that path creates an invalid regular file.
-pub async fn restore_nar_to_destination(
+/// Guix's substitute protocol asks the substituter to materialize the
+/// downloaded archive at `DESTINATION`.  The daemon restores that archive into
+/// the store after the substituter reports success on fd 4.
+pub async fn write_nar_to_destination(
     nar_path: &std::path::Path,
     dest: &std::path::Path,
 ) -> anyhow::Result<()> {
-    let nar_path = nar_path.to_path_buf();
-    let dest = dest.to_path_buf();
-
-    tokio::time::timeout(
-        std::time::Duration::from_secs(60),
-        tokio::task::spawn_blocking(move || restore_nar_to_destination_sync(&nar_path, &dest)),
-    )
-    .await
-    .context("timed out restoring nar")?
-    .context("nar restore task failed")?
-}
-
-fn restore_nar_to_destination_sync(
-    nar_path: &std::path::Path,
-    dest: &std::path::Path,
-) -> anyhow::Result<()> {
-    let _ = std::fs::remove_file(dest);
-    let _ = std::fs::remove_dir_all(dest);
-
-    let program = if std::path::Path::new("/run/current-system/profile/bin/guix").exists() {
-        "/run/current-system/profile/bin/guix"
-    } else {
-        "guix"
-    };
-    let script_path = nar_path.with_extension("restore.scm");
-
-    let script = format!(
-        "(use-modules (guix serialization))(let ((port (open-file {} \"rb\")))(dynamic-wind(const \
-         #t)(lambda () (restore-file port {}))(lambda () (close-port port))))",
-        scheme_string(&nar_path.display().to_string()),
-        scheme_string(&dest.display().to_string())
-    );
-
-    std::fs::write(&script_path, script)
-        .with_context(|| format!("failed to write restore helper {}", script_path.display()))?;
-
-    let output = std::process::Command::new(program)
-        .arg("repl")
-        .arg("--")
-        .arg(&script_path)
-        .stdin(Stdio::null())
-        .output()
-        .with_context(|| format!("failed to run {program} repl to restore nar"))?;
-
-    let _ = std::fs::remove_file(&script_path);
-
-    if !output.status.success() {
-        return Err(anyhow::anyhow!(
-            "failed to restore nar into {}: {}",
-            dest.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+    match tokio::fs::symlink_metadata(dest).await {
+        Ok(metadata) if metadata.is_dir() => {
+            tokio::fs::remove_dir_all(dest).await.with_context(|| {
+                format!("failed to remove existing directory {}", dest.display())
+            })?;
+        },
+        Ok(_) => {
+            tokio::fs::remove_file(dest)
+                .await
+                .with_context(|| format!("failed to remove existing file {}", dest.display()))?;
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+        Err(e) => {
+            return Err(e).with_context(|| format!("failed to inspect {}", dest.display()));
+        },
     }
 
+    tokio::fs::copy(nar_path, dest).await.with_context(|| {
+        format!("failed to write nar {} to {}", nar_path.display(), dest.display())
+    })?;
     Ok(())
-}
-
-fn scheme_string(value: &str) -> String {
-    let mut quoted = String::with_capacity(value.len() + 2);
-    quoted.push('"');
-    for ch in value.chars() {
-        match ch {
-            '\\' => quoted.push_str("\\\\"),
-            '"' => quoted.push_str("\\\""),
-            '\n' => quoted.push_str("\\n"),
-            '\r' => quoted.push_str("\\r"),
-            '\t' => quoted.push_str("\\t"),
-            _ => quoted.push(ch),
-        }
-    }
-    quoted.push('"');
-    quoted
 }
 
 #[cfg(test)]
 mod tests {
-    use super::scheme_string;
+    use super::write_nar_to_destination;
 
-    #[test]
-    fn quotes_scheme_strings() {
-        assert_eq!(scheme_string("/tmp/simple"), "\"/tmp/simple\"");
-        assert_eq!(scheme_string("/tmp/a\"b\\c"), "\"/tmp/a\\\"b\\\\c\"");
+    #[tokio::test]
+    async fn writes_nar_bytes_to_destination() {
+        let root = std::env::temp_dir().join(format!(
+            "guix-p2p-nar-dest-test-{}-{}",
+            std::process::id(),
+            "writes"
+        ));
+        let _ = tokio::fs::remove_dir_all(&root).await;
+        tokio::fs::create_dir_all(&root).await.unwrap();
+
+        let nar = root.join("source.nar");
+        let dest = root.join("dest.nar");
+        tokio::fs::write(&nar, b"nar-bytes").await.unwrap();
+
+        write_nar_to_destination(&nar, &dest).await.unwrap();
+
+        let data = tokio::fs::read(&dest).await.unwrap();
+        assert_eq!(data, b"nar-bytes");
+        let _ = tokio::fs::remove_dir_all(&root).await;
+    }
+
+    #[tokio::test]
+    async fn replaces_existing_destination_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "guix-p2p-nar-dest-test-{}-{}",
+            std::process::id(),
+            "replaces"
+        ));
+        let _ = tokio::fs::remove_dir_all(&root).await;
+        tokio::fs::create_dir_all(&root).await.unwrap();
+
+        let nar = root.join("source.nar");
+        let dest = root.join("dest");
+        tokio::fs::write(&nar, b"nar-bytes").await.unwrap();
+        tokio::fs::create_dir(&dest).await.unwrap();
+        tokio::fs::write(dest.join("old"), b"old").await.unwrap();
+
+        write_nar_to_destination(&nar, &dest).await.unwrap();
+
+        let data = tokio::fs::read(&dest).await.unwrap();
+        assert_eq!(data, b"nar-bytes");
+        let _ = tokio::fs::remove_dir_all(&root).await;
     }
 }

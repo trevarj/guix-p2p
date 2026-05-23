@@ -38,7 +38,7 @@ pub enum ReplyWriter {
     /// Collect all output into a buffer (no channel prefix, for direct use).
     Buffer(Vec<u8>),
     /// Collect output with channel prefix framing for socket relay.
-    /// fd4: lines -> fd 4, out: lines -> stdout, nar: lines -> restored substitute.
+    /// fd4: lines -> fd 4, out: lines -> stdout, nar: lines -> destination NAR file.
     Socket { buf: Vec<u8> },
 }
 

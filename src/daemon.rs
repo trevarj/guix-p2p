@@ -20,7 +20,7 @@ use crate::{
     dht::ProviderCache,
     http_client::HttpClientError,
     nar_hash,
-    nar_restore::restore_nar_to_destination,
+    nar_restore::write_nar_to_destination,
     nar_store::NarStore,
     narinfo::NarinfoCache,
     reputation::ReputationTracker,
@@ -695,8 +695,9 @@ async fn try_swarm_substitute(
                     return;
                 }
             } else {
-                // Direct substitute mode runs as guix-daemon's child and can
-                // restore the destination path itself.
+                // Direct substitute mode runs as guix-daemon's child and must
+                // write the NAR file to the requested destination.  The daemon
+                // restores that archive after we report success on fd 4.
                 let temp_path = std::env::temp_dir().join(format!(
                     "guix-p2p-direct-{}-{}.nar",
                     std::process::id(),
@@ -712,14 +713,14 @@ async fn try_swarm_substitute(
                     });
                     return;
                 }
-                if let Err(e) = restore_nar_to_destination(&temp_path, &dest_path).await {
+                if let Err(e) = write_nar_to_destination(&temp_path, &dest_path).await {
                     let _ = tokio::fs::remove_file(&temp_path).await;
-                    tracing::error!("Failed to restore nar to {}: {}", dest_path.display(), e);
+                    tracing::error!("Failed to write nar to {}: {}", dest_path.display(), e);
                     let _ = reply.write_line("not-found");
                     let _ = event_tx.send(DashboardEvent::DownloadFailed {
                         nar_hash: nar_hash_hex.clone(),
                         store_path: store_path.clone(),
-                        reason: format!("restore error: {}", e),
+                        reason: format!("nar destination write error: {}", e),
                     });
                     return;
                 }

@@ -4033,6 +4033,14 @@ fn run_direct_substitute_logged(
     if !dest.exists() {
         anyhow::bail!("direct substitute did not restore {}", dest.display());
     }
+    if !dest.is_file() {
+        anyhow::bail!("direct substitute wrote {} but it is not a NAR file", dest.display());
+    }
+    let header = std::fs::read(&dest)
+        .with_context(|| format!("failed to read direct substitute output {}", dest.display()))?;
+    if !header.starts_with(b"\r\0\0\0\0\0\0\0nix-arch") {
+        anyhow::bail!("direct substitute output is not a NAR archive: {}", dest.display());
+    }
     Ok(())
 }
 

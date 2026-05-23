@@ -2,7 +2,7 @@ use anyhow::Context;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
-use crate::nar_restore::restore_nar_to_destination;
+use crate::nar_restore::write_nar_to_destination;
 
 /// Connect to the daemon's Unix socket, forward stdin bytes to it,
 /// read reply lines and route them to the correct file descriptor.
@@ -147,10 +147,10 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
             tracing::info!(
                 nar = %temp_path.display(),
                 dest = %dest,
-                "restoring nar to substitute destination"
+                "writing nar to substitute destination"
             );
-            restore_nar_to_destination(&temp_path, std::path::Path::new(&dest)).await?;
-            tracing::info!(dest = %dest, "restored nar to substitute destination");
+            write_nar_to_destination(&temp_path, std::path::Path::new(&dest)).await?;
+            tracing::info!(dest = %dest, "wrote nar to substitute destination");
             let _ = tokio::fs::remove_file(&temp_path).await;
         } else {
             // Legacy unprefixed line → treat as fd 4 data for backward compat
