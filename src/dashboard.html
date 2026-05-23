@@ -64,13 +64,9 @@ button:focus-visible,input:focus-visible,.theme-select:focus-visible{outline:1px
 .header-readiness{
   flex:1 1 560px;max-width:760px;min-width:320px;text-align:left;
   display:grid;grid-template-columns:minmax(180px,1fr) minmax(210px,1.1fr) minmax(150px,.8fr);
-  gap:12px;align-items:center;padding:8px 72px 8px 10px;min-height:58px;position:relative
+  gap:12px;align-items:center;padding:8px 10px;min-height:58px;position:relative
 }
 .header-readiness:hover{background:var(--panel2)}
-.header-readiness::after{
-  content:'details >';position:absolute;right:10px;top:50%;transform:translateY(-50%);
-  color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.7px
-}
 .header-readiness .health-card,.header-readiness .info-card,.header-readiness .network-card{
   border:0;background:transparent;padding:0;border-radius:0
 }
@@ -403,8 +399,7 @@ main{
   .transfer-compact-stages{grid-template-columns:repeat(2,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:1fr 1fr}
   .transfer-peers{grid-template-columns:1fr}
-  .header-readiness{grid-template-columns:1fr;padding-right:10px}
-  .header-readiness::after{display:none}
+  .header-readiness{grid-template-columns:1fr}
   .tester-grid{grid-template-columns:1fr}
   .events .entry{grid-template-columns:62px 18px 1fr}
   .events .entry .kind{display:none}
