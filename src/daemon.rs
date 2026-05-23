@@ -917,12 +917,12 @@ async fn try_p2p_download(
     }
 
     if handshakes.len() < config.min_providers {
+        let fallback_pool = merge_provider_lists(
+            &selected_providers,
+            &fallback_peer_candidates(config, conn_mgr, &[]),
+        );
         let fallback_candidates = select_provider_candidates(
-            &fallback_peer_candidates(
-                config,
-                conn_mgr,
-                &merge_provider_lists(&selected_providers, &handshake_peers(&handshakes)),
-            ),
+            &exclude_peers(&fallback_pool, &handshake_peers(&handshakes)),
             reputation,
             conn_mgr,
             config.max_peers_per_download,
@@ -1159,6 +1159,11 @@ fn fallback_peer_candidates(
         .into_iter()
         .filter(|peer| !excluded.contains(peer))
         .collect()
+}
+
+fn exclude_peers(peers: &[PeerId], exclude: &[PeerId]) -> Vec<PeerId> {
+    let excluded: HashSet<_> = exclude.iter().copied().collect();
+    peers.iter().copied().filter(|peer| !excluded.contains(peer)).collect()
 }
 
 fn bootstrap_peer_ids(addrs: &[String]) -> Vec<PeerId> {
@@ -2341,6 +2346,16 @@ mod tests {
         let candidates = fallback_peer_candidates(&config, &conn_mgr, &[excluded]);
 
         assert_eq!(candidates, vec![connected, bootstrap]);
+    }
+
+    #[test]
+    fn exclude_peers_keeps_insufficient_dht_provider_for_fallback_pool() {
+        let dht_provider = PeerId::random();
+        let connected = PeerId::random();
+        let pool = merge_provider_lists(&[dht_provider], &[connected]);
+
+        assert_eq!(exclude_peers(&pool, &[]), vec![dht_provider, connected]);
+        assert_eq!(exclude_peers(&pool, &[dht_provider]), vec![connected]);
     }
 
     #[test]

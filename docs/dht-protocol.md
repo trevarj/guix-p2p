@@ -43,6 +43,11 @@ Downloader discovery is hybrid:
    and configured bootstrap peer IDs.
 4. Fall back to HTTP only if those P2P handshakes cannot produce a usable peer.
 
+When Kad returns some providers but fewer than `min_providers`, those providers
+are still included in the connected/bootstrap fallback handshake pool. The
+fallback path needs only one successful proof handshake, which is the expected
+shape for a one-bootstrap early network.
+
 The runtime tracks libp2p Kad query IDs for provider lookups so empty
 `FinishedWithNoAdditionalRecord` results can be reported against the original
 NAR hash instead of being inferred from a requester-side timeout.
