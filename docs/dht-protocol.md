@@ -43,6 +43,10 @@ Downloader discovery is hybrid:
    and configured bootstrap peer IDs.
 4. Fall back to HTTP only if those P2P handshakes cannot produce a usable peer.
 
+The runtime tracks libp2p Kad query IDs for provider lookups so empty
+`FinishedWithNoAdditionalRecord` results can be reported against the original
+NAR hash instead of being inferred from a requester-side timeout.
+
 The connected/bootstrap fallback is intentionally not a trust shortcut. The
 same block handshake, block-hash verification, and final NAR hash verification
 apply. It exists so a small early network with one public bootstrap/seeder can

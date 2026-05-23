@@ -1,8 +1,10 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use futures::StreamExt;
 use libp2p::{
-    Multiaddr, SwarmBuilder, noise, quic, request_response,
+    Multiaddr, SwarmBuilder,
+    kad::QueryId,
+    noise, quic, request_response,
     swarm::{DialError, SwarmEvent},
     tcp, yamux,
 };
@@ -35,6 +37,7 @@ pub async fn run_swarm_task(
 ) {
     let mut prune_tick = tokio::time::interval(Duration::from_secs(300));
     let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut active_provider_queries: HashMap<QueryId, String> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -48,7 +51,13 @@ pub async fn run_swarm_task(
             event = swarm.select_next_some() => {
                 match event {
                     SwarmEvent::Behaviour(GuixP2PEvent::Kad(ref e)) => {
-                        dht::handle_kad_event(&cache, &notify_tx, &event_tx, e);
+                        dht::handle_kad_event(
+                            &cache,
+                            &notify_tx,
+                            &event_tx,
+                            &mut active_provider_queries,
+                            e,
+                        );
                     },
                     SwarmEvent::Behaviour(GuixP2PEvent::BlockExchange(e)) => {
                         let ctx = BlockExchangeContext {
@@ -172,7 +181,7 @@ pub async fn run_swarm_task(
                 }
             }
             Some(cmd) = cmd_rx.next() => {
-                handle_swarm_command(&mut swarm, cmd, &event_tx);
+                handle_swarm_command(&mut swarm, cmd, &event_tx, &mut active_provider_queries);
             }
             Some(pending) = response_rx.recv() => {
                 let _ = swarm
@@ -188,7 +197,8 @@ pub async fn run_swarm_task(
                 let _ = event_tx.send(dashboard::DashboardEvent::ProviderLookupStarted {
                     nar_hash: hash.clone(),
                 });
-                swarm.behaviour_mut().kad.get_providers(key);
+                let query_id = swarm.behaviour_mut().kad.get_providers(key);
+                active_provider_queries.insert(query_id, hash.clone());
                 tracing::debug!("DHT get_providers for hash={}", hash);
             }
         }
@@ -284,6 +294,7 @@ fn handle_swarm_command(
     swarm: &mut libp2p::Swarm<GuixP2PBehaviour>,
     cmd: SwarmCommand,
     event_tx: &dashboard::EventBus,
+    active_provider_queries: &mut HashMap<QueryId, String>,
 ) {
     match cmd {
         SwarmCommand::GetProviders { hash } => {
@@ -291,7 +302,8 @@ fn handle_swarm_command(
             let key = libp2p::kad::RecordKey::new(&key_bytes);
             let _ = event_tx
                 .send(dashboard::DashboardEvent::ProviderLookupStarted { nar_hash: hash.clone() });
-            swarm.behaviour_mut().kad.get_providers(key);
+            let query_id = swarm.behaviour_mut().kad.get_providers(key);
+            active_provider_queries.insert(query_id, hash.clone());
             tracing::debug!("DHT get_providers for hash={}", hash);
         },
         SwarmCommand::SendBlockRequest { peer, request } => {

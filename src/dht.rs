@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use libp2p::{
     Multiaddr, PeerId,
-    kad::{Event as KadEvent, GetProvidersError, GetProvidersOk, QueryResult},
+    kad::{Event as KadEvent, GetProvidersError, GetProvidersOk, QueryId, QueryResult},
     multiaddr::Protocol,
 };
 
@@ -54,29 +54,53 @@ pub fn handle_kad_event(
     cache: &ProviderCache,
     notify_tx: &NotifyTx,
     event_tx: &dashboard::EventBus,
+    active_provider_queries: &mut HashMap<QueryId, String>,
     event: &KadEvent,
 ) {
     let (key_hex, providers, lookup_result) = match event {
         KadEvent::OutboundQueryProgressed {
+            id,
             result: QueryResult::GetProviders(Ok(GetProvidersOk::FoundProviders { key, providers })),
+            step,
             ..
         } => {
             let peers: Vec<libp2p::PeerId> = providers.iter().copied().collect();
+            if step.last {
+                active_provider_queries.remove(id);
+            }
             (record_key_hex(key), peers, "found")
         },
         KadEvent::OutboundQueryProgressed {
+            id,
             result:
                 QueryResult::GetProviders(Ok(GetProvidersOk::FinishedWithNoAdditionalRecord { .. })),
+            step,
             ..
         } => {
-            // libp2p does not include the key in this event. The requester-side
-            // timeout still records the empty result for the requested hash.
+            let Some(key_hex) = active_provider_queries.get(id).cloned() else {
+                return;
+            };
+            if step.last {
+                active_provider_queries.remove(id);
+            }
+            let _ = event_tx.send(dashboard::DashboardEvent::ProviderLookupFinished {
+                nar_hash: key_hex,
+                provider_count: 0,
+                result: "empty".to_string(),
+            });
             return;
         },
         KadEvent::OutboundQueryProgressed {
+            id,
             result: QueryResult::GetProviders(Err(GetProvidersError::Timeout { key, .. })),
+            step,
             ..
-        } => (record_key_hex(key), Vec::new(), "timeout"),
+        } => {
+            if step.last {
+                active_provider_queries.remove(id);
+            }
+            (record_key_hex(key), Vec::new(), "timeout")
+        },
         KadEvent::OutboundQueryProgressed {
             result: QueryResult::StartProviding(result) | QueryResult::RepublishProvider(result),
             ..
