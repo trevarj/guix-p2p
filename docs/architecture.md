@@ -742,18 +742,26 @@ locally-seeded nars in real time:
 - The dashboard package panel consumes `/api/packages`, supports fuzzy search
   across package name, version, and store path, and shows source, output, store
   path, and seed state. Its row-level seed control calls `POST /api/seeds`.
-- The dashboard layout starts with one consolidated readiness band for the
-  known-tester workflow. It groups node health, daemon version/commit, uptime,
-  connectivity role, the first shareable/bootstrap address, peer/DHT summary,
-  latest transfer source, and the minimal tester gates before the detailed
-  transfer proof path, packages, active seeds, peers, catalog, builds, and
-  filtered event history.
+- The dashboard layout is organized for seeder management. It starts with a
+  compact readiness band that always shows node health, connectivity role, and
+  latest transfer source. Version/commit, uptime, peer/DHT summary, and tester
+  gates are hidden behind a details control so the primary workspace remains
+  focused on transfers and active seeds.
+- The primary workspace gives the transfer proof path full width, places
+  Packages as a secondary add-seed list, and gives Active Seeds the wider
+  management area.
+- Catalog and Builds are merged into one Discovery panel. It combines
+  substitute lookup rows with narinfo/build metadata, showing store path,
+  size, P2P/HTTP availability, and provider count when known. Rows with build
+  metadata still open the existing signed narinfo/build detail overlay.
+- Events remain a compact full-width bottom log for recent failures,
+  connectivity trace, and transfer proof breadcrumbs.
 - Detailed counts live in the panels that own them. The header intentionally
   avoids duplicating package, seed, peer, catalog, DHT, and uptime counters.
-- The tester checklist summarizes only the setup gates that usually block a
-  real first-run P2P substitute test: Guix integration, bootstrap peers,
-  connected peers, observed transfer activity, and whether the node is directly
-  shareable or client-only.
+- The tester checklist appears only in readiness details and summarizes the
+  setup gates that usually block a real first-run P2P substitute test: Guix
+  integration, bootstrap peers, connected peers, observed transfer activity,
+  and whether the node is directly shareable or client-only.
 - The dashboard header uses an inline `guix-p2p` SVG wordmark so the embedded
   dashboard can render the logo without a separate static asset route.
 - The main dashboard grid scrolls as a whole when zoom or viewport height makes
@@ -816,13 +824,16 @@ Dashboard events related to seeding:
 | `BlockReceived` | Emitted when requested blocks are accepted from a provider (includes nar hash, peer, indices, bytes) |
 | `BlockServed` | Emitted when blocks are served to a requesting peer (includes nar hash, peer, indices) |
 
-## Dashboard Catalog View
+## Dashboard Discovery View
 
-The web dashboard includes a **catalog** panel showing packages discovered
-during substitute queries. Each entry shows the store path name, nar size, and
-whether P2P providers are available.
+The web dashboard includes a **discovery** panel showing packages discovered
+during substitute queries plus matching narinfo/build metadata when available.
+Each entry shows the store path name, nar size, whether P2P providers are
+available, and the provider count from build metadata when known.
 
 - `/api/catalog` returns all catalog entries seen by this node
+- `/api/builds` returns observed narinfo/build records that the browser merges
+  into the discovery panel
 - `CatalogEntry` events are emitted by the daemon when a `have` query
   processes a store path with narinfo metadata
 - A dashboard-owned catalog listener records `CatalogEntry` events whether or

@@ -72,12 +72,12 @@ button:focus-visible,input:focus-visible,.theme-select:focus-visible{outline:1px
 .status-pill.offline::before{background:var(--err);box-shadow:0 0 8px rgba(210,75,75,.45)}
 .status-pill.demo{color:var(--warn)}
 main{
-  display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:minmax(160px,.48fr) minmax(150px,.5fr) minmax(260px,1.1fr) minmax(210px,.85fr) minmax(150px,.45fr);
+  display:grid;grid-template-columns:.85fr 1.1fr 1.1fr;grid-template-rows:minmax(78px,.24fr) minmax(150px,.52fr) minmax(280px,1.18fr) minmax(210px,.8fr) minmax(120px,.34fr);
   grid-template-areas:
     "overview overview overview"
     "transfer transfer transfer"
     "packages seeds seeds"
-    "peers catalog builds"
+    "peers metadata metadata"
     "events events events";
   flex:1;min-height:0;overflow:auto;gap:8px;padding:8px
 }
@@ -90,9 +90,8 @@ main{
 .transfer-panel{grid-area:transfer}
 .overview-panel{grid-area:overview}
 .peers-panel{grid-area:peers}
-.catalog-panel{grid-area:catalog}
-.builds-panel{grid-area:builds}
-.events{grid-area:events;min-height:160px}
+.metadata-panel{grid-area:metadata}
+.events{grid-area:events;min-height:120px}
 .panel h2{
   font-size:11px;text-transform:uppercase;letter-spacing:1.5px;
   color:var(--acc);margin:-2px 0 8px;position:sticky;top:-10px;
@@ -154,13 +153,15 @@ main{
 .peer-row .status{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:4px}
 .peer-row.offline .status{background:var(--dim)}
 .peer-row.offline{opacity:.55}
-.catalog-row,.build-row,.seed-row,.package-row{cursor:pointer;border-radius:4px;padding-left:3px;padding-right:3px}
-.catalog-row:hover,.build-row:hover,.seed-row:hover,.package-row:hover{background:var(--panel2)}
-.catalog-row .path,.build-row .path,.seed-row .path,.package-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
-.catalog-row .size{min-width:70px;text-align:right;font-size:11px;opacity:.6}
-.catalog-row .p2p{min-width:40px;text-align:center;font-size:10px}
-.catalog-row .p2p.yes{color:var(--ok)}
-.catalog-row .p2p.no{color:var(--dim)}
+.catalog-row,.metadata-row,.build-row,.seed-row,.package-row{cursor:pointer;border-radius:4px;padding-left:3px;padding-right:3px}
+.catalog-row:hover,.metadata-row:hover,.build-row:hover,.seed-row:hover,.package-row:hover{background:var(--panel2)}
+.catalog-row .path,.metadata-row .path,.build-row .path,.seed-row .path,.package-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
+.catalog-row .size,.metadata-row .size{min-width:70px;text-align:right;font-size:11px;opacity:.6}
+.catalog-row .p2p,.metadata-row .p2p{min-width:40px;text-align:center;font-size:10px}
+.catalog-row .p2p.yes,.metadata-row .p2p.yes{color:var(--ok)}
+.catalog-row .p2p.no,.metadata-row .p2p.no{color:var(--dim)}
+.metadata-row{display:grid;grid-template-columns:minmax(0,1fr) 74px 56px 70px;align-items:center;column-gap:6px;border-bottom:1px solid var(--line);font-size:12px}
+.metadata-row .providers{text-align:right;color:var(--acc);font-size:11px}
 .build-row .path,.seed-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
 .build-row .providers{min-width:60px;text-align:right;color:var(--acc)}
 .seed-row .hash{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7;font-family:var(--font)}
@@ -204,7 +205,7 @@ main{
 .package-row .seed-action:hover{border-color:var(--acc)}
 .package-row.seeded .seed-action{color:var(--dim)}
 .package-row .seed-action:disabled{cursor:not-allowed;opacity:.55;border-color:var(--line)}
-.overview-grid{display:grid;grid-template-columns:minmax(230px,1.25fr) repeat(3,minmax(140px,.75fr));gap:8px;align-items:stretch}
+.overview-grid{display:grid;grid-template-columns:minmax(230px,1.2fr) minmax(180px,.9fr) minmax(150px,.8fr) auto;gap:8px;align-items:stretch}
 .health-card,.info-card,.check-card,.network-card{
   border:1px solid var(--line);background:var(--bg2);border-radius:6px;padding:9px;min-width:0
 }
@@ -214,13 +215,20 @@ main{
 .health-dot.error{background:var(--err);box-shadow:0 0 16px rgba(227,106,106,.45)}
 .health-title{font-size:15px;color:var(--fg)}
 .health-detail{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.info-card .k,.check-card .k{display:block;color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:.8px}
-.info-card .v{display:block;color:var(--fg);font-size:15px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.info-card .k,.network-card .k,.check-card .k{display:block;color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:.8px}
+.info-card .v,.network-card .v{display:block;color:var(--fg);font-size:15px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .info-card .sub{display:block;color:var(--muted);font-size:10px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .network-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start}
 .network-card .detail{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
 .network-card .line{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tester-grid{display:grid;grid-template-columns:repeat(6,minmax(72px,1fr));gap:6px;margin-top:8px}
+.readiness-toggle{
+  align-self:stretch;background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
+  padding:0 12px;font-family:var(--font);font-size:11px;cursor:pointer;border-radius:4px
+}
+.readiness-toggle:hover{border-color:var(--acc)}
+.readiness-detail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
+.readiness-detail.hidden{display:none}
+.tester-grid{display:grid;grid-template-columns:repeat(5,minmax(72px,1fr));gap:6px}
 .check-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px;align-items:center;padding:6px}
 .check-card .mark{width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;font-size:11px;background:var(--bg3);color:var(--warn);border:1px solid var(--line)}
 .check-card.ok .mark{color:var(--ok);border-color:rgba(103,200,121,.5)}
@@ -356,7 +364,7 @@ main{
       "transfer transfer"
       "packages packages"
       "seeds peers"
-      "catalog builds"
+      "metadata metadata"
       "events events"
   }
   .transfer-card{grid-template-columns:1fr}
@@ -365,6 +373,7 @@ main{
   .transfer-compact-stages{grid-template-columns:repeat(3,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:repeat(3,1fr)}
   .overview-grid{grid-template-columns:1fr 1fr}
+  .readiness-detail{grid-template-columns:1fr}
   .tester-grid{grid-template-columns:repeat(3,1fr)}
 }
 @media (max-width:720px){
@@ -377,7 +386,7 @@ main{
   .transfer-compact-stages{grid-template-columns:repeat(2,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:1fr 1fr}
   .transfer-peers{grid-template-columns:1fr}
-  .overview-grid,.tester-grid{grid-template-columns:1fr}
+  .overview-grid,.readiness-detail,.tester-grid{grid-template-columns:1fr}
   .events .entry{grid-template-columns:62px 18px 1fr}
   .events .entry .kind{display:none}
 }
@@ -427,11 +436,6 @@ main{
           <span class="health-detail" id="health-detail">waiting for dashboard API</span>
         </span>
       </div>
-      <div class="info-card" data-tip="guix-p2p version and embedded commit.">
-        <span class="k">version</span>
-        <span class="v" id="node-version">--</span>
-        <span class="sub" id="uptime">uptime --</span>
-      </div>
       <div class="network-card" id="network-diagnostics" role="button" tabindex="0" data-tip="Open full doctor-style diagnostics.">
         <span class="source-badge" id="connectivity-badge">unknown</span>
         <span>
@@ -444,18 +448,37 @@ main{
           </span>
         </span>
       </div>
-      <div class="info-card" data-tip="Peer and DHT summary. Detailed peer rows live in the Peers panel.">
-        <span class="k">swarm</span>
-        <span class="v" id="overview-connected">0 connected</span>
-        <span class="sub" id="overview-known">0 known / 0 dht</span>
-      </div>
       <div class="info-card" data-tip="Latest transfer source, if a transfer has been observed.">
         <span class="k">latest source</span>
         <span class="v" id="overview-source">none</span>
         <span class="sub" id="overview-transfer">no transfer</span>
       </div>
+      <button type="button" class="readiness-toggle" id="readiness-toggle" onclick="toggleReadinessDetail()">details</button>
     </div>
-    <div class="tester-grid" id="tester-checks"></div>
+    <div class="readiness-detail hidden" id="readiness-detail">
+      <div class="info-card" data-tip="guix-p2p version and embedded commit.">
+        <span class="k">version</span>
+        <span class="v" id="node-version">--</span>
+        <span class="sub" id="uptime">uptime --</span>
+      </div>
+      <div class="info-card" data-tip="Peer and DHT summary. Detailed peer rows live in the Peers panel.">
+        <span class="k">swarm</span>
+        <span class="v" id="overview-connected">0 connected</span>
+        <span class="sub" id="overview-known">0 known / 0 dht</span>
+      </div>
+      <div class="info-card" data-tip="First-run setup gates that usually block tester onboarding.">
+        <span class="k">setup gates</span>
+        <div class="tester-grid" id="tester-checks"></div>
+      </div>
+    </div>
+  </div>
+  <div class="panel transfer-panel" data-help="transfer">
+    <h2 data-tip="Latest P2P proof path: observed package, trusted narinfo, providers, block movement, import, and re-seeding.">transfer path</h2>
+    <div id="transfer-path"><div class="empty">no transfer observed</div></div>
+  </div>
+  <div class="panel seeds-panel" data-help="seeds">
+    <h2 data-tip="NARs this node can serve to other peers.">active seeds <span class="badge" id="seed-badge">0</span></h2>
+    <div id="seeds-list"><div class="empty">not seeding</div></div>
   </div>
   <div class="panel packages-panel" data-help="packages">
     <h2 data-tip="Installed store paths that can be seeded into the local P2P cache.">packages <span class="badge" id="package-badge">0</span></h2>
@@ -465,25 +488,13 @@ main{
     </div>
     <div id="packages-list"><div class="empty">loading packages</div></div>
   </div>
-  <div class="panel seeds-panel" data-help="seeds">
-    <h2 data-tip="NARs this node can serve to other peers.">active seeds <span class="badge" id="seed-badge">0</span></h2>
-    <div id="seeds-list"><div class="empty">not seeding</div></div>
-  </div>
-  <div class="panel transfer-panel" data-help="transfer">
-    <h2 data-tip="Latest P2P proof path: observed package, trusted narinfo, providers, block movement, import, and re-seeding.">transfer path</h2>
-    <div id="transfer-path"><div class="empty">no transfer observed</div></div>
-  </div>
   <div class="panel peers-panel" data-help="peers">
     <h2 data-tip="Peers known through reputation records and live connection events.">peers</h2>
     <div id="peers-list"><div class="empty">no peers yet</div></div>
   </div>
-  <div class="panel catalog-panel" data-help="catalog">
-    <h2 data-tip="Substitute lookups observed by this node, including whether P2P providers were found.">catalog <span class="badge" id="catalog-badge">0</span></h2>
-    <div id="catalog-list"><div class="empty">no packages discovered</div></div>
-  </div>
-  <div class="panel builds-panel" data-help="builds">
-    <h2 data-tip="Observed narinfo/build records with provider counts and detail drill-down.">builds</h2>
-    <div id="builds-list"><div class="empty">no builds observed</div></div>
+  <div class="panel metadata-panel" data-help="metadata">
+    <h2 data-tip="Merged substitute lookup and narinfo/build metadata.">discovery <span class="badge" id="metadata-badge">0</span></h2>
+    <div id="metadata-list"><div class="empty">no metadata discovered</div></div>
   </div>
   <div class="panel events" data-help="events">
     <div class="events-header">
@@ -541,7 +552,7 @@ var SERVER_STARTED=null;
 var DEMO_MODE=false;
 var HELP_TEXT={
   dashboard:['Dashboard','This page is the local operational view for a guix-p2p daemon. It combines seed inventory, transfer proof evidence, peer health, discovered substitute metadata, and recent daemon events.'],
-  overview:['Readiness','A compact first-screen summary for the local daemon: health, version, uptime, network role, peer/DHT state, latest transfer source, and the few setup gates that usually block tester onboarding.\n\nDetailed counts live in their owner panels below: packages, active seeds, peers, catalog, builds, transfer path, and events.'],
+  overview:['Readiness','A compact first-screen summary for the local daemon: health, network role, and latest transfer source.\n\nVersion, uptime, swarm summary, and tester setup gates are available from the details control so the primary seeding workspace has more room. Detailed counts live in their owner panels below.'],
   connected:['Connected Peers','The number of currently connected swarm peers reported by the daemon connection manager. A low value can be normal before discovery or when only bootstrap forwarding is available.'],
   'known-peers':['Known Peers','Peers that have reputation records. This can include disconnected peers if the daemon has seen successful or failed work from them before.'],
   dht:['DHT Records','Provider records currently known in the local DHT cache. These records help the node find peers that claim they can serve a desired NAR.'],
@@ -556,6 +567,7 @@ var HELP_TEXT={
   seeds:['Active Seeds','Shows cached NARs this node can serve to other peers.\n\nEach row shows the package/store item when known, the full path as secondary text, size and block metadata, and a stop action. Open a row for hash, size, block count, and seeding status. Stop removes the cached NAR and persisted seed path when metadata is available.'],
   transfer:['Transfer Path','Shows the latest proof path for P2P substitution.\n\nThe compact row shows package identity, NAR hash, size, total block movement, peer counts, downloaded bytes, and the six-stage progress strip: observed, trusted, providers, blocks, verified, and re-seeded. Click the row for detailed stage values and per-peer block contribution evidence.'],
   peers:['Peers','Ranks known peers by reputation score and connection state.\n\nRows show peer identity, score, and available address metadata. Offline rows are peers remembered from reputation history rather than active connections. Use this panel to confirm whether local or VM nodes are actually connected.'],
+  metadata:['Discovery','Merged substitute lookup and narinfo/build metadata.\n\nRows show observed store paths, known sizes when available, whether P2P providers were found, and provider counts when narinfo/build detail is known. Open a row with build metadata to inspect signed narinfo details.'],
   catalog:['Catalog','Tracks substitute lookups this node has processed.\n\nRows show observed store paths, known sizes when available, and whether P2P providers were found. P2P entries mean provider discovery found peers for that item; HTTP entries mean no P2P provider was known at that time.'],
   builds:['Builds','Shows observed narinfo/build records with provider counts.\n\nOpen a build row to inspect store path, size, deriver, download/cache status, references, provider peer ids, and raw signed narinfo text when available.'],
   events:['Events','A daemon-memory event log capped at 500 entries. It survives browser reloads but not daemon restarts.\n\nFilters narrow the stream by all events, transfer activity, seed changes, peer connections, discovery/catalog updates, or failures. Rows show time, symbol, event kind, and message.'],
@@ -789,6 +801,14 @@ function renderTesterChecklist(){
   el.innerHTML=items.map(function(item){return testerItem(item[0],item[1],item[2])}).join('')
 }
 
+function toggleReadinessDetail(){
+  var detail=document.getElementById('readiness-detail');
+  var button=document.getElementById('readiness-toggle');
+  if(!detail||!button)return;
+  var hidden=detail.classList.toggle('hidden');
+  button.textContent=hidden?'details':'hide'
+}
+
 function applyTheme(themeId){
   if(THEME_IDS.indexOf(themeId)<0)themeId='theme-yellow';
   THEME_IDS.forEach(function(t){document.body.classList.remove(t)});
@@ -1020,44 +1040,68 @@ function peerSource(peerId,p){
 }
 
 function renderBuilds(){
-  var el=document.getElementById('builds-list');
-  var keys=Object.keys(BUILDS);
-  if(!keys.length){el.innerHTML='<div class="empty">no builds observed</div>';return}
-  var arr=keys.map(function(k){return BUILDS[k]});
-  arr.sort(function(a,b){return(b.providers||0)-(a.providers||0)});
-  var h='';
-  arr.forEach(function(b){
-    var sz=b.nar_size!=null?fmtSize(b.nar_size):'?';
-    var name=b.store_path?b.store_path.split('-').slice(1).join('-'):b.nar_hash.slice(0,16);
-    var lookup=b.lookup_key||b.nar_hash;
-    h+='<div class="build-row" data-hash="'+attr(lookup)+'" onclick="openDetail(\''+jsArg(lookup)+'\')">'
-      +'<span class="path" data-tip="'+attr(b.store_path||b.nar_hash)+'">'+esc(name)+'</span>'
-      +'<span class="providers">'+esc(b.providers||0)+' peers</span>'
-      +'<span style="font-size:11px;opacity:.6">'+esc(sz)+'</span>'
-      +'</div>';
-  });
-  el.innerHTML=h;
+  renderMetadata()
 }
 
 function renderCatalog(){
-  var el=document.getElementById('catalog-list');
+  renderMetadata()
+}
+
+function renderMetadata(){
+  var el=document.getElementById('metadata-list');
+  if(!el)return;
+  var rows=[];
+  var seen={};
   var keys=Object.keys(CATALOG);
-  setText('catalog-badge',keys.length);
-  if(!keys.length){el.innerHTML='<div class="empty">no packages discovered</div>';return}
-  var arr=keys.map(function(k){return CATALOG[k]});
-  arr.sort(function(a,b){return(b.nar_size||0)-(a.nar_size||0)});
-  var h='';
-  arr.forEach(function(c){
-    var name=c.store_path?c.store_path.split('-').slice(1).join('-'):c.hash_part;
-    var sz=c.nar_size!=null?fmtSize(c.nar_size):'?';
-    var p2p=c.p2p_available?'yes':'no';
-    h+='<div class="catalog-row">'
-      +'<span class="path" data-tip="'+attr(c.store_path||c.hash_part)+'">'+esc(name)+'</span>'
-      +'<span class="size">'+esc(sz)+'</span>'
-      +'<span class="p2p '+p2p+'">'+(c.p2p_available?'P2P':'http')+'</span>'
-      +'</div>';
+  keys.forEach(function(k){
+    var c=CATALOG[k];
+    var b=(c.nar_hash&&BUILDS[c.nar_hash])||BUILDS[c.hash_part]||null;
+    var id=(c.nar_hash||c.hash_part||k);
+    seen[id]=true;
+    rows.push({
+      id:id,
+      lookup:b&&(b.lookup_key||b.nar_hash),
+      store_path:c.store_path||(b&&b.store_path),
+      nar_size:c.nar_size!=null?c.nar_size:(b&&b.nar_size),
+      p2p_available:Boolean(c.p2p_available),
+      providers:b?(b.providers||0):0,
+      tip:(c.store_path||c.hash_part||id)
+    })
   });
-  el.innerHTML=h;
+  Object.keys(BUILDS).forEach(function(k){
+    var b=BUILDS[k];
+    var id=b.nar_hash||k;
+    if(seen[id])return;
+    rows.push({
+      id:id,
+      lookup:b.lookup_key||b.nar_hash,
+      store_path:b.store_path,
+      nar_size:b.nar_size,
+      p2p_available:(b.providers||0)>0,
+      providers:b.providers||0,
+      tip:b.store_path||b.nar_hash||k
+    })
+  });
+  rows.sort(function(a,b){
+    return Number(Boolean(b.p2p_available))-Number(Boolean(a.p2p_available))
+      ||(b.providers||0)-(a.providers||0)
+      ||(b.nar_size||0)-(a.nar_size||0)
+      ||String(a.store_path||a.id).localeCompare(String(b.store_path||b.id))
+  });
+  setText('metadata-badge',rows.length);
+  if(!rows.length){el.innerHTML='<div class="empty">no metadata discovered</div>';return}
+  el.innerHTML=rows.map(function(row){
+    var name=row.store_path?storePathName(row.store_path):String(row.id||'unknown').slice(0,16)+'...';
+    var sz=row.nar_size!=null?fmtSize(row.nar_size):'?';
+    var p2p=row.p2p_available?'yes':'no';
+    var open=row.lookup?' onclick="openDetail(\''+jsArg(row.lookup)+'\')"':'';
+    return '<div class="metadata-row"'+open+'>'
+      +'<span class="path" data-tip="'+attr(row.tip||name)+'">'+esc(name)+'</span>'
+      +'<span class="size">'+esc(sz)+'</span>'
+      +'<span class="p2p '+p2p+'">'+(row.p2p_available?'P2P':'http')+'</span>'
+      +'<span class="providers">'+esc((row.providers||0)+' peers')+'</span>'
+      +'</div>'
+  }).join('');
 }
 
 function packageMatches(pkg,q){
