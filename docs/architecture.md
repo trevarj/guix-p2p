@@ -534,6 +534,14 @@ they are added to the DHT, connection manager, or persistent peer store. This
 prevents a public bootstrap node from repeatedly dialing a client's loopback,
 home-LAN, or VPN interface addresses.
 
+### Provider Announcements
+
+Seeded NARs are announced with Kademlia `start_providing` at daemon startup and
+again whenever a peer connection is established. The connection-time announce
+matters for bootstrap nodes that start with no bootstrap peers of their own:
+their first startup announce may not have any Kad peers to publish to yet, but
+they still need later clients to discover cached seeds.
+
 ### Shepherd Service (Daemon Mode)
 
 Guix System deployments should use `guix-p2p-service-type`. Normal daemon

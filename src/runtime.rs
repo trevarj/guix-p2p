@@ -108,6 +108,7 @@ pub async fn run_swarm_task(
                             peer_id: peer_id.to_string(),
                             addresses: vec![address.to_string()],
                         });
+                        announce_seeded_nars(&mut swarm, &nar_store, "peer-connected");
                         tracing::debug!("Connection established with {}", peer_id);
                     },
                     SwarmEvent::ConnectionEstablished { peer_id, .. } => {
@@ -116,6 +117,7 @@ pub async fn run_swarm_task(
                             peer_id: peer_id.to_string(),
                             addresses: vec![],
                         });
+                        announce_seeded_nars(&mut swarm, &nar_store, "peer-connected");
                         tracing::debug!("Connection established with {}", peer_id);
                     },
                     SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
@@ -190,6 +192,37 @@ pub async fn run_swarm_task(
     }
 }
 
+fn announce_seeded_nars(
+    swarm: &mut libp2p::Swarm<GuixP2PBehaviour>,
+    nar_store: &Arc<std::sync::Mutex<NarStore>>,
+    reason: &str,
+) {
+    let hashes = nar_store.lock().unwrap().seeded_hashes();
+    for hash in hashes {
+        announce_nar(swarm, &hash, reason);
+    }
+}
+
+fn announce_nar(swarm: &mut libp2p::Swarm<GuixP2PBehaviour>, hash: &str, reason: &str) {
+    if let Ok(bytes) = hex::decode(hash) {
+        let key = libp2p::kad::RecordKey::new(&bytes);
+        if let Err(e) = swarm.behaviour_mut().kad.start_providing(key) {
+            tracing::warn!(
+                reason = %reason,
+                "failed to announce nar {}: {}",
+                &hash[..16.min(hash.len())],
+                e
+            );
+        } else {
+            tracing::info!(
+                reason = %reason,
+                "announced nar {}.. in DHT",
+                &hash[..16.min(hash.len())]
+            );
+        }
+    }
+}
+
 fn record_peer_address(
     peer_store: &Option<Arc<std::sync::Mutex<PeerStore>>>,
     peer_id: libp2p::PeerId,
@@ -242,21 +275,7 @@ fn handle_swarm_command(swarm: &mut libp2p::Swarm<GuixP2PBehaviour>, cmd: SwarmC
             tracing::debug!("Sent block request {:?} to peer={}", req_id, peer);
         },
         SwarmCommand::StartProviding { hash } => {
-            if let Ok(bytes) = hex::decode(&hash) {
-                let key = libp2p::kad::RecordKey::new(&bytes);
-                if let Err(e) = swarm.behaviour_mut().kad.start_providing(key) {
-                    tracing::warn!(
-                        "failed to start providing nar {}: {}",
-                        &hash[..16.min(hash.len())],
-                        e
-                    );
-                } else {
-                    tracing::info!(
-                        "announced nar {}.. in DHT (post-download)",
-                        &hash[..16.min(hash.len())]
-                    );
-                }
-            }
+            announce_nar(swarm, &hash, "post-download");
         },
     }
 }
