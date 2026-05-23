@@ -146,6 +146,10 @@ integration tests therefore also enforce that dashboard package discovery and
 NAR seeding resolve `guix` and `guile` from `/run/current-system/profile/bin`
 before falling back to `PATH`.
 
+The default in-process E2E suite also covers the early bootstrap fallback path:
+a requester with an empty DHT provider result can still handshake a connected
+bootstrap/seeder peer and prove NAR availability before block transfer.
+
 Verify the imported output by SSHing into the fetcher and running the store
 path directly. The proof imports the output; it does not install `hello` into
 the shell profile.

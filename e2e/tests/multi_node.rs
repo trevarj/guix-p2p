@@ -98,6 +98,46 @@ async fn block_handshake_and_transfer() {
 }
 
 #[tokio::test]
+async fn connected_bootstrap_handshake_works_when_dht_lookup_is_empty() {
+    init();
+    let (nar_data, nar_hash) = make_nar(0xab, 96_000);
+    let seeder = match TestNode::seeder(&nar_hash, nar_data).await {
+        Ok(node) => node,
+        Err(e) if is_network_permission_denied(&e) => {
+            eprintln!("skipping E2E network test: {e:#}");
+            return;
+        },
+        Err(e) => panic!("{e:#}"),
+    };
+    let seeder_pid = seeder.pid();
+    let mut downloader = match TestNode::node(seeder.addr()).await {
+        Ok(node) => node,
+        Err(e) if is_network_permission_denied(&e) => {
+            eprintln!("skipping E2E network test: {e:#}");
+            return;
+        },
+        Err(e) => panic!("{e:#}"),
+    };
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    let (_missing_data, missing_hash) = make_nar(0xfe, 8192);
+    downloader.lookup(&missing_hash);
+    let providers = downloader.wait_providers(&missing_hash, Duration::from_secs(3)).await;
+    assert!(providers.is_empty(), "control lookup should have no DHT providers");
+
+    downloader.send_req(
+        seeder_pid,
+        BlockRequest::Handshake { nar_hash: hex::decode(&nar_hash).unwrap() },
+    );
+    let resp = downloader.wait_block_resp(seeder_pid, Duration::from_secs(20)).await;
+    let Some(BlockResponse::HandshakeReply { blocks_available, block_count, .. }) = resp else {
+        panic!("connected bootstrap peer should answer fallback handshake");
+    };
+    assert!(!blocks_available.is_empty(), "fallback handshake should prove availability");
+    assert_eq!(blocks_available.len(), block_count as usize);
+}
+
+#[tokio::test]
 async fn full_nar_download() {
     init();
     let (nar_data, nar_hash) = make_nar(0xcc, 200_000);
