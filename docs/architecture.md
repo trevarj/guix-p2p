@@ -742,11 +742,11 @@ locally-seeded nars in real time:
 - The dashboard package panel consumes `/api/packages`, supports fuzzy search
   across package name, version, and store path, and shows source, output, store
   path, and seed state. Its row-level seed control calls `POST /api/seeds`.
-- The dashboard layout is organized for seeder management. It starts with a
-  compact readiness band that always shows node health, connectivity role, and
-  latest transfer source. Version/commit, uptime, peer/DHT summary, and tester
-  gates are opened from the header `node details` button into the existing
-  side drawer, so expanded details never overlap the transfer workspace.
+- The dashboard layout is organized for seeder management. The header includes
+  a compact readiness control that always shows node health, connectivity
+  role, and latest transfer source. Version/commit, uptime, peer/DHT summary,
+  and tester gates open from that control into the existing side drawer, so
+  expanded details never overlap the transfer workspace.
 - The primary workspace gives the transfer proof path full width, places
   Packages as a secondary add-seed list, and gives Active Seeds the wider
   management area.

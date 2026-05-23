@@ -42,6 +42,7 @@ header{
   padding:10px 16px;display:flex;justify-content:space-between;align-items:center;
   flex-shrink:0;gap:16px
 }
+.header-main{min-width:0;flex:0 1 430px}
 header .brand-logo{display:block;width:150px;height:38px;color:var(--fg)}
 header .brand-logo text{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-weight:800;letter-spacing:0}
 header .brand-logo .brand-main{fill:var(--fg)}
@@ -60,6 +61,24 @@ header button,.theme-select{
 }
 header button:hover,.theme-select:hover{border-color:var(--acc)}
 button:focus-visible,input:focus-visible,.theme-select:focus-visible{outline:1px solid var(--acc);outline-offset:2px}
+.header-readiness{
+  flex:1 1 560px;max-width:760px;min-width:320px;text-align:left;
+  display:grid;grid-template-columns:minmax(180px,1fr) minmax(210px,1.1fr) minmax(150px,.8fr);
+  gap:12px;align-items:center;padding:8px 72px 8px 10px;min-height:58px;position:relative
+}
+.header-readiness:hover{background:var(--panel2)}
+.header-readiness::after{
+  content:'details >';position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.7px
+}
+.header-readiness .health-card,.header-readiness .info-card,.header-readiness .network-card{
+  border:0;background:transparent;padding:0;border-radius:0
+}
+.header-readiness .health-title{font-size:13px}
+.header-readiness .health-detail{font-size:10px}
+.header-readiness .info-card .v,.header-readiness .network-card .v{font-size:12px}
+.header-readiness .info-card .sub{font-size:10px}
+.header-readiness .network-card .line + .line{display:none}
 .theme-control{display:grid;gap:4px;justify-items:end}
 .theme-label{color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:1px}
 .theme-select{min-width:136px}
@@ -73,9 +92,8 @@ button:focus-visible,input:focus-visible,.theme-select:focus-visible{outline:1px
 .status-pill.demo{color:var(--warn)}
 main{
   display:grid;grid-template-columns:minmax(320px,.85fr) minmax(360px,1.1fr) minmax(360px,1.1fr);
-  grid-template-rows:auto minmax(210px,.55fr) minmax(360px,1.15fr) minmax(280px,.85fr) minmax(320px,1fr);
+  grid-template-rows:minmax(210px,.55fr) minmax(360px,1.15fr) minmax(280px,.85fr) minmax(320px,1fr);
   grid-template-areas:
-    "overview overview overview"
     "transfer transfer transfer"
     "packages seeds seeds"
     "peers metadata metadata"
@@ -89,7 +107,6 @@ main{
 .packages-panel{grid-area:packages}
 .seeds-panel{grid-area:seeds}
 .transfer-panel{grid-area:transfer}
-.overview-panel{grid-area:overview}
 .peers-panel{grid-area:peers}
 .metadata-panel{grid-area:metadata}
 .events{grid-area:events;min-height:320px}
@@ -206,18 +223,8 @@ main{
 .package-row .seed-action:hover{border-color:var(--acc)}
 .package-row.seeded .seed-action{color:var(--dim)}
 .package-row .seed-action:disabled{cursor:not-allowed;opacity:.55;border-color:var(--line)}
-.overview-panel{min-height:0;overflow:visible;padding:0;background:transparent;border:0;box-shadow:none}
-.readiness-card{
-  border:1px solid var(--line);background:var(--panel);padding:8px 10px;position:relative;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.025)
-}
-.readiness-card:focus-visible{outline:1px solid var(--acc);outline-offset:2px}
-.readiness-summary{display:grid;grid-template-columns:minmax(240px,1.25fr) minmax(220px,1fr) minmax(170px,.75fr);gap:12px;align-items:center}
 .health-card,.info-card,.check-card,.network-card{
   border:1px solid var(--line);background:var(--bg2);border-radius:6px;padding:9px;min-width:0
-}
-.readiness-card .health-card,.readiness-card .info-card,.readiness-card .network-card{
-  border:0;background:transparent;padding:0;border-radius:0
 }
 .health-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:center}
 .health-dot{width:14px;height:14px;border-radius:50%;background:var(--warn);box-shadow:0 0 16px rgba(216,166,66,.4)}
@@ -346,6 +353,7 @@ main{
 }
 .tip.hidden{display:none}
 [data-tip]{cursor:help}
+.header-readiness[data-tip]{cursor:pointer}
 .help-btn{
   width:16px;height:16px;border:1px solid var(--dim);border-radius:50%;
   background:transparent;color:var(--dim);font-family:var(--font);font-size:10px;
@@ -368,10 +376,10 @@ main{
 
 @media (max-width:1100px){
   header{align-items:flex-start;flex-wrap:wrap}
+  .header-readiness{order:3;max-width:none;flex-basis:100%;grid-template-columns:1fr 1fr 1fr}
   main{
-    grid-template-columns:1fr 1fr;grid-template-rows:auto minmax(220px,.6fr) minmax(320px,1fr) minmax(280px,.9fr) minmax(260px,.8fr) minmax(340px,1fr);
+    grid-template-columns:1fr 1fr;grid-template-rows:minmax(220px,.6fr) minmax(320px,1fr) minmax(280px,.9fr) minmax(260px,.8fr) minmax(340px,1fr);
     grid-template-areas:
-      "overview overview"
       "transfer transfer"
       "packages packages"
       "seeds peers"
@@ -383,7 +391,6 @@ main{
   .transfer-open{text-align:left}
   .transfer-compact-stages{grid-template-columns:repeat(3,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:repeat(3,1fr)}
-  .readiness-summary{grid-template-columns:1fr 1fr}
   .tester-grid{grid-template-columns:repeat(3,1fr)}
 }
 @media (max-width:720px){
@@ -396,7 +403,9 @@ main{
   .transfer-compact-stages{grid-template-columns:repeat(2,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:1fr 1fr}
   .transfer-peers{grid-template-columns:1fr}
-  .readiness-summary,.tester-grid{grid-template-columns:1fr}
+  .header-readiness{grid-template-columns:1fr;padding-right:10px}
+  .header-readiness::after{display:none}
+  .tester-grid{grid-template-columns:1fr}
   .events .entry{grid-template-columns:62px 18px 1fr}
   .events .entry .kind{display:none}
 }
@@ -404,7 +413,7 @@ main{
 </head>
 <body class="theme-yellow">
 <header>
-  <div>
+  <div class="header-main">
     <svg class="brand-logo" viewBox="0 0 240 60" role="img" aria-labelledby="brand-title brand-desc" data-tip="Local daemon dashboard for P2P substitute discovery, seeding, and transfer evidence.">
       <title id="brand-title">guix-p2p</title>
       <desc id="brand-desc">guix-p2p dashboard logo</desc>
@@ -422,6 +431,32 @@ main{
       <button type="button" id="copy-share" data-tip="Copy shareable peer multiaddr.">copy</button>
     </div>
   </div>
+  <button type="button" class="header-readiness" id="open-node-details" aria-label="Open node details" data-tip="Open version, uptime, swarm summary, setup gates, and network diagnostics.">
+    <span class="health-card" id="health-card">
+      <span class="health-dot" id="health-dot"></span>
+      <span>
+        <span class="health-title" id="health-title">checking</span>
+        <span class="health-detail" id="health-detail">waiting for dashboard API</span>
+      </span>
+    </span>
+    <span class="network-card" id="network-summary">
+      <span class="source-badge" id="connectivity-badge">unknown</span>
+      <span>
+        <span class="k">network</span>
+        <span class="v" id="connectivity-title">checking</span>
+        <span class="detail">
+          <span class="line" id="connectivity-detail">waiting for status</span>
+          <span class="line" id="connectivity-address">no shareable address</span>
+          <span class="line" id="connectivity-bootstrap">no bootstrap peer configured</span>
+        </span>
+      </span>
+    </span>
+    <span class="info-card">
+      <span class="k">latest source</span>
+      <span class="v" id="overview-source">none</span>
+      <span class="sub" id="overview-transfer">no transfer</span>
+    </span>
+  </button>
   <div class="theme-control">
     <label class="theme-label" for="theme-select">theme</label>
     <select class="theme-select" id="theme-select" data-tip="Select dashboard color theme.">
@@ -431,40 +466,11 @@ main{
       <option value="theme-tokyo">Tokyo Night</option>
     </select>
     <button type="button" id="copy-share-info" data-tip="Copy local PeerId, shareable multiaddrs, and paste-ready bootstrap_peers config.">copy peer</button>
-    <button type="button" id="open-node-details" data-tip="Open version, uptime, swarm summary, setup gates, and network diagnostics.">node details</button>
     <button type="button" id="copy-diagnostics" data-tip="Copy dashboard diagnostics for tester failure reports.">copy diag</button>
     <div class="status-pill offline" id="api-status" data-tip="Dashboard API and WebSocket connection state.">connecting</div>
   </div>
 </header>
 <main>
-  <section class="overview-panel" data-help="overview">
-    <div class="readiness-card" id="readiness-summary" data-tip="Compact daemon readiness summary. Use the header node details button for version, uptime, swarm summary, setup gates, and full network details.">
-      <div class="health-card" id="health-card">
-        <span class="health-dot" id="health-dot"></span>
-        <span>
-          <span class="health-title" id="health-title">checking</span>
-          <span class="health-detail" id="health-detail">waiting for dashboard API</span>
-        </span>
-      </div>
-      <div class="network-card" id="network-summary" data-tip="Network role and first configured share/bootstrap address.">
-        <span class="source-badge" id="connectivity-badge">unknown</span>
-        <span>
-          <span class="k">network</span>
-          <span class="v" id="connectivity-title">checking</span>
-          <span class="detail">
-            <span class="line" id="connectivity-detail">waiting for status</span>
-            <span class="line" id="connectivity-address">no shareable address</span>
-            <span class="line" id="connectivity-bootstrap">no bootstrap peer configured</span>
-          </span>
-        </span>
-      </div>
-      <div class="info-card" data-tip="Latest transfer source, if a transfer has been observed.">
-        <span class="k">latest source</span>
-        <span class="v" id="overview-source">none</span>
-        <span class="sub" id="overview-transfer">no transfer</span>
-      </div>
-    </div>
-  </section>
   <div class="panel transfer-panel" data-help="transfer">
     <h2 data-tip="Latest P2P proof path: observed package, trusted narinfo, providers, block movement, import, and re-seeding.">transfer path</h2>
     <div id="transfer-path"><div class="empty">no transfer observed</div></div>
