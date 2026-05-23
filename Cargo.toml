@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "guix-p2p"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2024"
 description = "P2P binary substitute distribution for GNU Guix"
 license = "GPL-3.0-or-later"

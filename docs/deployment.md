@@ -46,7 +46,7 @@ so it only reflects fixes after `guix pull`, `guix system reconfigure`, and
 service restart.
 
 `guix-p2p --version` prints the crate version and embedded Git commit, for
-example `guix-p2p 0.1.12 (abcdef123456)`. Include this value in tester reports
+example `guix-p2p 0.1.13 (abcdef123456)`. Include this value in tester reports
 while releases are still using the same package version.
 
 The Scheme substitute extension talks to the daemon socket directly, so normal
