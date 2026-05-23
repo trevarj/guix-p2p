@@ -209,6 +209,7 @@ struct ApiSeededNar {
     block_size: u32,
     store_path: Option<String>,
     source: String,
+    created_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -534,6 +535,7 @@ async fn api_seeds(State(state): State<DashboardState>) -> Json<Vec<ApiSeededNar
                 block_size: info.block_size,
                 store_path: info.store_path,
                 source: info.source.as_str().to_string(),
+                created_at: info.created_at,
             })
         })
         .collect();

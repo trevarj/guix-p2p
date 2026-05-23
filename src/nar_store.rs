@@ -40,10 +40,12 @@ struct NarEntry {
     block_info: BlockInfo,
     store_path: Option<String>,
     source: SeedSource,
+    created_at: u64,
 }
 
 /// Why a NAR is available for serving.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum SeedSource {
     /// Seeded explicitly from a store path through config, CLI, or dashboard.
     Manual,
@@ -71,6 +73,15 @@ pub struct SeededNarInfo {
     pub block_size: u32,
     pub store_path: Option<String>,
     pub source: SeedSource,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct NarMetadata {
+    store_path: Option<String>,
+    source: SeedSource,
+    created_at: u64,
+    updated_at: u64,
 }
 
 impl NarStore {
@@ -119,6 +130,7 @@ impl NarStore {
             }
             let nar_size = data.len() as u64;
             let block_info = BlockInfo::from_file_size(nar_size, self.block_size);
+            let metadata = self.read_metadata(&stem);
 
             tracing::info!(
                 "indexed local nar: hash={}.. size={} blocks={}",
@@ -132,8 +144,9 @@ impl NarStore {
                     path,
                     nar_size,
                     block_info,
-                    store_path: None,
-                    source: SeedSource::Cache,
+                    store_path: metadata.as_ref().and_then(|metadata| metadata.store_path.clone()),
+                    source: metadata.as_ref().map_or(SeedSource::Cache, |metadata| metadata.source),
+                    created_at: metadata.as_ref().map_or(0, |metadata| metadata.created_at),
                 },
             );
         }
@@ -164,6 +177,8 @@ impl NarStore {
         source: SeedSource,
     ) -> anyhow::Result<()> {
         let path = self.cache_dir.join(format!("{}.nar", nar_hash_hex));
+        let created_at =
+            self.read_metadata(nar_hash_hex).map_or_else(now_secs, |metadata| metadata.created_at);
         let mut f = std::fs::File::create(&path).context("failed to create nar file")?;
         f.write_all(nar_data).context("failed to write nar data")?;
 
@@ -179,8 +194,16 @@ impl NarStore {
 
         self.index.insert(
             nar_hash_hex.to_string(),
-            NarEntry { path, nar_size, block_info, store_path, source },
+            NarEntry {
+                path,
+                nar_size,
+                block_info,
+                store_path: store_path.clone(),
+                source,
+                created_at,
+            },
         );
+        self.write_metadata(nar_hash_hex, store_path, source, created_at)?;
         Ok(())
     }
 
@@ -190,9 +213,17 @@ impl NarStore {
         let nar_hash_hex = compute_nar_hash(store_path).context("failed to compute nar hash")?;
 
         if self.index.contains_key(&nar_hash_hex) {
+            let mut metadata_update = None;
             if let Some(entry) = self.index.get_mut(&nar_hash_hex) {
                 entry.store_path.get_or_insert_with(|| store_path.to_string());
                 entry.source = SeedSource::Manual;
+                metadata_update = Some((entry.store_path.clone(), entry.created_at));
+            }
+            if let Some((store_path, created_at)) = metadata_update
+                && let Err(e) =
+                    self.write_metadata(&nar_hash_hex, store_path, SeedSource::Manual, created_at)
+            {
+                tracing::warn!("failed to update cached nar metadata {}: {}", nar_hash_hex, e);
             }
             tracing::info!("nar already seeded: {}..", &nar_hash_hex[..16]);
             return Ok(nar_hash_hex);
@@ -220,12 +251,19 @@ impl NarStore {
             let Some(hash) = nar_hash::sha256_bytes(&narinfo.nar_hash).map(hex::encode) else {
                 continue;
             };
+            let mut metadata_update = None;
             let Some(entry) = self.index.get_mut(&hash) else {
                 continue;
             };
             if entry.store_path.is_none() && !narinfo.store_path.is_empty() {
                 entry.store_path = Some(narinfo.store_path.clone());
+                metadata_update = Some((entry.store_path.clone(), entry.source, entry.created_at));
                 updated += 1;
+            }
+            if let Some((store_path, source, created_at)) = metadata_update
+                && let Err(e) = self.write_metadata(&hash, store_path, source, created_at)
+            {
+                tracing::warn!("failed to update cached nar metadata {}: {}", hash, e);
             }
         }
         updated
@@ -255,6 +293,7 @@ impl NarStore {
             block_size: self.block_size as u32,
             store_path: entry.store_path.clone(),
             source: entry.source,
+            created_at: entry.created_at,
         })
     }
 
@@ -264,13 +303,57 @@ impl NarStore {
         if let Err(e) = std::fs::remove_file(&entry.path) {
             tracing::warn!("failed to remove cached nar {}: {}", entry.path.display(), e);
         }
+        if let Err(e) = std::fs::remove_file(self.metadata_path(nar_hash_hex))
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!("failed to remove cached nar metadata for {}: {}", nar_hash_hex, e);
+        }
         Some(SeededNarInfo {
             nar_size: entry.nar_size,
             block_count: entry.block_info.block_count,
             block_size: self.block_size as u32,
             store_path: entry.store_path,
             source: entry.source,
+            created_at: entry.created_at,
         })
+    }
+
+    fn metadata_path(&self, nar_hash_hex: &str) -> PathBuf {
+        self.cache_dir.join(format!("{nar_hash_hex}.json"))
+    }
+
+    fn read_metadata(&self, nar_hash_hex: &str) -> Option<NarMetadata> {
+        let path = self.metadata_path(nar_hash_hex);
+        let content = match std::fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(e) => {
+                tracing::warn!("failed to read cached nar metadata {}: {}", path.display(), e);
+                return None;
+            },
+        };
+        match serde_json::from_str(&content) {
+            Ok(metadata) => Some(metadata),
+            Err(e) => {
+                tracing::warn!("failed to parse cached nar metadata {}: {}", path.display(), e);
+                None
+            },
+        }
+    }
+
+    fn write_metadata(
+        &self,
+        nar_hash_hex: &str,
+        store_path: Option<String>,
+        source: SeedSource,
+        created_at: u64,
+    ) -> anyhow::Result<()> {
+        let path = self.metadata_path(nar_hash_hex);
+        let now = now_secs();
+        let metadata = NarMetadata { store_path, source, created_at, updated_at: now };
+        let content = serde_json::to_vec_pretty(&metadata)?;
+        std::fs::write(&path, content)
+            .with_context(|| format!("failed to write cached nar metadata {}", path.display()))
     }
 
     /// Handle an incoming block request. Returns None if we don't have this nar.
@@ -474,6 +557,12 @@ fn join_env_paths(paths: impl IntoIterator<Item = PathBuf>) -> OsString {
     std::env::join_paths(paths).unwrap_or_else(|_| OsString::new())
 }
 
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
 #[cfg(test)]
 mod tests {
     use sha2::{Digest, Sha256};
@@ -661,6 +750,41 @@ mod tests {
         let store = NarStore::new(tmp.path(), 512);
 
         assert_eq!(store.seed_info(&hash).unwrap().source, SeedSource::Cache);
+    }
+
+    #[test]
+    fn nar_metadata_persists_seed_source_and_store_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = b"downloaded nar bytes";
+        let hash = hex::encode(Sha256::digest(data));
+        let store_path = "/gnu/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-package";
+
+        {
+            let mut store = NarStore::new(tmp.path(), 512);
+            store.save_with_store_path(&hash, data, Some(store_path.to_string())).unwrap();
+        }
+
+        let store = NarStore::new(tmp.path(), 512);
+        let info = store.seed_info(&hash).unwrap();
+
+        assert_eq!(info.source, SeedSource::Downloaded);
+        assert_eq!(info.store_path.as_deref(), Some(store_path));
+        assert!(info.created_at > 0);
+    }
+
+    #[test]
+    fn remove_seed_removes_metadata_sidecar() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = b"downloaded nar bytes";
+        let hash = hex::encode(Sha256::digest(data));
+
+        let mut store = NarStore::new(tmp.path(), 512);
+        store.save(&hash, data).unwrap();
+        assert!(tmp.path().join("nar").join(format!("{hash}.json")).exists());
+
+        store.remove_seed(&hash).unwrap();
+
+        assert!(!tmp.path().join("nar").join(format!("{hash}.json")).exists());
     }
 
     #[test]

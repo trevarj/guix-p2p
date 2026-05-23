@@ -611,10 +611,13 @@ serving, and seed provenance labels.
 
 ### Approach: Hybrid nar cache seeding
 
-- **Post-download seeding**: When `auto_seed_downloads` is enabled, successful
-  substitute downloads are saved to `<cache_dir>/nar/<sha256hex>.nar`, tagged
-  as `downloaded`, and announced in the DHT via `start_providing`. Future peers
-  can download them from this node.
+- **Post-download seeding**: By default, successful P2P downloads are saved to
+  `<cache_dir>/nar/<sha256hex>.nar`, tagged as `downloaded`, and announced in
+  the DHT via `start_providing`. HTTP fallback downloads are not auto-seeded
+  unless `auto_seed_downloads = "all"` is configured. Set
+  `auto_seed_downloads = "off"` to disable download auto-seeding entirely.
+  Seed metadata is persisted beside the NAR as
+  `<cache_dir>/nar/<sha256hex>.json`.
 - **Explicit seeding**: The `--seed` flag accepts comma-separated store paths.
   Each is hashed via `guix hash -S nar -f hex`, serialized as a raw
   single-item NAR with Guix's `(guix serialization) write-file`, and stored in
@@ -622,9 +625,10 @@ serving, and seed provenance labels.
   on startup.
 - **Startup scan**: On startup, `NarStore::new()` scans `<cache_dir>/nar/*.nar`
   and indexes each file by its filename stem (the hex sha256). Files whose
-  bytes do not hash to the filename stem are skipped. Files whose provenance is
-  not known are tagged as `cache`. All indexed nars are annotated with any
-  matching local narinfo metadata and announced in the DHT.
+  bytes do not hash to the filename stem are skipped. Matching sidecar metadata
+  restores the source tag, store path, and creation time. Files whose
+  provenance is not known are tagged as `cache`. All indexed nars are annotated
+  with any matching local narinfo metadata and announced in the DHT.
 - **Serving**: Incoming block requests are served from the nar store. The
   `NarStore::handle_request()` method dispatches to handshake replies (with
   block hashes) or block data reads. Outbound responses pass through
@@ -681,7 +685,8 @@ locally-seeded nars in real time:
 - **Seed count** in the header bar updates as nars are seeded or auto-saved
   after downloads.
 - The `/api/seeds` endpoint returns the full list of seeded nars with size,
-  block count, block size, store path when known, and seed source.
+  block count, block size, store path when known, seed source, and cache
+  creation time.
 - The `/api/packages` endpoint lists installed packages from
   `/run/current-system/profile`, `/run/current-system/kernel`, and
   `$HOME/.guix-home/profile` using

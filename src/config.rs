@@ -39,6 +39,69 @@ impl std::str::FromStr for SubstitutePolicy {
     }
 }
 
+/// Which successful substitute downloads should be cached for later P2P seeding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoSeedDownloads {
+    /// Never cache downloads automatically.
+    Off,
+    /// Cache only downloads that came from P2P peers.
+    #[default]
+    P2p,
+    /// Cache downloads from P2P peers and HTTP substitute servers.
+    All,
+}
+
+impl AutoSeedDownloads {
+    pub fn should_seed_p2p(self) -> bool {
+        matches!(self, AutoSeedDownloads::P2p | AutoSeedDownloads::All)
+    }
+
+    pub fn should_seed_http(self) -> bool {
+        matches!(self, AutoSeedDownloads::All)
+    }
+}
+
+impl std::fmt::Display for AutoSeedDownloads {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AutoSeedDownloads::Off => write!(f, "off"),
+            AutoSeedDownloads::P2p => write!(f, "p2p"),
+            AutoSeedDownloads::All => write!(f, "all"),
+        }
+    }
+}
+
+impl std::str::FromStr for AutoSeedDownloads {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "off" => Ok(AutoSeedDownloads::Off),
+            "p2p" => Ok(AutoSeedDownloads::P2p),
+            "all" => Ok(AutoSeedDownloads::All),
+            _ => Err(format!("unknown auto-seed mode '{}'; expected off, p2p, or all", s)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(untagged)]
+enum AutoSeedDownloadsConfig {
+    Mode(AutoSeedDownloads),
+    Enabled(bool),
+}
+
+impl AutoSeedDownloadsConfig {
+    fn into_mode(self) -> AutoSeedDownloads {
+        match self {
+            AutoSeedDownloadsConfig::Mode(mode) => mode,
+            AutoSeedDownloadsConfig::Enabled(true) => AutoSeedDownloads::All,
+            AutoSeedDownloadsConfig::Enabled(false) => AutoSeedDownloads::Off,
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default)]
 struct ConfigFile {
@@ -71,7 +134,7 @@ struct ConfigFile {
     tor_only: Option<bool>,
     socket_path: Option<String>,
     seed_paths: Option<Vec<String>>,
-    auto_seed_downloads: Option<bool>,
+    auto_seed_downloads: Option<AutoSeedDownloadsConfig>,
     local_narinfo_path: Option<String>,
 }
 
@@ -111,8 +174,8 @@ pub struct Config {
     pub socket_path: String,
     /// Store paths to seed on startup via `guix archive --export`.
     pub seed_paths: Vec<String>,
-    /// Cache successful substitute downloads and announce them for re-seeding.
-    pub auto_seed_downloads: bool,
+    /// Which successful substitute downloads to cache and announce for re-seeding.
+    pub auto_seed_downloads: AutoSeedDownloads,
     /// Optional JSON metadata file for offline narinfo lookups.
     pub local_narinfo_path: Option<PathBuf>,
 }
@@ -227,7 +290,10 @@ impl Config {
                 .socket_path
                 .unwrap_or_else(|| cache_dir.join("guix-p2p.sock").display().to_string()),
             seed_paths: file.seed_paths.unwrap_or_default(),
-            auto_seed_downloads: file.auto_seed_downloads.unwrap_or(true),
+            auto_seed_downloads: file
+                .auto_seed_downloads
+                .map(AutoSeedDownloadsConfig::into_mode)
+                .unwrap_or_default(),
             local_narinfo_path: file.local_narinfo_path.map(PathBuf::from),
         }
     }
@@ -320,8 +386,8 @@ dashboard_enabled = true
 dashboard_bind = "127.0.0.1"
 dashboard_port = 3030
 
-# Cache successful downloads and serve them to peers.
-auto_seed_downloads = true
+# Cache successful downloads and serve them to peers: "off", "p2p", or "all".
+auto_seed_downloads = "p2p"
 seed_paths = []
 "#,
         listen_addr = toml_string(&listen_addr),
@@ -400,6 +466,7 @@ mod tests {
         assert_eq!(config.dashboard_port, 3030);
         assert!(!config.dashboard_enabled);
         assert_eq!(config.substitute_policy, SubstitutePolicy::P2pFirst);
+        assert_eq!(config.auto_seed_downloads, AutoSeedDownloads::P2p);
     }
 
     #[test]
@@ -418,6 +485,26 @@ mod tests {
             let s = policy.to_string();
             assert_eq!(s.parse::<SubstitutePolicy>().unwrap(), policy);
         }
+    }
+
+    #[test]
+    fn test_auto_seed_downloads_from_str() {
+        assert_eq!("off".parse(), Ok(AutoSeedDownloads::Off));
+        assert_eq!("p2p".parse(), Ok(AutoSeedDownloads::P2p));
+        assert_eq!("all".parse(), Ok(AutoSeedDownloads::All));
+        assert!("invalid".parse::<AutoSeedDownloads>().is_err());
+    }
+
+    #[test]
+    fn test_auto_seed_downloads_config_deserializes_modes_and_legacy_bools() {
+        let file: ConfigFile = toml::from_str(r#"auto_seed_downloads = "all""#).unwrap();
+        assert_eq!(file.auto_seed_downloads.unwrap().into_mode(), AutoSeedDownloads::All);
+
+        let file: ConfigFile = toml::from_str("auto_seed_downloads = false").unwrap();
+        assert_eq!(file.auto_seed_downloads.unwrap().into_mode(), AutoSeedDownloads::Off);
+
+        let file: ConfigFile = toml::from_str("auto_seed_downloads = true").unwrap();
+        assert_eq!(file.auto_seed_downloads.unwrap().into_mode(), AutoSeedDownloads::All);
     }
 
     #[test]

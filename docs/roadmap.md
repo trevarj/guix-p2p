@@ -72,7 +72,7 @@ Before a broader release:
   instead of the current channel checkout.
 - Decide whether release binaries are supported or source builds remain the
   only documented path.
-- Tag `v0.1.6` only after packaging, bootstrap, and benchmark claims are
+- Tag `v0.1.7` only after packaging, bootstrap, and benchmark claims are
   documented with matching evidence.
 
 ## Bootstrap Network

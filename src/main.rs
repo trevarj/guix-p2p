@@ -5,7 +5,7 @@ use clap::{ArgGroup, Parser};
 use guix_p2p::{
     bandwidth::{BandwidthConfig, BandwidthLimiter},
     channel::{SwarmCommand, SwarmNotification},
-    config::{self, SubstitutePolicy},
+    config::{self, AutoSeedDownloads, SubstitutePolicy},
     connection::{ConnectionConfig, ConnectionManager},
     daemon, dashboard, dht, identity, nar_store, narinfo,
     reputation::ReputationTracker,
@@ -104,8 +104,12 @@ struct Cli {
     seed: Option<String>,
 
     /// Do not cache successful substitute downloads for later P2P seeding
-    #[arg(long, global = true)]
+    #[arg(long, global = true, conflicts_with = "auto_seed_downloads")]
     no_auto_seed_downloads: bool,
+
+    /// Which successful downloads to auto-seed: off, p2p, or all
+    #[arg(long, global = true)]
+    auto_seed_downloads: Option<AutoSeedDownloads>,
 
     /// JSON metadata file for offline narinfo lookups
     #[arg(long, global = true)]
@@ -196,7 +200,10 @@ async fn main() -> anyhow::Result<()> {
             .collect();
     }
     if cli.no_auto_seed_downloads {
-        config.auto_seed_downloads = false;
+        config.auto_seed_downloads = AutoSeedDownloads::Off;
+    }
+    if let Some(mode) = cli.auto_seed_downloads {
+        config.auto_seed_downloads = mode;
     }
     if let Some(ref path) = cli.local_narinfo {
         config.local_narinfo_path = Some(path.clone());

@@ -35,6 +35,13 @@ use crate::{
 struct DownloadedNar {
     data: Vec<u8>,
     trace_url: String,
+    source: DownloadSource,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DownloadSource {
+    P2p,
+    Http,
 }
 
 mod protocol;
@@ -529,7 +536,11 @@ async fn try_swarm_substitute(
                 narinfo_cache,
             )
             .await
-            .map(|data| DownloadedNar { data, trace_url: p2p_trace_url.clone() })
+            .map(|data| DownloadedNar {
+                data,
+                trace_url: p2p_trace_url.clone(),
+                source: DownloadSource::P2p,
+            })
         },
         SubstitutePolicy::P2pFirst => {
             let _ = reply.write_trace(&format_trace_started(&store_path, &p2p_trace_url, nar_size));
@@ -551,7 +562,11 @@ async fn try_swarm_substitute(
             )
             .await
             {
-                Ok(data) => Ok(DownloadedNar { data, trace_url: p2p_trace_url.clone() }),
+                Ok(data) => Ok(DownloadedNar {
+                    data,
+                    trace_url: p2p_trace_url.clone(),
+                    source: DownloadSource::P2p,
+                }),
                 Err(_) => {
                     tracing::info!(
                         hash = %nar_hash_hex,
@@ -621,7 +636,11 @@ async fn try_swarm_substitute(
                         narinfo_cache,
                     )
                     .await
-                    .map(|data| DownloadedNar { data, trace_url: p2p_trace_url.clone() })
+                    .map(|data| DownloadedNar {
+                        data,
+                        trace_url: p2p_trace_url.clone(),
+                        source: DownloadSource::P2p,
+                    })
                 },
             }
         },
@@ -630,6 +649,10 @@ async fn try_swarm_substitute(
     match result {
         Ok(download) => {
             let dest_path = PathBuf::from(dest);
+            let should_auto_seed = match download.source {
+                DownloadSource::P2p => config.auto_seed_downloads.should_seed_p2p(),
+                DownloadSource::Http => config.auto_seed_downloads.should_seed_http(),
+            };
             let nar_data = download.data;
             let size = nar_data.len() as u64;
 
@@ -727,7 +750,7 @@ async fn try_swarm_substitute(
                 let _ = tokio::fs::remove_file(&temp_path).await;
             }
 
-            if config.auto_seed_downloads {
+            if should_auto_seed {
                 let mut store = nar_store.lock().unwrap();
                 if store.has_nar(&nar_hash_hex) {
                     tracing::debug!("nar already in store, skipping save");
@@ -749,7 +772,9 @@ async fn try_swarm_substitute(
             } else {
                 tracing::debug!(
                     nar_hash = %nar_hash_hex,
-                    "auto-seeding disabled; not caching downloaded nar"
+                    source = ?download.source,
+                    mode = %config.auto_seed_downloads,
+                    "auto-seeding skipped for downloaded nar"
                 );
             }
 
@@ -981,7 +1006,11 @@ async fn try_http_download(
                 download.data.len(),
                 download.source_url
             );
-            Ok(DownloadedNar { data: download.data, trace_url: download.source_url })
+            Ok(DownloadedNar {
+                data: download.data,
+                trace_url: download.source_url,
+                source: DownloadSource::Http,
+            })
         },
         Err(HttpClientError::NotFound) => Err("HTTP nar not found on any substitute server".into()),
         Err(HttpClientError::BadSignature) => Err("narinfo signature verification failed".into()),
