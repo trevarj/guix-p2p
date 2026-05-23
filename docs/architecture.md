@@ -745,8 +745,10 @@ locally-seeded nars in real time:
 - The dashboard layout is organized for seeder management. The header includes
   a compact readiness control that always shows node health, connectivity
   role, and latest transfer source. Version/commit, uptime, peer/DHT summary,
-  and tester gates open from that control into the existing side drawer, so
-  expanded details never overlap the transfer workspace.
+  share/bootstrap details, and tester gates open from that control into the
+  existing side drawer, so expanded details never overlap the transfer
+  workspace. The header keeps connectivity to one truncating summary line to
+  avoid overlap with long multiaddrs or diagnostic strings.
 - The primary workspace gives the transfer proof path full width, places
   Packages as a secondary add-seed list, and gives Active Seeds the wider
   management area.
@@ -775,6 +777,11 @@ locally-seeded nars in real time:
   keyboard handlers for dynamic rows, filters, help, overlays, and raw narinfo
   toggles. This keeps generated package/seed/discovery rows inspectable and
   avoids inline JavaScript handlers.
+- Dashboard panels are semantic sections in visual/tab order: transfer proof,
+  packages, active seeds, peers, discovery, and event log. The event stream is
+  exposed as a polite log region, and grid cells that contain peer IDs,
+  multiaddrs, store paths, or diagnostic strings explicitly allow truncation
+  instead of overlapping adjacent controls.
 - Dashboard colors are selected from a named theme dropdown. Terminal yellow,
   green, and amber preserve the console look; Tokyo Night provides a more
   conventional high-contrast dark palette. Scrollbars follow the active theme,
