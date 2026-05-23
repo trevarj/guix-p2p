@@ -209,11 +209,10 @@ main{
 .overview-panel{min-height:0;overflow:visible;padding:0;background:transparent;border:0;box-shadow:none}
 .readiness-card{
   border:1px solid var(--line);background:var(--panel);padding:8px 10px;position:relative;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.025);cursor:pointer
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025)
 }
-.readiness-card:hover{border-color:var(--acc);background:var(--panel2)}
 .readiness-card:focus-visible{outline:1px solid var(--acc);outline-offset:2px}
-.readiness-summary{display:grid;grid-template-columns:minmax(240px,1.25fr) minmax(220px,1fr) minmax(170px,.75fr) 64px;gap:12px;align-items:center}
+.readiness-summary{display:grid;grid-template-columns:minmax(240px,1.25fr) minmax(220px,1fr) minmax(170px,.75fr);gap:12px;align-items:center}
 .health-card,.info-card,.check-card,.network-card{
   border:1px solid var(--line);background:var(--bg2);border-radius:6px;padding:9px;min-width:0
 }
@@ -232,9 +231,7 @@ main{
 .network-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start}
 .network-card .detail{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
 .network-card .line{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.readiness-toggle{justify-self:end;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.8px}
-.readiness-detail{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
-.readiness-detail.hidden{display:none}
+.detail-grid{display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:12px}
 .readiness-action{
   align-self:stretch;background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
   padding:8px 10px;font-family:var(--font);font-size:11px;cursor:pointer;border-radius:4px
@@ -294,6 +291,8 @@ main{
 .detail .transfer-stage{display:grid;grid-template-columns:150px minmax(0,1fr);gap:8px;align-items:center}
 .detail .transfer-stage .value{margin-top:0;white-space:normal;word-break:break-word}
 .detail .transfer-peers{grid-template-columns:1fr}
+.detail .tester-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:8px}
+.detail .readiness-action{width:100%;margin-top:4px}
 
 /* transfer flash animation */
 .seed-row.flash{animation:flash .6s ease}
@@ -385,7 +384,6 @@ main{
   .transfer-compact-stages{grid-template-columns:repeat(3,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:repeat(3,1fr)}
   .readiness-summary{grid-template-columns:1fr 1fr}
-  .readiness-detail{grid-template-columns:1fr 1fr}
   .tester-grid{grid-template-columns:repeat(3,1fr)}
 }
 @media (max-width:720px){
@@ -398,7 +396,7 @@ main{
   .transfer-compact-stages{grid-template-columns:repeat(2,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:1fr 1fr}
   .transfer-peers{grid-template-columns:1fr}
-  .readiness-summary,.readiness-detail,.tester-grid{grid-template-columns:1fr}
+  .readiness-summary,.tester-grid{grid-template-columns:1fr}
   .events .entry{grid-template-columns:62px 18px 1fr}
   .events .entry .kind{display:none}
 }
@@ -433,13 +431,14 @@ main{
       <option value="theme-tokyo">Tokyo Night</option>
     </select>
     <button type="button" id="copy-share-info" data-tip="Copy local PeerId, shareable multiaddrs, and paste-ready bootstrap_peers config.">copy peer</button>
+    <button type="button" id="open-node-details" data-tip="Open version, uptime, swarm summary, setup gates, and network diagnostics.">node details</button>
     <button type="button" id="copy-diagnostics" data-tip="Copy dashboard diagnostics for tester failure reports.">copy diag</button>
     <div class="status-pill offline" id="api-status" data-tip="Dashboard API and WebSocket connection state.">connecting</div>
   </div>
 </header>
 <main>
   <section class="overview-panel" data-help="overview">
-    <div class="readiness-card" id="readiness-summary" role="button" tabindex="0" aria-expanded="false" aria-controls="readiness-detail" data-tip="Click for version, uptime, swarm summary, setup gates, and full network details.">
+    <div class="readiness-card" id="readiness-summary" data-tip="Compact daemon readiness summary. Use the header node details button for version, uptime, swarm summary, setup gates, and full network details.">
       <div class="health-card" id="health-card">
         <span class="health-dot" id="health-dot"></span>
         <span>
@@ -463,24 +462,6 @@ main{
         <span class="k">latest source</span>
         <span class="v" id="overview-source">none</span>
         <span class="sub" id="overview-transfer">no transfer</span>
-      </div>
-      <span class="readiness-toggle" id="readiness-toggle">details</span>
-      <div class="readiness-detail hidden" id="readiness-detail">
-        <div class="info-card" data-tip="guix-p2p version and embedded commit.">
-          <span class="k">version</span>
-          <span class="v" id="node-version">--</span>
-          <span class="sub" id="uptime">uptime --</span>
-        </div>
-        <div class="info-card" data-tip="Peer and DHT summary. Detailed peer rows live in the Peers panel.">
-          <span class="k">swarm</span>
-          <span class="v" id="overview-connected">0 connected</span>
-          <span class="sub" id="overview-known">0 known / 0 dht</span>
-        </div>
-        <div class="info-card" data-tip="First-run setup gates that usually block tester onboarding.">
-          <span class="k">setup gates</span>
-          <div class="tester-grid" id="tester-checks"></div>
-        </div>
-        <button type="button" class="readiness-action" id="network-diagnostics" data-tip="Open full doctor-style network diagnostics.">diagnostics</button>
       </div>
     </div>
   </section>
@@ -564,7 +545,7 @@ var SERVER_STARTED=null;
 var DEMO_MODE=false;
 var HELP_TEXT={
   dashboard:['Dashboard','This page is the local operational view for a guix-p2p daemon. It combines seed inventory, transfer proof evidence, peer health, discovered substitute metadata, and recent daemon events.'],
-  overview:['Readiness','A compact first-screen summary for the local daemon: health, network role, and latest transfer source.\n\nVersion, uptime, swarm summary, and tester setup gates are available from the details control so the primary seeding workspace has more room. Detailed counts live in their owner panels below.'],
+  overview:['Readiness','A compact first-screen summary for the local daemon: health, network role, and latest transfer source.\n\nVersion, uptime, swarm summary, tester setup gates, and full network diagnostics are available from the header node details button so the primary seeding workspace stays unobstructed. Detailed counts live in their owner panels below.'],
   connected:['Connected Peers','The number of currently connected swarm peers reported by the daemon connection manager. A low value can be normal before discovery or when only bootstrap forwarding is available.'],
   'known-peers':['Known Peers','Peers that have reputation records. This can include disconnected peers if the daemon has seen successful or failed work from them before.'],
   dht:['DHT Records','Provider records currently known in the local DHT cache. These records help the node find peers that claim they can serve a desired NAR.'],
@@ -797,28 +778,29 @@ function testerItem(label,state,detail){
     +'</div>'
 }
 
-function renderTesterChecklist(){
-  var el=document.getElementById('tester-checks');
-  if(!el)return;
+function testerItems(){
   var status=LAST_STATUS||{};
-  var items=[
+  return [
     ['guix',checkOk('guix-integration')?'ok':(checkError('guix-integration')?'error':'warn'),checkOk('guix-integration')?'integration enabled':'check doctor integration'],
     ['bootstrap',(status.bootstrap_peer_count||0)>0?'ok':'warn',(status.bootstrap_peer_count||0)+' configured'],
     ['peer',(status.connected_peers||0)>0?'ok':'warn',(status.connected_peers||0)+' connected'],
     ['transfer',latestTransfer()?'ok':'warn',latestTransfer()?sourceDisplay(latestTransfer().source):'none observed'],
     ['share',(status.shareable_addresses||[]).length>0?'ok':'warn',(status.shareable_addresses||[]).length?'dialable address':'client-only or LAN']
-  ];
-  el.innerHTML=items.map(function(item){return testerItem(item[0],item[1],item[2])}).join('')
+  ]
 }
 
-function toggleReadinessDetail(){
-  var detail=document.getElementById('readiness-detail');
-  var button=document.getElementById('readiness-toggle');
-  var summary=document.getElementById('readiness-summary');
-  if(!detail||!button||!summary)return;
-  var hidden=detail.classList.toggle('hidden');
-  summary.setAttribute('aria-expanded',hidden?'false':'true');
-  button.textContent=hidden?'details':'hide'
+function testerChecklistHtml(){
+  return testerItems().map(function(item){return testerItem(item[0],item[1],item[2])}).join('')
+}
+
+function renderTesterChecklist(){
+  var el=document.getElementById('tester-checks');
+  if(el)el.innerHTML=testerChecklistHtml()
+}
+
+function currentUptimeText(){
+  if(!SERVER_STARTED)return'uptime --';
+  return 'uptime '+fmtTime(Math.floor((Date.now()-SERVER_STARTED)/1000))
 }
 
 function applyTheme(themeId){
@@ -881,6 +863,39 @@ function copyShareInfo(){
 function severityLabel(sev){
   if(sev==='warning')return'warn';
   return sev||'unknown'
+}
+
+function openNodeDetails(){
+  var c=document.getElementById('detail-content');
+  var version=(LAST_STATUS&&LAST_STATUS.version)||'unknown';
+  var connected=(LAST_STATUS&&LAST_STATUS.connected_peers)||0;
+  var known=Object.keys(PEERS).length;
+  var dht=(LAST_STATUS&&LAST_STATUS.dht_entries)||0;
+  var transfer=latestTransfer();
+  var connectivity=CONNECTIVITY||{};
+  c.innerHTML='<h2>node details</h2>'
+    +'<div class="detail-grid">'
+    +'<div class="info-card" data-tip="guix-p2p version and embedded commit.">'
+    +'<span class="k">version</span><span class="v" id="node-version">'+esc(version)+'</span><span class="sub" id="uptime">'+esc(currentUptimeText())+'</span>'
+    +'</div>'
+    +'<div class="info-card" data-tip="Peer and DHT summary. Detailed peer rows live in the Peers panel.">'
+    +'<span class="k">swarm</span><span class="v" id="overview-connected">'+esc(connected+' connected')+'</span><span class="sub" id="overview-known">'+esc(known+' known / '+dht+' dht')+'</span>'
+    +'</div>'
+    +'<div class="info-card" data-tip="Latest transfer source and package/NAR subject.">'
+    +'<span class="k">latest transfer</span><span class="v">'+esc(sourceDisplay(transfer&&transfer.source))+'</span><span class="sub">'+esc(transfer?transferSubjectName(transfer):'no transfer')+'</span>'
+    +'</div>'
+    +'<div class="info-card" data-tip="Network role and connectivity summary from /api/status.">'
+    +'<span class="k">network</span><span class="v">'+esc(connectivity.state||'unknown')+'</span><span class="sub">'+esc(connectivity.detail||'status unavailable')+'</span>'
+    +'</div>'
+    +'</div>'
+    +'<h3>setup gates</h3>'
+    +'<div class="tester-grid" id="tester-checks">'+testerChecklistHtml()+'</div>'
+    +'<h3>actions</h3>'
+    +'<button type="button" class="readiness-action" id="network-diagnostics" data-tip="Open full doctor-style network diagnostics.">network diagnostics</button>';
+  document.getElementById('overlay').classList.remove('hidden');
+  decorateHelpButtons(c);
+  renderOverview();
+  renderTesterChecklist()
 }
 
 function openDiagnosticsDetail(){
@@ -1818,14 +1833,13 @@ document.addEventListener('click',function(ev){
     closeHelp();
     return
   }
-  var readiness=ev.target.closest('#readiness-summary');
-  if(readiness&&!ev.target.closest('.help-btn')&&!ev.target.closest('#network-diagnostics')){
-    toggleReadinessDetail();
-    return
-  }
   if(ev.target.closest('#network-diagnostics')){
     ev.stopPropagation();
     openDiagnosticsDetail();
+    return
+  }
+  if(ev.target.closest('#open-node-details')){
+    openNodeDetails();
     return
   }
   var filter=ev.target.closest('.event-filter');
@@ -1892,10 +1906,6 @@ document.addEventListener('keydown',function(ev){
   if((ev.key==='Enter'||ev.key===' ')&&ev.target&&ev.target.closest('#network-diagnostics')){
     ev.preventDefault();
     openDiagnosticsDetail()
-  }
-  if((ev.key==='Enter'||ev.key===' ')&&ev.target&&ev.target.id==='readiness-summary'){
-    ev.preventDefault();
-    toggleReadinessDetail()
   }
   if((ev.key==='Enter'||ev.key===' ')&&ev.target&&ev.target.closest('[data-action="transfer-detail"]')){
     ev.preventDefault();

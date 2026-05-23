@@ -745,9 +745,8 @@ locally-seeded nars in real time:
 - The dashboard layout is organized for seeder management. It starts with a
   compact readiness band that always shows node health, connectivity role, and
   latest transfer source. Version/commit, uptime, peer/DHT summary, and tester
-  gates are hidden behind a details control so the primary workspace remains
-  focused on transfers and active seeds. The readiness band is a single
-  keyboard-accessible card; clicking it expands the less-frequent details.
+  gates are opened from the header `node details` button into the existing
+  side drawer, so expanded details never overlap the transfer workspace.
 - The primary workspace gives the transfer proof path full width, places
   Packages as a secondary add-seed list, and gives Active Seeds the wider
   management area.
@@ -760,10 +759,10 @@ locally-seeded nars in real time:
   height and wraps messages instead of squeezing them into a thin strip.
 - Detailed counts live in the panels that own them. The header intentionally
   avoids duplicating package, seed, peer, catalog, DHT, and uptime counters.
-- The tester checklist appears only in readiness details and summarizes the
-  setup gates that usually block a real first-run P2P substitute test: Guix
-  integration, bootstrap peers, connected peers, observed transfer activity,
-  and whether the node is directly shareable or client-only.
+- The tester checklist appears only in the node details drawer and summarizes
+  the setup gates that usually block a real first-run P2P substitute test:
+  Guix integration, bootstrap peers, connected peers, observed transfer
+  activity, and whether the node is directly shareable or client-only.
 - The dashboard header uses an inline `guix-p2p` SVG wordmark so the embedded
   dashboard can render the logo without a separate static asset route.
 - The main dashboard grid scrolls as a whole when zoom or viewport height makes
