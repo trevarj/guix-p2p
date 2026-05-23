@@ -75,6 +75,18 @@ fails. Use JSON for issue reports:
 guix-p2p --test-connectivity /dns4/bootstrap.example.org/udp/6881/quic-v1/p2p/12D3KooW... --json
 ```
 
+## Active Provider Lookup Test
+
+```sh
+guix-p2p --test-provider-lookup 1202bd0992b1facb208c34d9f29c1260244963fa7990bac636bb8811edc2c0e8
+```
+
+This starts the normal swarm path, dials configured bootstrap peers, queries
+Kad providers for the NAR hash, then sends the regular block handshake to DHT
+providers and connected/bootstrap fallback candidates. It exits with status `0`
+when a peer proves NAR availability and `2` when no provider handshake
+succeeds. Use `--json` for automation.
+
 ## NAT And Firewalls
 
 For remote peers to dial a home node:

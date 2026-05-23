@@ -13,7 +13,12 @@ use guix_p2p::{
 
 #[derive(Parser)]
 #[command(name = "guix-p2p", version = guix_p2p::version::VERSION)]
-#[command(group(ArgGroup::new("json_output_mode").args(["doctor", "share_info", "test_connectivity"])))]
+#[command(group(ArgGroup::new("json_output_mode").args([
+    "doctor",
+    "share_info",
+    "test_connectivity",
+    "test_provider_lookup"
+])))]
 struct Cli {
     /// Run in query mode (driven by guix-daemon --query)
     #[arg(long, conflicts_with_all = ["substitute", "daemon"])]
@@ -24,11 +29,11 @@ struct Cli {
     substitute: bool,
 
     /// Run as a persistent background daemon
-    #[arg(long, conflicts_with_all = ["query", "substitute", "doctor", "init"])]
+    #[arg(long, conflicts_with_all = ["query", "substitute", "doctor", "init", "test_provider_lookup"])]
     daemon: bool,
 
     /// Run local readiness checks for tester rollout and connectivity setup
-    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "init", "share_info", "test_connectivity"])]
+    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "init", "share_info", "test_connectivity", "test_provider_lookup"])]
     doctor: bool,
 
     /// Emit machine-readable JSON for --doctor or --share-info
@@ -36,16 +41,20 @@ struct Cli {
     json: bool,
 
     /// Create a starter config file without overwriting an existing one
-    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor", "share_info", "test_connectivity"])]
+    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor", "share_info", "test_connectivity", "test_provider_lookup"])]
     init: bool,
 
     /// Print shareable bootstrap information for testers
-    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor", "init", "test_connectivity"])]
+    #[arg(long, conflicts_with_all = ["query", "substitute", "daemon", "doctor", "init", "test_connectivity", "test_provider_lookup"])]
     share_info: bool,
 
     /// Actively dial a peer multiaddr and report whether the connection succeeds
-    #[arg(long, value_name = "MULTIADDR", conflicts_with_all = ["query", "substitute", "daemon", "doctor", "init", "share_info"])]
+    #[arg(long, value_name = "MULTIADDR", conflicts_with_all = ["query", "substitute", "daemon", "doctor", "init", "share_info", "test_provider_lookup"])]
     test_connectivity: Option<String>,
+
+    /// Query DHT providers and try provider/bootstrap block handshakes for a NAR hash
+    #[arg(long, value_name = "NAR_HASH", conflicts_with_all = ["query", "substitute", "daemon", "doctor", "init", "share_info", "test_connectivity"])]
+    test_provider_lookup: Option<String>,
 
     /// Comma-separated list of bootstrap peer multiaddrs
     #[arg(long, global = true)]
@@ -125,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
         || cli.init
         || cli.share_info
         || cli.test_connectivity.is_some()
+        || cli.test_provider_lookup.is_some()
     {
         "warn"
     } else {
@@ -432,7 +442,26 @@ async fn main() -> anyhow::Result<()> {
 
     let notify_rx = notify_tx.subscribe();
 
-    if cli.query {
+    if let Some(nar_hash) = cli.test_provider_lookup.as_deref() {
+        let mut notify_rx = notify_rx;
+        let report = guix_p2p::provider_probe::test_provider_lookup(
+            &config,
+            &cmd_tx,
+            &mut notify_rx,
+            &conn_mgr,
+            nar_hash,
+            std::time::Duration::from_secs(config.request_timeout_secs),
+        )
+        .await;
+        if cli.json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            print!("{}", guix_p2p::provider_probe::format_provider_lookup_probe(&report));
+        }
+        if !report.success {
+            std::process::exit(2);
+        }
+    } else if cli.query {
         daemon::run_query_mode(
             &provider_cache,
             &query_tx,
@@ -479,7 +508,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         tracing::error!(
             "No mode specified. Use --query, --substitute, --daemon, --doctor, --share-info, \
-             --test-connectivity, or --init."
+             --test-connectivity, --test-provider-lookup, or --init."
         );
         std::process::exit(1);
     }

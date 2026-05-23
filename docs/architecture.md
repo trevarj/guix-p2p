@@ -84,6 +84,11 @@ guix-p2p (Rust, libp2p)
   │    external addresses, stopped daemon socket, missing ACL, and substitute
   │    URL setup
   │
+  ├─► Provider Probe
+  │    `--test-provider-lookup HASH` dials bootstrap peers, queries Kad
+  │    providers, and handshakes provider plus connected/bootstrap fallback
+  │    candidates for the requested NAR hash
+  │
   └─► HTTP Narinfo Client (reqwest)
        Narinfo fetch from official substitute URLs
        Ed25519 signature verification against /etc/guix/acl
