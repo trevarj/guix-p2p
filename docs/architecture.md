@@ -545,11 +545,12 @@ user's TOML file:
 (service guix-p2p-service-type
          (guix-p2p-configuration
           (dashboard? #t)
-          (bootstrap-peers
-           '("/dns4/guix-p2p.trevs.site/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"))
           (external-addresses '())
           (policy "p2p-first")))
 ```
+
+The service defaults to the project bootstrap node. Set `(bootstrap-peers '())`
+to run without default bootstrap peers.
 
 For standalone bootstrap-node operations, use the Shepherd-first guide in
 [`bootstrap-node.md`](bootstrap-node.md). The equivalent low-level service shape

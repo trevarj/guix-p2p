@@ -108,9 +108,7 @@ Put this in the `services` field of your `operating-system` configuration:
   (modify-services
       (cons (service guix-p2p-service-type
                      (guix-p2p-configuration
-                      (dashboard? #t)
-                      (bootstrap-peers
-                       '("/dns4/guix-p2p.trevs.site/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"))))
+                      (dashboard? #t)))
             %base-services)
     (guix-service-type config =>
       (guix-p2p-enable-guix-daemon-extension config))))
@@ -118,7 +116,9 @@ Put this in the `services` field of your `operating-system` configuration:
 
 `guix-p2p-service-type` starts `guix-p2p --daemon`, adds the package to the
 system profile, and creates the default cache directory. System daemon
-bootstrap peers should live in `guix-p2p-configuration`, not in a user's
+bootstrap peers default to the project bootstrap node and can be overridden in
+`guix-p2p-configuration`; set `(bootstrap-peers '())` to disable the default.
+System daemon bootstrap peers should live in `guix-p2p-configuration`, not in a user's
 `~/.config/guix-p2p/config.toml`, because Shepherd starts the daemon from the
 system service definition with explicit command-line options. Installing the
 package puts the extension at

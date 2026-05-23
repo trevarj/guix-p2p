@@ -10,6 +10,7 @@
   #:use-module (srfi srfi-13)
   #:export (%guix-p2p-default-cache-directory
             %guix-p2p-default-socket
+            %guix-p2p-default-bootstrap-peers
             <guix-p2p-configuration>
             guix-p2p-configuration
             guix-p2p-configuration?
@@ -35,6 +36,9 @@
 (define-public %guix-p2p-default-socket
   (string-append %guix-p2p-default-cache-directory "/guix-p2p.sock"))
 
+(define-public %guix-p2p-default-bootstrap-peers
+  '("/dns4/guix-p2p.trevs.site/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"))
+
 (define-record-type* <guix-p2p-configuration>
   guix-p2p-configuration make-guix-p2p-configuration
   guix-p2p-configuration?
@@ -47,7 +51,7 @@
   (listen-address guix-p2p-configuration-listen-address
                   (default "/ip4/0.0.0.0/udp/6881/quic-v1"))
   (bootstrap-peers guix-p2p-configuration-bootstrap-peers
-                   (default '()))
+                   (default %guix-p2p-default-bootstrap-peers))
   (external-addresses guix-p2p-configuration-external-addresses
                       (default '()))
   (policy guix-p2p-configuration-policy

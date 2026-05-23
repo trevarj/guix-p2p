@@ -66,10 +66,12 @@ bootstrap_peers = "/ip4/p2p1.guix.example.org/udp/6881/quic-v1/p2p/12D3KooW...,/
 external_addresses = "/dns4/node.example.org/udp/6881/quic-v1"
 ```
 
-There are no built-in default bootstrap peers yet. The code path is enabled by
-`enable_default_bootstrap_peers = true` so project-operated bootnodes can be
-added later without changing user config. Users can add known peers via the
-`--bootstrap-peers` CLI flag or `bootstrap_peers` in the config file.
+The binary/TOML built-in bootstrap list is currently empty. The code path is
+enabled by `enable_default_bootstrap_peers = true` so project-operated bootnodes
+can be added later without changing user config. Guix System users get the
+project bootstrap node from `guix-p2p-service-type` unless they override
+`bootstrap-peers`. Users can add known peers via the `--bootstrap-peers` CLI
+flag or `bootstrap_peers` in the config file.
 
 Reachable peers learned from successful dials, identify, and mDNS are persisted
 under `cache_dir` when `peer_store_enabled = true`. Loopback, unspecified, and

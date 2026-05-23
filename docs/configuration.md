@@ -66,7 +66,7 @@ seed_paths = ["/gnu/store/...-hello"]
 | Key | Default | CLI override | Purpose |
 |-----|---------|--------------|---------|
 | `bootstrap_peers` | empty | `--bootstrap-peers` | Comma-separated community or private peer multiaddrs used for initial DHT connectivity. |
-| `enable_default_bootstrap_peers` | `true` | none | Include built-in project bootstrap peers when they are available. The current built-in list is empty. |
+| `enable_default_bootstrap_peers` | `true` | none | Include binary/TOML built-in project bootstrap peers when they are available. The current binary built-in list is empty; the Guix service type has its own project bootstrap default. |
 | `peer_store_enabled` | `true` | none | Persist reachable peer addresses under `cache_dir` and reuse them on later starts; loopback, local-interface, and failed dial addresses are pruned. |
 | `peer_store_max_entries` | `100` | none | Maximum persisted peer address entries. |
 | `external_addresses` | empty | `--external-addresses` | Comma-separated listener addresses advertised to peers and provider records when autodetection is insufficient. |
@@ -106,17 +106,20 @@ command line:
          (guix-p2p-configuration
           (dashboard? #t)
           (auto-seed-downloads "p2p")
-          (bootstrap-peers
-           '("/dns4/guix-p2p.trevs.site/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"))
           (external-addresses '())
           (policy "p2p-first")))
 ```
 
+The service default includes the project bootstrap node. Override
+`bootstrap-peers` with a custom list, or set `(bootstrap-peers '())` for an
+isolated node.
+
 Use `extra-options` only for flags that do not yet have service fields.
 
-Startup bootstrap peers are merged from the built-in project list, configured
-`bootstrap_peers`, CLI `--bootstrap-peers`, and the persisted peer store. The
-peer store is written under `cache_dir`; user config is never rewritten.
+For TOML/CLI daemon starts, startup bootstrap peers are merged from the built-in
+project list, configured `bootstrap_peers`, CLI `--bootstrap-peers`, and the
+persisted peer store. The peer store is written under `cache_dir`; user config
+is never rewritten.
 
 Use `external_addresses` when the listen address seen locally is not the
 address other peers should dial, such as port-forwarded VMs, NAT rules, or a
