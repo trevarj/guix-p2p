@@ -48,18 +48,12 @@ header .brand-logo .brand-main{fill:var(--fg)}
 header .brand-logo .brand-accent{fill:var(--acc)}
 header .brand-logo .brand-link{stroke:var(--acc)}
 header .id{font-size:11px;opacity:.6}
-.share-peer{margin-top:4px;display:flex;gap:4px;align-items:center;max-width:280px}
+.share-peer{margin-top:4px;display:flex;gap:4px;align-items:center;max-width:420px}
 .share-peer .share-value{
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--muted);font-size:10px
 }
 .share-peer button{padding:3px 6px;font-size:10px;flex:0 0 auto}
-header .stats{display:grid;grid-template-columns:repeat(8,auto);gap:8px;font-size:11px}
-header .stats div{border:1px solid var(--line);background:var(--panel);padding:4px 7px;min-width:74px}
-header .stats span{display:block;color:var(--acc);font-weight:bold;font-size:14px;line-height:1.1}
-header .stats .stat-action{cursor:pointer}
-header .stats .stat-action:hover{border-color:var(--acc)}
-header .stats .stat-action:focus-visible{outline:1px solid var(--acc);outline-offset:2px}
 header button,.theme-select{
   background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
   padding:5px 10px;font-family:var(--font);font-size:11px;cursor:pointer;border-radius:4px
@@ -78,10 +72,10 @@ button:focus-visible,input:focus-visible,.theme-select:focus-visible{outline:1px
 .status-pill.offline::before{background:var(--err);box-shadow:0 0 8px rgba(210,75,75,.45)}
 .status-pill.demo{color:var(--warn)}
 main{
-  display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:minmax(130px,.42fr) minmax(150px,.5fr) minmax(260px,1.1fr) minmax(210px,.85fr) minmax(150px,.45fr);
+  display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:minmax(160px,.48fr) minmax(150px,.5fr) minmax(260px,1.1fr) minmax(210px,.85fr) minmax(150px,.45fr);
   grid-template-areas:
-    "overview overview connectivity"
-    "transfer transfer tester"
+    "overview overview overview"
+    "transfer transfer transfer"
     "packages seeds seeds"
     "peers catalog builds"
     "events events events";
@@ -95,8 +89,6 @@ main{
 .seeds-panel{grid-area:seeds}
 .transfer-panel{grid-area:transfer}
 .overview-panel{grid-area:overview}
-.connectivity-panel{grid-area:connectivity}
-.tester-panel{grid-area:tester}
 .peers-panel{grid-area:peers}
 .catalog-panel{grid-area:catalog}
 .builds-panel{grid-area:builds}
@@ -212,8 +204,8 @@ main{
 .package-row .seed-action:hover{border-color:var(--acc)}
 .package-row.seeded .seed-action{color:var(--dim)}
 .package-row .seed-action:disabled{cursor:not-allowed;opacity:.55;border-color:var(--line)}
-.overview-grid{display:grid;grid-template-columns:1.15fr repeat(4,minmax(86px,.6fr));gap:8px;align-items:stretch}
-.health-card,.info-card,.check-card{
+.overview-grid{display:grid;grid-template-columns:minmax(230px,1.25fr) repeat(3,minmax(140px,.75fr));gap:8px;align-items:stretch}
+.health-card,.info-card,.check-card,.network-card{
   border:1px solid var(--line);background:var(--bg2);border-radius:6px;padding:9px;min-width:0
 }
 .health-card{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center}
@@ -225,13 +217,11 @@ main{
 .info-card .k,.check-card .k{display:block;color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:.8px}
 .info-card .v{display:block;color:var(--fg);font-size:15px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .info-card .sub{display:block;color:var(--muted);font-size:10px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.connectivity-stack{display:grid;gap:8px}
-.connectivity-state{display:flex;align-items:center;gap:8px}
-.connectivity-state .label{font-size:16px;color:var(--fg)}
-.connectivity-state .detail{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
-.addr-box{border:1px solid var(--line);background:var(--bg3);border-radius:4px;padding:7px;font-size:10px;color:var(--muted);word-break:break-all}
-.tester-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
-.check-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px;align-items:center;padding:7px}
+.network-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start}
+.network-card .detail{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.network-card .line{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tester-grid{display:grid;grid-template-columns:repeat(6,minmax(72px,1fr));gap:6px;margin-top:8px}
+.check-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px;align-items:center;padding:6px}
 .check-card .mark{width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;font-size:11px;background:var(--bg3);color:var(--warn);border:1px solid var(--line)}
 .check-card.ok .mark{color:var(--ok);border-color:rgba(103,200,121,.5)}
 .check-card.warn .mark{color:var(--warn)}
@@ -359,12 +349,11 @@ main{
 
 @media (max-width:1100px){
   header{align-items:flex-start;flex-wrap:wrap}
-  header .stats{flex-wrap:wrap;gap:10px 16px}
   main{
-    grid-template-columns:1fr 1fr;grid-template-rows:auto auto minmax(0,.7fr) minmax(0,1fr) minmax(0,1fr) minmax(0,.8fr) auto;
+    grid-template-columns:1fr 1fr;grid-template-rows:auto minmax(0,.7fr) minmax(0,1fr) minmax(0,1fr) minmax(0,.8fr) auto;
     grid-template-areas:
-      "overview connectivity"
-      "transfer tester"
+      "overview overview"
+      "transfer transfer"
       "packages packages"
       "seeds peers"
       "catalog builds"
@@ -376,12 +365,10 @@ main{
   .transfer-compact-stages{grid-template-columns:repeat(3,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:repeat(3,1fr)}
   .overview-grid{grid-template-columns:1fr 1fr}
-  .tester-grid{grid-template-columns:1fr 1fr}
+  .tester-grid{grid-template-columns:repeat(3,1fr)}
 }
 @media (max-width:720px){
   body{overflow:auto}
-  header .stats{width:100%}
-  header .stats{grid-template-columns:repeat(2,1fr)}
   main{display:block;overflow:visible}
   .panel{min-height:220px;max-height:360px}
   .events{max-height:260px}
@@ -416,16 +403,6 @@ main{
       <button type="button" id="copy-share" data-tip="Copy shareable peer multiaddr.">copy</button>
     </div>
   </div>
-  <div class="stats">
-    <div data-tip="Currently connected swarm peers.">CONN <span id="connected">0</span></div>
-    <div data-tip="Known peers with reputation records.">PEERS <span id="total-peers">0</span></div>
-    <div data-tip="Provider records known in the local DHT cache.">DHT <span id="dht-entries">0</span></div>
-    <div data-tip="Installed packages discovered from system, kernel, and Guix Home profiles.">PACKAGES <span id="package-count">0</span></div>
-    <div data-tip="Store paths observed through substitute/narinfo lookups.">CATALOG <span id="catalog-count">0</span></div>
-    <div data-tip="NARs currently cached locally and available for block serving.">SEEDS <span id="seed-count">0</span></div>
-    <div id="network-diagnostics" class="stat-action" role="button" tabindex="0" data-tip="Static reachability readiness based on bootstrap peers and shareable external addresses. Open diagnostics detail.">NET <span id="connectivity-state">local</span></div>
-    <div data-tip="Daemon dashboard uptime since this process started.">UPTIME <span id="uptime">00:00:00</span></div>
-  </div>
   <div class="theme-control">
     <label class="theme-label" for="theme-select">theme</label>
     <select class="theme-select" id="theme-select" data-tip="Select dashboard color theme.">
@@ -441,7 +418,7 @@ main{
 </header>
 <main>
   <div class="panel overview-panel" data-help="overview">
-    <h2 data-tip="Readiness summary for the local daemon.">node health</h2>
+    <h2 data-tip="Readiness, version, network role, and first-run checks for the local daemon.">readiness</h2>
     <div class="overview-grid">
       <div class="health-card" id="health-card">
         <span class="health-dot" id="health-dot"></span>
@@ -453,17 +430,24 @@ main{
       <div class="info-card" data-tip="guix-p2p version and embedded commit.">
         <span class="k">version</span>
         <span class="v" id="node-version">--</span>
-        <span class="sub">daemon binary</span>
+        <span class="sub" id="uptime">uptime --</span>
       </div>
-      <div class="info-card" data-tip="Connected peers available to this daemon right now.">
-        <span class="k">connected</span>
-        <span class="v" id="overview-connected">0</span>
-        <span class="sub" id="overview-known">0 known</span>
+      <div class="network-card" id="network-diagnostics" role="button" tabindex="0" data-tip="Open full doctor-style diagnostics.">
+        <span class="source-badge" id="connectivity-badge">unknown</span>
+        <span>
+          <span class="k">network</span>
+          <span class="v" id="connectivity-title">checking</span>
+          <span class="detail">
+            <span class="line" id="connectivity-detail">waiting for status</span>
+            <span class="line" id="connectivity-address">no shareable address</span>
+            <span class="line" id="connectivity-bootstrap">no bootstrap peer configured</span>
+          </span>
+        </span>
       </div>
-      <div class="info-card" data-tip="Active local NAR seeds this node can serve.">
-        <span class="k">seeding</span>
-        <span class="v" id="overview-seeds">0</span>
-        <span class="sub" id="overview-dht">0 dht records</span>
+      <div class="info-card" data-tip="Peer and DHT summary. Detailed peer rows live in the Peers panel.">
+        <span class="k">swarm</span>
+        <span class="v" id="overview-connected">0 connected</span>
+        <span class="sub" id="overview-known">0 known / 0 dht</span>
       </div>
       <div class="info-card" data-tip="Latest transfer source, if a transfer has been observed.">
         <span class="k">latest source</span>
@@ -471,23 +455,6 @@ main{
         <span class="sub" id="overview-transfer">no transfer</span>
       </div>
     </div>
-  </div>
-  <div class="panel connectivity-panel" data-help="connectivity-panel">
-    <h2 data-tip="Network role and reachable addresses.">connectivity</h2>
-    <div class="connectivity-stack">
-      <div class="connectivity-state">
-        <span class="source-badge" id="connectivity-badge">unknown</span>
-        <span>
-          <span class="label" id="connectivity-title">checking</span>
-          <span class="detail" id="connectivity-detail">waiting for status</span>
-        </span>
-      </div>
-      <div class="addr-box" id="connectivity-address">no shareable address</div>
-      <div class="addr-box" id="connectivity-bootstrap">no bootstrap peer configured</div>
-    </div>
-  </div>
-  <div class="panel tester-panel" data-help="tester">
-    <h2 data-tip="First-run checks for a real tester node.">tester checklist</h2>
     <div class="tester-grid" id="tester-checks"></div>
   </div>
   <div class="panel packages-panel" data-help="packages">
@@ -574,9 +541,7 @@ var SERVER_STARTED=null;
 var DEMO_MODE=false;
 var HELP_TEXT={
   dashboard:['Dashboard','This page is the local operational view for a guix-p2p daemon. It combines seed inventory, transfer proof evidence, peer health, discovered substitute metadata, and recent daemon events.'],
-  overview:['Node Health','A compact readiness summary for the local daemon: version, peer connectivity, seeding inventory, DHT records, and latest transfer source.\n\nReady means the dashboard API is reachable, Guix integration has no reported error, and the node has at least one bootstrap peer or shareable address.'],
-  'connectivity-panel':['Connectivity','Shows the network role this daemon is currently configured for.\n\nClient-only nodes can download through bootstrap peers but are not directly dialable. Shareable nodes have a public multiaddr that other peers can use. Local-only nodes rely on LAN discovery unless bootstrap peers are added.'],
-  tester:['Tester Checklist','A short first-run checklist for onboarding real testers. It highlights the setup problems that usually block a P2P substitute test: daemon/API reachability, Guix integration, bootstrap configuration, peer connection, package discovery, transfer activity, and seeding.'],
+  overview:['Readiness','A compact first-screen summary for the local daemon: health, version, uptime, network role, peer/DHT state, latest transfer source, and the few setup gates that usually block tester onboarding.\n\nDetailed counts live in their owner panels below: packages, active seeds, peers, catalog, builds, transfer path, and events.'],
   connected:['Connected Peers','The number of currently connected swarm peers reported by the daemon connection manager. A low value can be normal before discovery or when only bootstrap forwarding is available.'],
   'known-peers':['Known Peers','Peers that have reputation records. This can include disconnected peers if the daemon has seen successful or failed work from them before.'],
   dht:['DHT Records','Provider records currently known in the local DHT cache. These records help the node find peers that claim they can serve a desired NAR.'],
@@ -682,8 +647,18 @@ function closeHelp(){
   document.getElementById('help-popover').classList.add('hidden')
 }
 
+function setText(id,value){
+  var el=document.getElementById(id);
+  if(el)el.textContent=value
+}
+
+function setTip(id,value){
+  var el=document.getElementById(id);
+  if(el)el.dataset.tip=value
+}
+
 function updatePeerCount(){
-  document.getElementById('total-peers').textContent=Object.keys(PEERS).length
+  renderOverview()
 }
 
 function setStatus(text,state){
@@ -702,24 +677,15 @@ function setStatus(text,state){
 function renderConnectivityStatus(status){
   LAST_STATUS=status;
   CONNECTIVITY=status.connectivity||null;
-  var el=document.getElementById('connectivity-state');
-  if(!el)return;
   if(!CONNECTIVITY){
-    el.textContent='unknown';
-    el.dataset.tip='Connectivity status is unavailable';
+    setText('connectivity-title','unknown');
+    setTip('network-diagnostics','Connectivity status is unavailable');
     return
   }
-  var label={
-    'shareable':'share',
-    'shareable-no-bootstrap':'share/no-bs',
-    'client-only':'client',
-    'local-only':'local'
-  }[CONNECTIVITY.state]||CONNECTIVITY.state||'unknown';
-  el.textContent=label;
-  el.dataset.tip=CONNECTIVITY.detail
+  setTip('network-diagnostics',CONNECTIVITY.detail
     +'\nbootstrap peers: '+(status.bootstrap_peer_count||0)
     +'\nshareable addresses: '+((CONNECTIVITY.shareable_addresses||[]).length)
-    +(CONNECTIVITY.has_private_external_addresses?'\nprivate external address configured':'')
+    +(CONNECTIVITY.has_private_external_addresses?'\nprivate external address configured':''))
   renderConnectivityPanel();
   renderOverview();
   renderTesterChecklist();
@@ -773,13 +739,11 @@ function renderOverview(){
   if(detail)detail.textContent=health.detail;
   if(!LAST_STATUS)return;
   var transfer=latestTransfer();
-  document.getElementById('node-version').textContent=LAST_STATUS.version||'unknown';
-  document.getElementById('overview-connected').textContent=LAST_STATUS.connected_peers||0;
-  document.getElementById('overview-known').textContent=Object.keys(PEERS).length+' known';
-  document.getElementById('overview-seeds').textContent=LAST_STATUS.seed_count||0;
-  document.getElementById('overview-dht').textContent=(LAST_STATUS.dht_entries||0)+' dht records';
-  document.getElementById('overview-source').textContent=sourceDisplay(transfer&&transfer.source);
-  document.getElementById('overview-transfer').textContent=transfer?transferSubjectName(transfer):'no transfer'
+  setText('node-version',LAST_STATUS.version||'unknown');
+  setText('overview-connected',(LAST_STATUS.connected_peers||0)+' connected');
+  setText('overview-known',Object.keys(PEERS).length+' known / '+(LAST_STATUS.dht_entries||0)+' dht');
+  setText('overview-source',sourceDisplay(transfer&&transfer.source));
+  setText('overview-transfer',transfer?transferSubjectName(transfer):'no transfer')
 }
 
 function renderConnectivityPanel(){
@@ -794,12 +758,12 @@ function renderConnectivityPanel(){
   var badge=document.getElementById('connectivity-badge');
   badge.textContent=role;
   badge.className='source-badge '+(state==='local-only'?'warn':'ready');
-  document.getElementById('connectivity-title').textContent=role;
-  document.getElementById('connectivity-detail').textContent=CONNECTIVITY.detail||'unknown';
-  var share=(CONNECTIVITY.shareable_addresses||[]).join('\n')||'no shareable address; this node can still download through bootstrap peers';
-  var boot=(LAST_STATUS.bootstrap_peers||[]).join('\n')||'no bootstrap peer configured';
-  document.getElementById('connectivity-address').textContent=share;
-  document.getElementById('connectivity-bootstrap').textContent=boot
+  setText('connectivity-title',role);
+  setText('connectivity-detail',CONNECTIVITY.detail||'unknown');
+  var share=(CONNECTIVITY.shareable_addresses||[])[0]||'no shareable address';
+  var boot=(LAST_STATUS.bootstrap_peers||[])[0]||'no bootstrap peer configured';
+  setText('connectivity-address',share);
+  setText('connectivity-bootstrap',boot)
 }
 
 function testerItem(label,state,detail){
@@ -816,13 +780,10 @@ function renderTesterChecklist(){
   if(!el)return;
   var status=LAST_STATUS||{};
   var items=[
-    ['daemon','ok','dashboard API reachable'],
     ['guix',checkOk('guix-integration')?'ok':(checkError('guix-integration')?'error':'warn'),checkOk('guix-integration')?'integration enabled':'check doctor integration'],
     ['bootstrap',(status.bootstrap_peer_count||0)>0?'ok':'warn',(status.bootstrap_peer_count||0)+' configured'],
     ['peer',(status.connected_peers||0)>0?'ok':'warn',(status.connected_peers||0)+' connected'],
-    ['packages',PACKAGES.length>0?'ok':'warn',PACKAGES.length+' discovered'],
     ['transfer',latestTransfer()?'ok':'warn',latestTransfer()?sourceDisplay(latestTransfer().source):'none observed'],
-    ['seeding',(status.seed_count||0)>0?'ok':'warn',(status.seed_count||0)+' active'],
     ['share',(status.shareable_addresses||[]).length>0?'ok':'warn',(status.shareable_addresses||[]).length?'dialable address':'client-only or LAN']
   ];
   el.innerHTML=items.map(function(item){return testerItem(item[0],item[1],item[2])}).join('')
@@ -1081,8 +1042,7 @@ function renderBuilds(){
 function renderCatalog(){
   var el=document.getElementById('catalog-list');
   var keys=Object.keys(CATALOG);
-  document.getElementById('catalog-count').textContent=keys.length;
-  document.getElementById('catalog-badge').textContent=keys.length;
+  setText('catalog-badge',keys.length);
   if(!keys.length){el.innerHTML='<div class="empty">no packages discovered</div>';return}
   var arr=keys.map(function(k){return CATALOG[k]});
   arr.sort(function(a,b){return(b.nar_size||0)-(a.nar_size||0)});
@@ -1112,8 +1072,7 @@ function renderPackages(){
   var el=document.getElementById('packages-list');
   var q=(document.getElementById('package-search').value||'').trim();
   var arr=PACKAGES.filter(function(pkg){return packageMatches(pkg,q)});
-  document.getElementById('package-count').textContent=PACKAGES.length;
-  document.getElementById('package-badge').textContent=arr.length;
+  setText('package-badge',arr.length);
   renderTesterChecklist();
   if(!PACKAGES.length){el.innerHTML='<div class="empty">no installed packages found</div>';return}
   if(!arr.length){el.innerHTML='<div class="empty">no packages match</div>';return}
@@ -1411,8 +1370,7 @@ function renderSeeds(){
   var el=document.getElementById('seeds-list');
   var keys=Object.keys(SEEDS);
   var count=keys.length;
-  document.getElementById('seed-count').textContent=count;
-  document.getElementById('seed-badge').textContent=count;
+  setText('seed-badge',count);
   renderOverview();
   renderTesterChecklist();
   if(!count){el.innerHTML='<div class="empty">not seeding</div>';return}
@@ -1832,7 +1790,7 @@ document.addEventListener('keydown',function(ev){
   function tickUptime(){
     if(!SERVER_STARTED)return;
     var s=Math.floor((Date.now()-SERVER_STARTED)/1000);
-    document.getElementById('uptime').textContent=fmtTime(s)
+    setText('uptime','uptime '+fmtTime(s))
   }
   setInterval(tickUptime,1000);
   tickUptime();
@@ -1849,8 +1807,6 @@ document.addEventListener('keydown',function(ev){
       shareEl.textContent=share||'set external_addresses to share';
       shareEl.dataset.tip=share||'Set external_addresses to the address other peers can dial.';
       copyEl.dataset.value=share;
-      document.getElementById('connected').textContent=s.connected_peers;
-      document.getElementById('dht-entries').textContent=s.dht_entries;
       renderConnectivityStatus(s);
       if(s.uptime_secs!=null){
         SERVER_STARTED=Date.now()-s.uptime_secs*1000;

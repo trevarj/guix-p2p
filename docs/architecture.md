@@ -742,15 +742,18 @@ locally-seeded nars in real time:
 - The dashboard package panel consumes `/api/packages`, supports fuzzy search
   across package name, version, and store path, and shows source, output, store
   path, and seed state. Its row-level seed control calls `POST /api/seeds`.
-- The dashboard layout starts with operational readiness for the known-tester
-  workflow: node health, daemon version/commit, connectivity role,
-  shareable/bootstrap addresses, and a tester checklist are shown before the
+- The dashboard layout starts with one consolidated readiness band for the
+  known-tester workflow. It groups node health, daemon version/commit, uptime,
+  connectivity role, the first shareable/bootstrap address, peer/DHT summary,
+  latest transfer source, and the minimal tester gates before the detailed
   transfer proof path, packages, active seeds, peers, catalog, builds, and
   filtered event history.
-- The tester checklist summarizes the setup gates needed for a real first-run
-  P2P substitute test: dashboard API, Guix integration, bootstrap peers,
-  connected peers, installed package discovery, observed transfer activity,
-  active seeds, and whether the node is directly shareable or client-only.
+- Detailed counts live in the panels that own them. The header intentionally
+  avoids duplicating package, seed, peer, catalog, DHT, and uptime counters.
+- The tester checklist summarizes only the setup gates that usually block a
+  real first-run P2P substitute test: Guix integration, bootstrap peers,
+  connected peers, observed transfer activity, and whether the node is directly
+  shareable or client-only.
 - The dashboard header uses an inline `guix-p2p` SVG wordmark so the embedded
   dashboard can render the logo without a separate static asset route.
 - The main dashboard grid scrolls as a whole when zoom or viewport height makes
