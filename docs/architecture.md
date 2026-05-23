@@ -496,7 +496,7 @@ guix-daemon invokes "guix substitute --query"
 
 guix-daemon invokes "guix substitute --substitute"
   → extension intercepts "--substitute"
-  → if socket exists: connect to $GUIX_P2P_SOCKET and restore daemon nar output
+  → if socket exists: connect to $GUIX_P2P_SOCKET, receive daemon nar output, and restore it into Guix's destination path
   → else: delegate to built-in guix substitute --substitute
 
 other substitute invocations
@@ -511,6 +511,10 @@ Integration contract:
 - Query mode is interactive: the extension must write the reply for each
   `have`/`info` command before waiting for stdin EOF, because `guix-daemon`
   keeps the query process open.
+- Substitute mode receives base64-framed raw NAR bytes from the daemon, stores
+  them in a temporary file, restores them into Guix's requested destination
+  with `(guix serialization) restore-file`, and then forwards the terminal
+  `success` or failure reply on fd 4.
 - `GUIX_P2P_BIN` is only used by older relay/wrapper setups; the Scheme
   extension does not exec it.
 

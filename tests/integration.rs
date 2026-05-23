@@ -112,7 +112,7 @@ mod cli_contract {
         assert!(output.status.success());
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("guix-p2p"));
-        assert!(stdout.contains("0.1.7 ("));
+        assert!(stdout.contains(concat!(env!("CARGO_PKG_VERSION"), " (")));
     }
 
     #[test]
@@ -236,6 +236,28 @@ mod scheme_extension {
             .unwrap_or(false)
     }
 
+    fn make_test_nar(temp: &tempfile::TempDir, contents: &[u8]) -> Vec<u8> {
+        let source = temp.path().join("source");
+        let nar = temp.path().join("source.nar");
+        std::fs::write(&source, contents).unwrap();
+
+        let status = Command::new("guile")
+            .args([
+                "-c",
+                "(use-modules (guix serialization)) \
+                 (call-with-output-file (getenv \"GUIX_P2P_TEST_NAR\") \
+                   (lambda (port) \
+                     (write-file (getenv \"GUIX_P2P_TEST_SOURCE\") port)))",
+            ])
+            .env("GUIX_P2P_TEST_SOURCE", &source)
+            .env("GUIX_P2P_TEST_NAR", &nar)
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed to generate test nar with guile");
+
+        std::fs::read(nar).unwrap()
+    }
+
     #[test]
     fn substitute_extension_relays_to_socket_without_rust_helper() {
         if !extension_loads() {
@@ -247,7 +269,8 @@ mod scheme_extension {
         let socket_path = temp.path().join("guix-p2p.sock");
         let destination = temp.path().join("substitute-out");
         let fd4_path = temp.path().join("fd4");
-        let nar_bytes = b"nar bytes from daemon";
+        let restored_bytes = b"nar bytes from daemon";
+        let nar_bytes = make_test_nar(&temp, restored_bytes);
 
         let listener = UnixListener::bind(&socket_path).unwrap();
         let expected_destination = destination.clone();
@@ -270,7 +293,7 @@ mod scheme_extension {
                 format!("substitute /gnu/store/abc-test {}", expected_destination.display())
             );
 
-            let encoded = base64::engine::general_purpose::STANDARD.encode(nar_bytes);
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&nar_bytes);
             writeln!(stream, "nar:{encoded}").unwrap();
             writeln!(stream, "nar-end").unwrap();
             writeln!(stream, "fd4:success sha256:dummy {}", nar_bytes.len()).unwrap();
@@ -327,7 +350,7 @@ mod scheme_extension {
 
         let mut restored = Vec::new();
         File::open(&destination).unwrap().read_to_end(&mut restored).unwrap();
-        assert_eq!(restored, nar_bytes);
+        assert_eq!(restored, restored_bytes);
 
         let mut fd4_output = String::new();
         drop(fd4_file);

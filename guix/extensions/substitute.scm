@@ -1,6 +1,7 @@
 (define-module (guix extensions substitute)
   #:use-module ((guix scripts substitute) #:prefix builtin:)
   #:use-module (guix base64)
+  #:use-module ((guix serialization) #:select (restore-file))
   #:use-module ((guix build utils) #:select (delete-file-recursively))
   #:use-module (ice-9 match)
   #:use-module (ice-9 rdelim)
@@ -88,19 +89,37 @@
   (match destinations
     (() (error "received nar data without a destination"))
     ((destination rest ...)
-     (remove-destination destination)
-     (values destination rest (open-file destination "wb")))))
+     (let* ((template (string-copy
+                       (string-append (or (getenv "TMPDIR") "/tmp")
+                                      "/guix-p2p-substitute-XXXXXX")))
+            (port (mkstemp! template)))
+       (values destination rest port template)))))
+
+(define (restore-nar-destination nar-port nar-temp-path destination)
+  (close-port nar-port)
+  (dynamic-wind
+    (const #t)
+    (lambda ()
+      (remove-destination destination)
+      (call-with-input-file nar-temp-path
+        (lambda (port)
+          (restore-file port destination))))
+    (lambda ()
+      (false-if-exception (delete-file nar-temp-path)))))
 
 (define (handle-relay-output socket-port reply-port destinations)
   (let loop ((destinations destinations)
              (expected-terminal-replies (length destinations))
              (nar-destination #f)
              (nar-port #f)
+             (nar-temp-path #f)
              (terminal-replies 0))
     (match (read-line socket-port)
       ((? eof-object?)
        (when nar-port
          (close-port nar-port)
+         (when nar-temp-path
+           (false-if-exception (delete-file nar-temp-path)))
          (error "daemon socket closed before finishing nar" nar-destination))
        (when (< terminal-replies expected-terminal-replies)
          (error "daemon socket closed before substitute returned a terminal reply"))
@@ -114,24 +133,30 @@
                  expected-terminal-replies
                  nar-destination
                  nar-port
+                 nar-temp-path
                  (if (terminal-substitute-reply? data)
                      (+ terminal-replies 1)
                      terminal-replies))))
         ((string-prefix? "out:" line)
          (write-trace-line (string-drop line 4))
-         (loop destinations expected-terminal-replies nar-destination nar-port terminal-replies))
+         (loop destinations
+               expected-terminal-replies
+               nar-destination
+               nar-port
+               nar-temp-path
+               terminal-replies))
         ((string-prefix? "nar:" line)
-         (let-values (((destination rest port)
+         (let-values (((destination rest port temp-path)
                        (if nar-port
-                           (values nar-destination destinations nar-port)
+                           (values nar-destination destinations nar-port nar-temp-path)
                            (open-nar-destination destinations))))
            (put-bytevector port (base64-decode (string-drop line 4)))
-           (loop rest expected-terminal-replies destination port terminal-replies)))
+           (loop rest expected-terminal-replies destination port temp-path terminal-replies)))
         ((string=? line "nar-end")
          (unless nar-port
            (error "received nar-end without a destination"))
-         (close-port nar-port)
-         (loop destinations expected-terminal-replies #f #f terminal-replies))
+         (restore-nar-destination nar-port nar-temp-path nar-destination)
+         (loop destinations expected-terminal-replies #f #f #f terminal-replies))
         (else
          ;; Backward-compatible fallback for legacy unprefixed socket replies.
          (write-reply-line reply-port line)
@@ -139,6 +164,7 @@
                expected-terminal-replies
                nar-destination
                nar-port
+               nar-temp-path
                (if (terminal-substitute-reply? line)
                    (+ terminal-replies 1)
                    terminal-replies))))))))
