@@ -91,7 +91,7 @@ seed_paths = ["/gnu/store/...-hello"]
 | `dashboard_bind` | `127.0.0.1` | `--dashboard-bind` | Dashboard bind address. |
 | `tor_socks` | unset | `--tor-socks` | SOCKS5 proxy address for Tor. |
 | `tor_only` | `false` | `--tor-only` | Route network traffic only through Tor-capable paths. |
-| `socket_path` | `<cache_dir>/guix-p2p.sock` | `--socket` | Unix socket used by relay mode and the Guix wrapper. |
+| `socket_path` | `<cache_dir>/guix-p2p.sock` | `--socket` | Unix socket used by the daemon, Scheme extension, and legacy relay mode. |
 | `seed_paths` | empty | `--seed` | Store paths serialized as raw single-item NARs and announced in the DHT. |
 
 ## Guix System Service Fields

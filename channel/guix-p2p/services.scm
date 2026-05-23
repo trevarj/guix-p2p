@@ -122,7 +122,6 @@
          (string-prefix? prefix value))
        '("GUIX="
          "GUIX_EXTENSIONS_PATH="
-         "GUIX_P2P_BIN="
          "GUIX_P2P_SOCKET="
          "REAL_GUIX=")))
 
@@ -140,6 +139,9 @@
                  (guix-p2p-bin "/run/current-system/profile/bin/guix-p2p")
                  (socket %guix-p2p-default-socket))
   "Return CONFIG with guix-daemon resolving the guix-p2p substitute extension."
+  ;; Accepted for backward-compatible system configs; the Scheme extension no
+  ;; longer execs a helper binary.
+  guix-p2p-bin
   (let* ((environment (guix-configuration-environment config))
          (existing-extensions
           (guix-p2p-environment-value "GUIX_EXTENSIONS_PATH" environment))
@@ -151,7 +153,6 @@
      (inherit config)
      (environment
       (cons* (string-append "GUIX_EXTENSIONS_PATH=" extensions-path)
-             (string-append "GUIX_P2P_BIN=" guix-p2p-bin)
              (string-append "GUIX_P2P_SOCKET=" socket)
              (remove guix-p2p-integration-environment?
                      environment))))))

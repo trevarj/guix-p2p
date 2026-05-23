@@ -1607,7 +1607,7 @@ kill $(cat /tmp/e2e-guix-daemon.pid 2>/dev/null) 2>/dev/null || true
 rm -f /tmp/e2e-guix-daemon.sock /tmp/e2e-guix-daemon.log /tmp/e2e-guix-daemon.pid
 GUIX_EXTENSIONS_PATH="/tmp/guix-p2p-extensions/guix/extensions${GUIX_EXTENSIONS_PATH:+:$GUIX_EXTENSIONS_PATH}" \
 GUIX_P2P_SOCKET=/tmp/guix-p2p-b/guix-p2p.sock \
-GUIX_P2P_BIN="${GUIX_P2P_E2E_P2P_BIN:-/tmp/guix-p2p}" \
+GUIX_P2P_BIN=/tmp/guix-p2p-relay-should-not-run \
 /run/current-system/profile/bin/guix-daemon \
   --disable-chroot \
   --build-users-group=guixbuild \
@@ -1667,7 +1667,6 @@ guix repl -L /tmp/guix-p2p-channel/channel /tmp/guix-p2p-channel-proof-env.scm \
 grep -qx 'CHANNEL_SERVICE=guix-p2p' /tmp/guix-p2p-channel-proof-env.out
 grep -q '^ENV GUIX_EXTENSIONS_PATH=/tmp/guix-p2p-extensions/guix/extensions' \
   /tmp/guix-p2p-channel-proof-env.out
-grep -qx 'ENV GUIX_P2P_BIN=/tmp/guix-p2p' /tmp/guix-p2p-channel-proof-env.out
 grep -qx 'ENV GUIX_P2P_SOCKET=/tmp/guix-p2p-b/guix-p2p.sock' \
   /tmp/guix-p2p-channel-proof-env.out
 sed -n 's/^ENV /export /p' /tmp/guix-p2p-channel-proof-env.out \
@@ -1682,7 +1681,6 @@ rm -f /tmp/e2e-guix-daemon.sock /tmp/e2e-guix-daemon.log /tmp/e2e-guix-daemon.pi
 env \
   GUIX_EXTENSIONS_PATH="$GUIX_EXTENSIONS_PATH" \
   GUIX_P2P_SOCKET="$GUIX_P2P_SOCKET" \
-  GUIX_P2P_BIN="$GUIX_P2P_BIN" \
     /run/current-system/profile/bin/guix-daemon \
     --disable-chroot \
     --build-users-group=guixbuild \

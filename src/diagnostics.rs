@@ -542,8 +542,8 @@ fn guix_integration_check() -> DiagnosticCheck {
     } else if daemon_probe.readable_envs == 0 {
         format!(
             "found {} guix-daemon process(es), but their environments were not readable; run \
-             doctor with enough permissions or verify that GUIX_EXTENSIONS_PATH, GUIX_P2P_BIN, \
-             and GUIX_P2P_SOCKET are set in the guix-service environment.{}",
+             doctor with enough permissions or verify that GUIX_EXTENSIONS_PATH and \
+             GUIX_P2P_SOCKET are set in the guix-service environment.{}",
             daemon_probe.found_daemons,
             current_env_detail.unwrap_or_default()
         )
@@ -592,12 +592,12 @@ where
     if let Some(extensions_path) = value("GUIX_EXTENSIONS_PATH") {
         let has_guix_p2p_path =
             split_env_paths(extensions_path).iter().any(|path| path_contains_guix_p2p(path));
-        let has_helper_vars = value("GUIX_P2P_BIN").is_some() && value("GUIX_P2P_SOCKET").is_some();
-        if has_guix_p2p_path || has_helper_vars {
+        let has_socket = value("GUIX_P2P_SOCKET").is_some();
+        if has_guix_p2p_path || has_socket {
             let detail = if has_guix_p2p_path {
                 format!("GUIX_EXTENSIONS_PATH includes {extensions_path}")
             } else {
-                "GUIX_EXTENSIONS_PATH plus GUIX_P2P_BIN and GUIX_P2P_SOCKET are set".to_string()
+                "GUIX_EXTENSIONS_PATH plus GUIX_P2P_SOCKET are set".to_string()
             };
             evidence.push(GuixIntegrationEvidence { kind: GuixIntegrationKind::Extension, detail });
         }
@@ -621,13 +621,12 @@ fn guix_integration_evidence_from_service_source(
     }
 
     let has_extensions = source.contains("GUIX_EXTENSIONS_PATH=");
-    let has_bin = source.contains("GUIX_P2P_BIN=");
     let has_socket = source.contains("GUIX_P2P_SOCKET=");
-    if has_extensions && has_bin && has_socket {
+    if has_extensions && has_socket {
         return Some(GuixIntegrationEvidence {
             kind: GuixIntegrationKind::Extension,
             detail: format!(
-                "generated guix-daemon service includes GUIX_EXTENSIONS_PATH, GUIX_P2P_BIN, and GUIX_P2P_SOCKET at {}",
+                "generated guix-daemon service includes GUIX_EXTENSIONS_PATH and GUIX_P2P_SOCKET at {}",
                 path.display()
             ),
         });
@@ -987,7 +986,6 @@ mod tests {
                 "GUIX_EXTENSIONS_PATH".into(),
                 "/gnu/store/hash-guix-p2p/share/guix/extensions".into(),
             ),
-            ("GUIX_P2P_BIN".into(), "/run/current-system/profile/bin/guix-p2p".into()),
             ("GUIX_P2P_SOCKET".into(), "/var/cache/guix-p2p/guix-p2p.sock".into()),
         ]);
 
@@ -1027,7 +1025,6 @@ mod tests {
              (list "/gnu/store/hash-guix/bin/guix-daemon")
              #:environment-variables
              (quote ("GUIX_EXTENSIONS_PATH=/run/current-system/profile/share/guix/extensions"
-                     "GUIX_P2P_BIN=/run/current-system/profile/bin/guix-p2p"
                      "GUIX_P2P_SOCKET=/var/cache/guix-p2p/guix-p2p.sock")))
             "#,
             Path::new("/gnu/store/hash-shepherd-guix-daemon.scm"),

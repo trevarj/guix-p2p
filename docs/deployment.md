@@ -46,13 +46,13 @@ so it only reflects fixes after `guix pull`, `guix system reconfigure`, and
 service restart.
 
 `guix-p2p --version` prints the crate version and embedded Git commit, for
-example `guix-p2p 0.1.4 (abcdef123456)`. Include this value in tester reports
+example `guix-p2p 0.1.5 (abcdef123456)`. Include this value in tester reports
 while releases are still using the same package version.
 
-Substitute relay invocations default to warning-only logs so Guix commands do
-not print repeated startup lines. The daemon still emits one startup line with
-version, peer id, cache directory, policy, listen address, socket, and dashboard
-settings.
+The Scheme substitute extension talks to the daemon socket directly, so normal
+Guix substitute calls do not start a Rust relay process. The daemon emits one
+startup line with version, peer id, cache directory, policy, listen address,
+socket, and dashboard settings.
 
 From a checkout, use the manifest for contributor shells:
 
@@ -131,17 +131,16 @@ environment, but it cannot directly configure the system `guix-daemon` service
 environment.
 
 `guix-p2p --doctor` includes a `guix-integration` check for this setup. It
-inspects the running `guix-daemon` environment for `GUIX_EXTENSIONS_PATH`,
-`GUIX_P2P_BIN`, and `GUIX_P2P_SOCKET`. On socket-activated systems where no
-`guix-daemon` process is currently running, it also inspects generated Shepherd
-service files for the same environment. It errors when the substitute extension
-or legacy wrapper is not confirmed. A shell-level `GUIX_EXTENSIONS_PATH` is not
-enough; the variable must be present in the `guix-service-type` environment.
+inspects the running `guix-daemon` environment for `GUIX_EXTENSIONS_PATH` and
+`GUIX_P2P_SOCKET`. On socket-activated systems where no `guix-daemon` process is
+currently running, it also inspects generated Shepherd service files for the
+same environment. It errors when the substitute extension or legacy wrapper is
+not confirmed. A shell-level `GUIX_EXTENSIONS_PATH` is not enough; the variable
+must be present in the `guix-service-type` environment.
 
 Default extension behavior:
 
 - relay socket: `/var/cache/guix-p2p/guix-p2p.sock`
-- `guix-p2p` binary: `/run/current-system/profile/bin/guix-p2p`
 
 Optional environment overrides:
 
@@ -149,7 +148,8 @@ Optional environment overrides:
   helper prepends `/run/current-system/profile/share/guix/extensions` to the
   daemon's existing value.
 - `GUIX_P2P_SOCKET`: relay socket path.
-- `GUIX_P2P_BIN`: `guix-p2p` binary path.
+- `GUIX_P2P_BIN`: legacy relay/wrapper binary path. The Scheme extension no
+  longer execs this binary for normal substitute traffic.
 
 The legacy `scripts/guix-wrapper.sh` file is only a compatibility shim that
 execs `guix-p2p-wrapper`.
@@ -160,7 +160,7 @@ Flow:
 guix-daemon
   -> guix substitute --query
   -> guix-p2p substitute extension
-  -> guix-p2p --query --socket <socket>
+  -> Scheme socket client
   -> daemon socket
 ```
 

@@ -10,18 +10,17 @@ alongside) HTTP.
 Zero changes to the guix-daemon. A Guix command extension shadows the internal
 `guix substitute` command when the daemon environment includes the package's
 extension directory in `GUIX_EXTENSIONS_PATH`. The extension delegates
-substitute protocol traffic to the Rust relay when the `guix-p2p` socket is
-available.
+substitute protocol traffic directly to the daemon Unix socket when the
+`guix-p2p` socket is available.
 
 ## Architecture Overview
 
 The binary runs in three operational modes plus diagnostics:
 - **Daemon** (`--daemon`): Persistent process with warm libp2p swarm, listening
   on a Unix domain socket for relay connections
-- **Relay** (`--query --socket PATH` or `--substitute --socket PATH`): Thin
-  client that forwards stdin/fd4 through the Unix socket to the daemon,
-
-  avoiding cold-start cost
+- **Relay** (`--query --socket PATH` or `--substitute --socket PATH`): Legacy
+  Rust client that forwards stdin/fd4 through the Unix socket to the daemon.
+  The Guix extension now uses an in-process Scheme socket client instead.
 - **Direct** (`--query` or `--substitute` without `--socket`): Development and
   fallback path that initializes a fresh swarm for one substituter request.
 - **Doctor** (`--doctor`): Local readiness checks for tester rollout. It loads
@@ -39,7 +38,7 @@ guix-daemon
   │ fd 4:  reads "success sha256:... 12345" or "not-found" or "hash-mismatch ..."
   ▼
 guix-p2p substitute extension from GUIX_EXTENSIONS_PATH
-  │ if extension detects substitute protocol mode and socket exists → exec guix-p2p
+  │ if extension detects substitute protocol mode and socket exists → connect to daemon socket
   ▼
 guix-p2p (Rust, libp2p)
   │
@@ -49,10 +48,10 @@ guix-p2p (Rust, libp2p)
   │     Warm libp2p swarm, seeds to peers
   │
   ├─► Relay Mode (--query --socket PATH / --substitute --socket PATH)
-  │     Connects to daemon's Unix socket
+  │     Legacy/debug client that connects to daemon's Unix socket
   │     Sends mode header + forwards stdin to daemon
   │     Writes daemon replies to fd 4
-  │     Near-zero startup cost (<1ms vs cold-start libp2p init)
+  │     Avoids cold-start libp2p init but still starts a Rust process
   │
   ├─► Direct Mode (--query / --substitute without --socket)
   │     Legacy mode: initializes own libp2p swarm and processes requests
@@ -155,15 +154,14 @@ The Unix socket between daemon and relay uses channel prefix framing:
   substitute request. The daemon streams these chunks directly to the socket
   instead of buffering a full base64-encoded NAR reply.
 
-The relay demuxes these: `fd4:` lines are written to fd 4, `out:` lines to
-stdout (fd 1), and `nar:` chunks are buffered to a temporary NAR file. At
-`nar-end`, the relay writes the verified NAR bytes to the destination from the
-`substitute <store-path> <dest>` command. Guix's substituter protocol expects
-that destination to be a NAR file; `guix-daemon` restores it into the store
-after the substituter reports `success` on fd 4.
-Destination writes happen in the relay process spawned by `guix-daemon`, not in
-the long-lived user daemon. This keeps the warm swarm architecture while
-matching guix-daemon's permission model.
+The extension socket client demuxes these: `fd4:` lines are written to fd 4,
+`out:` lines to stdout (fd 1), and `nar:` chunks are decoded to the destination
+from the `substitute <store-path> <dest>` command. Guix's substituter protocol
+expects that destination to be a NAR file; `guix-daemon` restores it into the
+store after the substituter reports `success` on fd 4.
+Destination writes happen inside the substitute process spawned by
+`guix-daemon`, not in the long-lived user daemon. This keeps the warm swarm
+architecture while matching guix-daemon's permission model.
 If the daemon socket closes during substitute mode before a terminal `fd4:`
 reply (`success`, `not-found`, or `hash-mismatch`), the relay exits with an
 error instead of silently reporting success.
@@ -454,25 +452,30 @@ sockets and disabled with a warning in restricted containers or sandboxes.
 
 The binary accepts `--query` / `--substitute` / `--daemon` as top-level flags
 (matching guix-daemon's invocation of `guix substitute --query`). The `--socket`
-flag selects relay mode for `--query` and `--substitute`.
+flag selects the legacy Rust relay mode for `--query` and `--substitute`.
 
-### Daemon + Relay Architecture
+### Daemon + Extension Architecture
 
-The recommended deployment uses a persistent daemon and thin relay clients:
+The recommended deployment uses a persistent daemon and the Scheme substitute
+extension as the socket client:
 
 1. **Daemon** (`guix-p2p --daemon`): Listens on a Unix domain socket
    (`$XDG_CACHE_HOME/guix-p2p/guix-p2p.sock` by default). Keeps the libp2p
    swarm warm, serves block requests, processes queries and substitutes from
    relay connections.
 
-2. **Relay** (`guix-p2p --query --socket PATH`): Connects to the daemon's Unix
-   socket, sends mode header (`mode: query\n`), then forwards stdin lines and
-   writes daemon replies to fd 4. Startup is <1ms since no libp2p
-   initialization is needed.
+2. **Extension socket client**: For `--query` and `--substitute`, connects to
+   the daemon's Unix socket, sends a mode header (`mode: query\n` or
+   `mode: substitute\n`), forwards stdin lines, writes substitute replies to fd
+   4, writes trace output to stdout, and restores `nar:` payload chunks to the
+   destination path.
 
-Each relay connection sends a mode header and then streams daemon protocol
-commands. The daemon processes each connection independently, subscribing to
-the swarm's broadcast notification channel for that connection.
+Each socket connection sends a mode header and then streams daemon protocol
+commands. The daemon processes each connection independently, subscribing to the
+swarm's broadcast notification channel for that connection. The Rust
+`--query --socket` / `--substitute --socket` relay remains available for
+debugging and older wrapper deployments, but it is no longer the normal Guix
+extension path.
 
 ### Guix Substitute Extension
 
@@ -488,12 +491,12 @@ does not scan that directory unless it is in `GUIX_EXTENSIONS_PATH`. The
 ```
 guix-daemon invokes "guix substitute --query"
   → extension intercepts "--query"
-  → if socket exists: exec guix-p2p --query --socket $SOCKET
+  → if socket exists: connect to $GUIX_P2P_SOCKET and forward query lines
   → else: delegate to built-in guix substitute --query
 
 guix-daemon invokes "guix substitute --substitute"
   → extension intercepts "--substitute"
-  → if socket exists: exec guix-p2p --substitute --socket $SOCKET
+  → if socket exists: connect to $GUIX_P2P_SOCKET and restore daemon nar output
   → else: delegate to built-in guix substitute --substitute
 
 other substitute invocations
@@ -505,7 +508,8 @@ Integration contract:
 - `GUIX_EXTENSIONS_PATH` lets Guix find `(guix extensions substitute)`.
 - `GUIX_P2P_SOCKET` tells the extension where the warm relay daemon is
   listening.
-- `GUIX_P2P_BIN` tells the extension which binary to exec for relay mode.
+- `GUIX_P2P_BIN` is only used by older relay/wrapper setups; the Scheme
+  extension does not exec it.
 
 No `GUIX` wrapper is required for the recommended path.
 

@@ -112,7 +112,7 @@ mod cli_contract {
         assert!(output.status.success());
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("guix-p2p"));
-        assert!(stdout.contains("0.1.4 ("));
+        assert!(stdout.contains("0.1.5 ("));
     }
 
     #[test]
@@ -193,6 +193,150 @@ mod cli_contract {
 
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("invalid multiaddr"));
+    }
+}
+
+mod substitute_extension_contract {
+    const EXTENSION: &str = include_str!("../guix/extensions/substitute.scm");
+
+    #[test]
+    fn extension_uses_in_process_socket_client() {
+        assert!(EXTENSION.contains("(define (open-relay-socket"));
+        assert!(EXTENSION.contains("mode: query"));
+        assert!(EXTENSION.contains("mode: substitute"));
+        assert!(EXTENSION.contains("fdopen 4"));
+        assert!(EXTENSION.contains("base64-decode"));
+        assert!(EXTENSION.contains("put-bytevector"));
+    }
+
+    #[test]
+    fn extension_does_not_exec_rust_relay() {
+        assert!(!EXTENSION.contains("execlp"));
+        assert!(!EXTENSION.contains("GUIX_P2P_BIN"));
+        assert!(!EXTENSION.contains("--socket"));
+        assert!(!EXTENSION.contains("relay-arguments"));
+    }
+}
+
+#[cfg(unix)]
+mod scheme_extension {
+    use base64::Engine as _;
+    use std::fs::File;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::os::unix::net::UnixListener;
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    use std::thread;
+
+    fn extension_loads() -> bool {
+        Command::new("guile")
+            .args(["-L", ".", "-c", "(use-modules (guix extensions substitute))"])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn substitute_extension_relays_to_socket_without_rust_helper() {
+        if !extension_loads() {
+            eprintln!("skipping Scheme extension test because guile/guix modules are unavailable");
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let socket_path = temp.path().join("guix-p2p.sock");
+        let destination = temp.path().join("substitute-out");
+        let fd4_path = temp.path().join("fd4");
+        let nar_bytes = b"nar bytes from daemon";
+
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let expected_destination = destination.clone();
+        let daemon = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut lines = Vec::new();
+            loop {
+                let mut line = String::new();
+                let read = reader.read_line(&mut line).unwrap();
+                if read == 0 {
+                    break;
+                }
+                lines.push(line.trim_end().to_string());
+            }
+
+            assert_eq!(lines[0], "mode: substitute");
+            assert_eq!(
+                lines[1],
+                format!("substitute /gnu/store/abc-test {}", expected_destination.display())
+            );
+
+            let encoded = base64::engine::general_purpose::STANDARD.encode(nar_bytes);
+            writeln!(stream, "nar:{encoded}").unwrap();
+            writeln!(stream, "nar-end").unwrap();
+            writeln!(stream, "fd4:success sha256:dummy {}", nar_bytes.len()).unwrap();
+        });
+
+        let fd4_file = File::create(&fd4_path).unwrap();
+        let fd4 = std::os::fd::AsRawFd::as_raw_fd(&fd4_file);
+        let mut command = Command::new("guile");
+        command
+            .args([
+                "-L",
+                ".",
+                "-c",
+                "(use-modules (guix extensions substitute)) (guix-substitute \"--substitute\")",
+            ])
+            .env("GUIX_P2P_SOCKET", &socket_path)
+            .env("GUIX_P2P_BIN", "/definitely/missing/guix-p2p")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        // SAFETY: the child process only duplicates an already-open temp file
+        // descriptor onto fd 4 before exec; no shared Rust state is touched in
+        // the pre-exec closure.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::dup2(fd4, 4) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::fcntl(4, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().unwrap();
+
+        writeln!(
+            child.stdin.as_mut().unwrap(),
+            "substitute /gnu/store/abc-test {}",
+            destination.display()
+        )
+        .unwrap();
+        drop(child.stdin.take());
+
+        let output = child.wait_with_output().unwrap();
+        daemon.join().unwrap();
+
+        assert!(
+            output.status.success(),
+            "guile failed\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let mut restored = Vec::new();
+        File::open(&destination).unwrap().read_to_end(&mut restored).unwrap();
+        assert_eq!(restored, nar_bytes);
+
+        let mut fd4_output = String::new();
+        drop(fd4_file);
+        File::open(&fd4_path).unwrap().read_to_string(&mut fd4_output).unwrap();
+        assert!(
+            fd4_output.contains("success sha256:dummy"),
+            "fd4 output missing reply; fd4={fd4_output:?}, stdout={}",
+            String::from_utf8_lossy(&output.stdout)
+        );
     }
 }
 

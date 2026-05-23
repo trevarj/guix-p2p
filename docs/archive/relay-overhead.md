@@ -1,13 +1,18 @@
 # Relay Startup Overhead
 
-`guix-p2p` currently keeps the expensive P2P state in a long-running daemon, but
-the Guix substitute extension still starts a short-lived `guix-p2p` relay
-process for substitute protocol calls when the daemon socket exists.
+Archived: resolved by replacing the normal Guix extension relay path with a
+Scheme socket client. The Rust `--query --socket` / `--substitute --socket`
+relay remains available for compatibility and debugging.
 
-This document tracks whether that relay process startup is negligible or worth
-removing.
+Historical context: `guix-p2p` kept the expensive P2P state in a long-running
+daemon, but the Guix substitute extension still started a short-lived
+`guix-p2p` relay process for substitute protocol calls when the daemon socket
+existed.
 
-## Current Flow
+This document tracked whether that relay process startup was negligible or
+worth removing.
+
+## Old Flow
 
 ```
 guix-daemon
