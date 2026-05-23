@@ -166,6 +166,7 @@ pub struct TransferStats {
     pub nar_hash: String,
     pub store_path: Option<String>,
     pub nar_size: Option<u64>,
+    pub source: Option<String>,
     pub total_blocks_received: usize,
     pub total_bytes_received: u64,
     pub total_blocks_served: usize,
@@ -244,6 +245,7 @@ struct ApiTransfer {
     nar_hash: String,
     store_path: Option<String>,
     nar_size: Option<u64>,
+    source: Option<String>,
     total_blocks_received: usize,
     total_bytes_received: u64,
     total_blocks_served: usize,
@@ -512,6 +514,7 @@ fn api_transfer_from_stats(stats: &TransferStats) -> ApiTransfer {
         nar_hash: stats.nar_hash.clone(),
         store_path: stats.store_path.clone(),
         nar_size: stats.nar_size,
+        source: stats.source.clone(),
         total_blocks_received: stats.total_blocks_received,
         total_bytes_received: stats.total_bytes_received,
         total_blocks_served: stats.total_blocks_served,
@@ -815,13 +818,14 @@ async fn maintain_transfers(state: DashboardState) {
                 entry.total_blocks_served += indices.len();
                 record_transfer_peer(&mut entry.serving_peers, peer_id, indices, 0);
             },
-            DashboardEvent::DownloadSucceeded { nar_hash, store_path, size, .. } => {
+            DashboardEvent::DownloadSucceeded { nar_hash, store_path, size, source, .. } => {
                 let mut transfers = state.transfer_registry.lock().unwrap();
                 let entry = transfers
                     .entry(nar_hash.clone())
                     .or_insert_with(|| TransferStats { nar_hash, ..TransferStats::default() });
                 entry.store_path = Some(store_path);
                 entry.nar_size = Some(size);
+                entry.source = Some(source);
             },
             _ => {},
         }
@@ -1065,6 +1069,7 @@ mod tests {
                     nar_hash: "sha256:transfer".to_string(),
                     store_path: Some("/gnu/store/hash-package".to_string()),
                     nar_size: Some(8192),
+                    source: Some("p2p-connected-fallback".to_string()),
                     total_blocks_received: 3,
                     total_bytes_received: 6144,
                     total_blocks_served: 2,
@@ -1090,6 +1095,7 @@ mod tests {
 
         assert_eq!(transfers.len(), 1);
         assert_eq!(transfers[0].nar_hash, "sha256:transfer");
+        assert_eq!(transfers[0].source.as_deref(), Some("p2p-connected-fallback"));
         assert_eq!(transfers[0].download_peers[0].peer_id, "peer-a");
         assert_eq!(transfers[0].download_peers[0].last_indices, vec![0, 2]);
         assert_eq!(transfers[0].download_peers[1].peer_id, "peer-b");

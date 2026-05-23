@@ -777,8 +777,8 @@ locally-seeded nars in real time:
 - The dashboard server indexes catalog events internally, so `/api/catalog`
   works for automation even when no browser WebSocket is connected.
 - The dashboard server indexes transfer events internally, so `/api/transfers`
-  returns aggregate download and upload evidence even when no browser WebSocket
-  is connected.
+  returns aggregate download and upload evidence, plus the last successful
+  download source, even when no browser WebSocket is connected.
 - The dashboard server indexes the latest 500 events internally, so
   `/api/events` restores recent history after browser reloads. The live
   WebSocket remains the source for newly-arriving events.
@@ -825,8 +825,8 @@ Dashboard API endpoints:
 - `/api/builds` returns observed builds with a `lookup_key` for detail links.
 - `/api/build/{hash}` accepts either the registry lookup key or the nar hash.
 - `/api/transfers` returns aggregate transfer evidence by nar hash, including
-  downloaded block counts, downloaded bytes, served block counts, and peer-level
-  contribution summaries.
+  downloaded block counts, downloaded bytes, served block counts, last
+  successful download source, and peer-level contribution summaries.
 - `/api/events` returns the latest 500 dashboard events with a monotonic
   in-memory id, timestamp, and serialized event payload. Connection events
   include outbound dial attempts, dial failures, inbound attempts, inbound
