@@ -491,7 +491,7 @@ does not scan that directory unless it is in `GUIX_EXTENSIONS_PATH`. The
 ```
 guix-daemon invokes "guix substitute --query"
   → extension intercepts "--query"
-  → if socket exists: connect to $GUIX_P2P_SOCKET and forward query lines
+  → if socket exists: connect to $GUIX_P2P_SOCKET and relay each query line/reply
   → else: delegate to built-in guix substitute --query
 
 guix-daemon invokes "guix substitute --substitute"
@@ -508,6 +508,9 @@ Integration contract:
 - `GUIX_EXTENSIONS_PATH` lets Guix find `(guix extensions substitute)`.
 - `GUIX_P2P_SOCKET` tells the extension where the warm relay daemon is
   listening.
+- Query mode is interactive: the extension must write the reply for each
+  `have`/`info` command before waiting for stdin EOF, because `guix-daemon`
+  keeps the query process open.
 - `GUIX_P2P_BIN` is only used by older relay/wrapper setups; the Scheme
   extension does not exec it.
 

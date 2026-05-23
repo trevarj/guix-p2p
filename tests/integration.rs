@@ -338,6 +338,103 @@ mod scheme_extension {
             String::from_utf8_lossy(&output.stdout)
         );
     }
+
+    #[test]
+    fn substitute_extension_query_replies_before_stdin_eof() {
+        if !extension_loads() {
+            eprintln!("skipping Scheme extension test because guile/guix modules are unavailable");
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let socket_path = temp.path().join("guix-p2p.sock");
+        let fd4_path = temp.path().join("fd4");
+        let store_path = "/gnu/store/abc-test";
+
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let daemon = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            assert_eq!(line.trim_end(), "mode: query");
+
+            line.clear();
+            reader.read_line(&mut line).unwrap();
+            assert_eq!(line.trim_end(), format!("have {store_path}"));
+
+            writeln!(stream, "fd4:{store_path}").unwrap();
+            writeln!(stream, "fd4:").unwrap();
+
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).unwrap() == 0 {
+                    break;
+                }
+            }
+        });
+
+        let fd4_file = File::create(&fd4_path).unwrap();
+        let fd4 = std::os::fd::AsRawFd::as_raw_fd(&fd4_file);
+        let mut command = Command::new("guile");
+        command
+            .args([
+                "-L",
+                ".",
+                "-c",
+                "(use-modules (guix extensions substitute)) (guix-substitute \"--query\")",
+            ])
+            .env("GUIX_P2P_SOCKET", &socket_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        // SAFETY: the child process only duplicates an already-open temp file
+        // descriptor onto fd 4 before exec; no shared Rust state is touched in
+        // the pre-exec closure.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::dup2(fd4, 4) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::fcntl(4, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().unwrap();
+
+        writeln!(child.stdin.as_mut().unwrap(), "have {store_path}").unwrap();
+        child.stdin.as_mut().unwrap().flush().unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut fd4_output = String::new();
+        while std::time::Instant::now() < deadline {
+            fd4_output.clear();
+            File::open(&fd4_path).unwrap().read_to_string(&mut fd4_output).unwrap();
+            if fd4_output.contains(store_path) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+
+        assert!(
+            fd4_output.contains(store_path),
+            "query reply was not written before stdin EOF; fd4={fd4_output:?}"
+        );
+
+        drop(child.stdin.take());
+        let output = child.wait_with_output().unwrap();
+        daemon.join().unwrap();
+
+        assert!(
+            output.status.success(),
+            "guile failed\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 mod service_environment_contract {

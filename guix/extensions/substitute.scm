@@ -143,6 +143,43 @@
                    (+ terminal-replies 1)
                    terminal-replies))))))))
 
+(define (handle-query-reply socket-port reply-port)
+  (let loop ()
+    (match (read-line socket-port)
+      ((? eof-object?)
+       (error "daemon socket closed before query reply completed"))
+      (line
+       (cond
+        ((string-prefix? "fd4:" line)
+         (let ((data (string-drop line 4)))
+           (write-reply-line reply-port data)
+           (unless (string-null? data)
+             (loop))))
+        ((string-prefix? "out:" line)
+         (write-trace-line (string-drop line 4))
+         (loop))
+        (else
+         ;; Backward-compatible fallback for legacy unprefixed socket replies.
+         (write-reply-line reply-port line)
+         (unless (string-null? line)
+           (loop))))))))
+
+(define (relay-query-through-socket socket-port reply-port)
+  (write-line socket-port "mode: query")
+  (force-output socket-port)
+  (let loop ()
+    (match (read-line)
+      ((? eof-object?)
+       (shutdown socket-port 1)
+       #t)
+      (line
+       ;; Guix keeps substitute --query alive and expects a reply for each
+       ;; query before it necessarily closes stdin.
+       (write-line socket-port line)
+       (force-output socket-port)
+       (handle-query-reply socket-port reply-port)
+       (loop)))))
+
 (define (relay-through-socket args socket-path)
   (match args
     (("--query" _ ...)
@@ -150,8 +187,7 @@
       socket-path
       (lambda (socket-port)
         (let ((reply-port (reply-port)))
-          (relay-stdin-to-socket 'query socket-port)
-          (handle-relay-output socket-port reply-port '())
+          (relay-query-through-socket socket-port reply-port)
           #t))))
     (("--substitute" _ ...)
      (call-with-relay-socket
