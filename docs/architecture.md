@@ -682,6 +682,9 @@ serving, and seed provenance labels.
   too few usable providers, the downloader handshakes connected peers and
   configured bootstrap peer IDs before falling back to HTTP. A fallback peer is
   only used after it returns a normal block handshake for the requested NAR.
+  When that fallback path is attempted, the Guix trace stream includes a
+  `p2p+connected-fallback://<hash>` download-started marker before any HTTP
+  fallback marker.
 
 ### `--seed` CLI flag
 

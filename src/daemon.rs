@@ -535,6 +535,7 @@ async fn try_swarm_substitute(
                 &store_path,
                 nar_size,
                 &hash_part,
+                reply,
                 reputation,
                 conn_mgr,
                 event_tx,
@@ -561,6 +562,7 @@ async fn try_swarm_substitute(
                 &store_path,
                 nar_size,
                 &hash_part,
+                reply,
                 reputation,
                 conn_mgr,
                 event_tx,
@@ -637,6 +639,7 @@ async fn try_swarm_substitute(
                         &store_path,
                         nar_size,
                         &hash_part,
+                        reply,
                         reputation,
                         conn_mgr,
                         event_tx,
@@ -840,7 +843,8 @@ async fn try_p2p_download(
     nar_hash_bytes: &[u8; 32],
     store_path: &str,
     nar_size: u64,
-    _hash_part: &str,
+    hash_part: &str,
+    reply: &mut ReplyWriter,
     reputation: &Arc<Mutex<ReputationTracker>>,
     conn_mgr: &Arc<Mutex<ConnectionManager>>,
     event_tx: &dashboard::EventBus,
@@ -924,6 +928,9 @@ async fn try_p2p_download(
             config.max_peers_per_download,
         );
         if !fallback_candidates.is_empty() {
+            let fallback_trace_url = format!("p2p+connected-fallback://{hash_part}");
+            let _ =
+                reply.write_trace(&format_trace_started(store_path, &fallback_trace_url, nar_size));
             tracing::info!(
                 "Trying {} connected/bootstrap fallback peers for {}",
                 fallback_candidates.len(),
