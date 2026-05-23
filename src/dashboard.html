@@ -139,6 +139,10 @@ main{
 }
 .peer-row{display:grid;grid-template-columns:24px minmax(0,1fr) minmax(70px,.45fr) 118px;column-gap:6px}
 .peer-row .flag,.build-row .flag,.seed-row .flag,.package-row .source{font-size:14px;min-width:24px}
+.peer-row .flag{
+  font-family:"Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji","Twemoji Mozilla",sans-serif;
+  line-height:1
+}
 .peer-row .peer-id{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .peer-row .bar,.build-row .bar{height:6px;background:var(--bg3);align-self:center}
 .peer-row .bar-inner,.build-row .bar-inner{height:100%;background:var(--acc)}
@@ -158,7 +162,15 @@ main{
 .seed-row .hash{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7;font-family:var(--font)}
 .seed-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(96px,auto) auto;align-items:center;column-gap:8px}
 .seed-row .seed-name{min-width:0;overflow:hidden}
-.seed-row .seed-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seed-row .seed-title{display:flex;align-items:center;gap:6px;min-width:0}
+.seed-row .seed-title-text{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.seed-row .seed-tag{
+  flex:0 0 auto;border:1px solid var(--line);background:var(--bg3);color:var(--muted);
+  padding:1px 5px;border-radius:3px;font-size:9px;text-transform:uppercase;letter-spacing:.5px
+}
+.seed-row .seed-tag.manual{color:var(--ok);border-color:rgba(158,206,106,.55)}
+.seed-row .seed-tag.downloaded{color:var(--acc);border-color:rgba(125,207,255,.55)}
+.seed-row .seed-tag.cache{color:var(--warn);border-color:rgba(224,175,104,.55)}
 .seed-row .seed-subtitle{display:block;font-size:10px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .seed-row .seed-meta{min-width:96px;text-align:right;font-size:11px;opacity:.8;white-space:nowrap}
 .seed-row .seed-meta .sz{color:var(--fg)}
@@ -757,11 +769,13 @@ function renderEvents(){
 function peerIdShort(pid){return pid.slice(0,12)+'...'}
 
 function flagEmoji(code){
-  if(!code||code.length!==2)return'[??] ';
+  if(!code||code.length!==2)return'🌐 ';
   try{
+    code=String(code).toUpperCase();
     var a=code.charCodeAt(0),b=code.charCodeAt(1);
+    if(a<65||a>90||b<65||b>90)return'🌐 ';
     return String.fromCodePoint(127462+a-65)+String.fromCodePoint(127462+b-65)+' '
-  }catch(e){return'[??] '}
+  }catch(e){return'🌐 '}
 }
 
 function renderPeers(){
@@ -779,7 +793,7 @@ function renderPeers(){
     var p=PEERS[k];
     var sc=p.score||0;
     var w=clamp(Math.round(sc*100),0,100);
-    var flag=p.country?flagEmoji(p.country):'[??] ';
+    var flag=p.country?flagEmoji(p.country):'🌐 ';
     var addr=(p.addresses&&p.addresses.length)?p.addresses[0]:(p.ip||'no address');
     var activity=fmtAge(p.last_active_secs_ago);
     var counters=(p.completed||0)+' ok / '+(p.failed||0)+' fail';
@@ -1151,16 +1165,34 @@ function renderSeeds(){
     var sz=fmtSize(s.nar_size||0);
     var bl=s.block_count||'?';
     var bs=s.block_size?fmtSize(s.block_size):'256KB';
-    var seedTitle=s.store_path?storePathName(s.store_path):k.slice(0,24)+'...';
+    var source=seedSource(s);
+    var seedTitle=s.store_path?storePathName(s.store_path):seedSourceTitle(source);
     var seedSubtitle=s.store_path?s.store_path:k;
     h+='<div class="seed-row" data-hash="'+attr(k)+'" onclick="openSeedDetail(\''+jsArg(k)+'\')">'
-      +'<span class="seed-name"><span class="seed-title">'+esc(seedTitle)+'</span>'
+      +'<span class="seed-name"><span class="seed-title"><span class="seed-tag '+attr(source)+'">'+esc(seedSourceLabel(source))+'</span><span class="seed-title-text">'+esc(seedTitle)+'</span></span>'
       +'<span class="seed-subtitle" data-tip="'+attr(seedSubtitle)+'">'+esc(seedSubtitle)+'</span></span>'
       +'<span class="seed-meta"><span class="sz">'+esc(sz)+'</span><span class="bl">'+esc(bl+' x '+bs)+'</span></span>'
       +'<button class="stop-seed" data-tip="Stop serving this cached NAR and remove its persisted seed path when known." onclick="event.stopPropagation();stopSeedByHash(\''+jsArg(k)+'\',\''+jsArg(s.store_path||'')+'\')">stop</button>'
       +'</div>';
   });
   el.innerHTML=h;
+}
+
+function seedSource(seed){
+  var s=(seed&&seed.source)||'cache';
+  return (s==='manual'||s==='downloaded'||s==='cache')?s:'cache'
+}
+
+function seedSourceLabel(source){
+  if(source==='manual')return'manual';
+  if(source==='downloaded')return'auto';
+  return'cache'
+}
+
+function seedSourceTitle(source){
+  if(source==='downloaded')return'Auto-seeded download';
+  if(source==='manual')return'Manual seed';
+  return'Cached NAR'
 }
 
 function storePathName(storePath){
@@ -1176,8 +1208,10 @@ function openSeedDetail(hash){
   var sz=fmtSize(s.nar_size||0);
   var bl=s.block_count||'?';
   var bs=s.block_size?fmtSize(s.block_size):'256KB';
+  var source=seedSource(s);
   c.innerHTML='<h2>seeded nar</h2>'
     +'<div class="field"><label>package</label><span class="val">'+esc(s.store_path?storePathName(s.store_path):'?')+'</span></div>'
+    +'<div class="field"><label>source</label><span class="val">'+esc(seedSourceLabel(source))+'</span></div>'
     +'<div class="field"><label>store</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(s.store_path||'?')+'</span></div>'
     +'<div class="field"><label>hash</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(hash)+'</span></div>'
     +'<div class="field"><label>size</label><span class="val">'+esc(sz)+'</span></div>'
@@ -1341,12 +1375,12 @@ function handleEvent(e,meta){
       break;
 
     case 'SeedAdded':
-      SEEDS[e.nar_hash]={nar_size:e.nar_size,block_count:null,block_size:null,store_path:e.store_path};
+      SEEDS[e.nar_hash]={nar_size:e.nar_size,block_count:null,block_size:null,store_path:e.store_path,source:e.source||'cache'};
       PACKAGES.forEach(function(pkg){
         if(pkg.store_path===e.store_path)pkg.seeded=true
       });
       markTransfer(e.nar_hash,e.store_path,e.nar_size,'reseeded','serving locally');
-      addEvent('seed-add','*','Seed added: '+e.nar_hash.slice(0,16)+'... ('+fmtSize(e.nar_size)+')',meta);
+      addEvent('seed-add','*','Seed added ['+seedSourceLabel(seedSource(SEEDS[e.nar_hash]))+']: '+e.nar_hash.slice(0,16)+'... ('+fmtSize(e.nar_size)+')',meta);
       renderPackages();
       renderSeeds();
       if(!meta.persisted)loadSeeds();
@@ -1576,7 +1610,7 @@ document.addEventListener('keydown',function(ev){
     fetch('/api/seeds').then(function(r){return r.json()}).then(function(ss){
       SEEDS={};
       ss.forEach(function(s){
-        SEEDS[s.nar_hash]={nar_size:s.nar_size,block_count:s.block_count,block_size:s.block_size,store_path:s.store_path}
+        SEEDS[s.nar_hash]={nar_size:s.nar_size,block_count:s.block_count,block_size:s.block_size,store_path:s.store_path,source:s.source||'cache'}
       });
       renderSeeds()
     }).catch(function(){})

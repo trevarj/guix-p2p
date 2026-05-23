@@ -23,6 +23,7 @@
             guix-p2p-configuration-dashboard?
             guix-p2p-configuration-dashboard-bind
             guix-p2p-configuration-dashboard-port
+            guix-p2p-configuration-auto-seed-downloads?
             guix-p2p-configuration-extra-options
             guix-p2p-service-type
             guix-p2p-enable-guix-daemon-extension
@@ -57,6 +58,8 @@
                   (default "127.0.0.1"))
   (dashboard-port guix-p2p-configuration-dashboard-port
                   (default 3030))
+  (auto-seed-downloads? guix-p2p-configuration-auto-seed-downloads?
+                        (default #t))
   (extra-options guix-p2p-configuration-extra-options
                  (default '())))
 
@@ -87,6 +90,9 @@
                     "--dashboard-bind" ,(guix-p2p-configuration-dashboard-bind config)
                     "--dashboard-port" ,dashboard-port)
                   '())
+            ,@(if (guix-p2p-configuration-auto-seed-downloads? config)
+                  '()
+                  '("--no-auto-seed-downloads"))
             ,@(guix-p2p-configuration-extra-options config))))
     (list
      (shepherd-service

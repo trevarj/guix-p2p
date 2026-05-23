@@ -46,7 +46,7 @@ so it only reflects fixes after `guix pull`, `guix system reconfigure`, and
 service restart.
 
 `guix-p2p --version` prints the crate version and embedded Git commit, for
-example `guix-p2p 0.1.5 (abcdef123456)`. Include this value in tester reports
+example `guix-p2p 0.1.6 (abcdef123456)`. Include this value in tester reports
 while releases are still using the same package version.
 
 The Scheme substitute extension talks to the daemon socket directly, so normal
@@ -211,6 +211,13 @@ single-item NAR with Guix's `(guix serialization) write-file`, stored under
 `<cache_dir>/nar/`, and announced in the DHT. This intentionally avoids
 `guix archive --export`, which produces a signed nar bundle rather than the
 byte stream served by substitute servers.
+
+Successful substitute downloads are also cached and re-announced by default.
+Set `auto_seed_downloads = false` in `config.toml`, pass
+`--no-auto-seed-downloads`, or set `(auto-seed-downloads? #f)` in
+`guix-p2p-configuration` to disable this. The dashboard tags seeds as `manual`,
+`auto`, or `cache` so users can distinguish explicit seeds from downloaded or
+pre-existing cached NARs.
 
 ## Checks
 

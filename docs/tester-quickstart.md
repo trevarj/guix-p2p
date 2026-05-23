@@ -111,6 +111,9 @@ guix-p2p --daemon --seed /gnu/store/...-hello
 ```
 
 The dashboard `active seeds` panel shows NARs this node can serve.
+Rows tagged `manual` came from the package list or `seed_paths`; rows tagged
+`auto` came from successful downloads cached for re-sharing; rows tagged
+`cache` were found in the cache at daemon startup without stored provenance.
 
 ## Useful Failure Report
 

@@ -71,6 +71,7 @@ struct ConfigFile {
     tor_only: Option<bool>,
     socket_path: Option<String>,
     seed_paths: Option<Vec<String>>,
+    auto_seed_downloads: Option<bool>,
     local_narinfo_path: Option<String>,
 }
 
@@ -110,6 +111,8 @@ pub struct Config {
     pub socket_path: String,
     /// Store paths to seed on startup via `guix archive --export`.
     pub seed_paths: Vec<String>,
+    /// Cache successful substitute downloads and announce them for re-seeding.
+    pub auto_seed_downloads: bool,
     /// Optional JSON metadata file for offline narinfo lookups.
     pub local_narinfo_path: Option<PathBuf>,
 }
@@ -224,6 +227,7 @@ impl Config {
                 .socket_path
                 .unwrap_or_else(|| cache_dir.join("guix-p2p.sock").display().to_string()),
             seed_paths: file.seed_paths.unwrap_or_default(),
+            auto_seed_downloads: file.auto_seed_downloads.unwrap_or(true),
             local_narinfo_path: file.local_narinfo_path.map(PathBuf::from),
         }
     }
@@ -316,6 +320,8 @@ dashboard_enabled = true
 dashboard_bind = "127.0.0.1"
 dashboard_port = 3030
 
+# Cache successful downloads and serve them to peers.
+auto_seed_downloads = true
 seed_paths = []
 "#,
         listen_addr = toml_string(&listen_addr),

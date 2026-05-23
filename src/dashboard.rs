@@ -104,6 +104,7 @@ pub enum DashboardEvent {
         nar_hash: String,
         store_path: Option<String>,
         nar_size: u64,
+        source: String,
     },
     SeedRemoved {
         nar_hash: String,
@@ -207,6 +208,7 @@ struct ApiSeededNar {
     block_count: u32,
     block_size: u32,
     store_path: Option<String>,
+    source: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -531,6 +533,7 @@ async fn api_seeds(State(state): State<DashboardState>) -> Json<Vec<ApiSeededNar
                 block_count: info.block_count,
                 block_size: info.block_size,
                 store_path: info.store_path,
+                source: info.source.as_str().to_string(),
             })
         })
         .collect();
@@ -659,6 +662,7 @@ fn complete_seed_mutation(
         nar_hash: nar_hash.to_string(),
         store_path: Some(store_path.to_string()),
         nar_size,
+        source: "manual".to_string(),
     });
 
     Ok(())
@@ -1414,10 +1418,12 @@ mod tests {
                 nar_hash: event_hash,
                 store_path: event_path,
                 nar_size,
+                source,
             } => {
                 assert_eq!(event_hash, nar_hash);
                 assert_eq!(event_path.as_deref(), Some(store_path));
                 assert_eq!(nar_size, 42);
+                assert_eq!(source, "manual");
             },
             other => panic!("unexpected dashboard event: {other:?}"),
         }

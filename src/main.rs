@@ -103,6 +103,10 @@ struct Cli {
     #[arg(long, global = true)]
     seed: Option<String>,
 
+    /// Do not cache successful substitute downloads for later P2P seeding
+    #[arg(long, global = true)]
+    no_auto_seed_downloads: bool,
+
     /// JSON metadata file for offline narinfo lookups
     #[arg(long, global = true)]
     local_narinfo: Option<std::path::PathBuf>,
@@ -190,6 +194,9 @@ async fn main() -> anyhow::Result<()> {
             .filter(|part| !part.is_empty())
             .map(str::to_string)
             .collect();
+    }
+    if cli.no_auto_seed_downloads {
+        config.auto_seed_downloads = false;
     }
     if let Some(ref path) = cli.local_narinfo {
         config.local_narinfo_path = Some(path.clone());
@@ -372,11 +379,13 @@ async fn main() -> anyhow::Result<()> {
         for hash in store.seeded_hashes() {
             let info = store.seed_info(&hash);
             let nar_size = info.as_ref().map_or(0, |i| i.nar_size);
+            let source = info.as_ref().map_or("cache", |i| i.source.as_str()).to_string();
             let store_path = info.and_then(|i| i.store_path);
             let _ = event_tx.send(dashboard::DashboardEvent::SeedAdded {
                 nar_hash: hash.clone(),
                 store_path,
                 nar_size,
+                source,
             });
         }
     }

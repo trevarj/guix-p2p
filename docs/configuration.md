@@ -57,6 +57,7 @@ max_download_rate_kbps = 0
 dashboard_enabled = true
 dashboard_port = 3030
 dashboard_bind = "127.0.0.1"
+auto_seed_downloads = true
 seed_paths = ["/gnu/store/...-hello"]
 ```
 
@@ -93,6 +94,7 @@ seed_paths = ["/gnu/store/...-hello"]
 | `tor_only` | `false` | `--tor-only` | Route network traffic only through Tor-capable paths. |
 | `socket_path` | `<cache_dir>/guix-p2p.sock` | `--socket` | Unix socket used by the daemon, Scheme extension, and legacy relay mode. |
 | `seed_paths` | empty | `--seed` | Store paths serialized as raw single-item NARs and announced in the DHT. |
+| `auto_seed_downloads` | `true` | `--no-auto-seed-downloads` | Cache successful substitute downloads and announce them for later P2P seeding. |
 
 ## Guix System Service Fields
 
@@ -103,6 +105,7 @@ command line:
 (service guix-p2p-service-type
          (guix-p2p-configuration
           (dashboard? #t)
+          (auto-seed-downloads? #t)
           (bootstrap-peers
            '("/dns4/guix-p2p.trevs.site/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"))
           (external-addresses '())

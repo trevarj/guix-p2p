@@ -727,8 +727,7 @@ async fn try_swarm_substitute(
                 let _ = tokio::fs::remove_file(&temp_path).await;
             }
 
-            // Save nar to local store for re-seeding
-            {
+            if config.auto_seed_downloads {
                 let mut store = nar_store.lock().unwrap();
                 if store.has_nar(&nar_hash_hex) {
                     tracing::debug!("nar already in store, skipping save");
@@ -744,8 +743,14 @@ async fn try_swarm_substitute(
                         nar_hash: nar_hash_hex.clone(),
                         store_path: Some(store_path.clone()),
                         nar_size: size,
+                        source: "downloaded".to_string(),
                     });
                 }
+            } else {
+                tracing::debug!(
+                    nar_hash = %nar_hash_hex,
+                    "auto-seeding disabled; not caching downloaded nar"
+                );
             }
 
             // Mark build as downloaded in registry

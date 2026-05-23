@@ -606,22 +606,25 @@ unnecessary. The cleaner upstream shape is `guix-daemon
 ## Seeding Strategy
 
 Nars are seeded from a local cache directory after successful downloads or
-explicit `--seed` paths. The `NarStore` (`src/nar_store.rs`) manages storage
-and serving.
+explicit `--seed` paths. The `NarStore` (`src/nar_store.rs`) manages storage,
+serving, and seed provenance labels.
 
 ### Approach: Hybrid nar cache seeding
 
-- **Post-download seeding**: After a successful swarm download, the nar is
-  saved to `<cache_dir>/nar/<sha256hex>.nar` and announced in the DHT via
-  `start_providing`. Future peers can download it from this node.
+- **Post-download seeding**: When `auto_seed_downloads` is enabled, successful
+  substitute downloads are saved to `<cache_dir>/nar/<sha256hex>.nar`, tagged
+  as `downloaded`, and announced in the DHT via `start_providing`. Future peers
+  can download them from this node.
 - **Explicit seeding**: The `--seed` flag accepts comma-separated store paths.
   Each is hashed via `guix hash -S nar -f hex`, serialized as a raw
   single-item NAR with Guix's `(guix serialization) write-file`, and stored in
-  the nar cache. All seeded nars are announced in the DHT on startup.
+  the nar cache with source `manual`. All seeded nars are announced in the DHT
+  on startup.
 - **Startup scan**: On startup, `NarStore::new()` scans `<cache_dir>/nar/*.nar`
   and indexes each file by its filename stem (the hex sha256). Files whose
-  bytes do not hash to the filename stem are skipped. All indexed nars are
-  annotated with any matching local narinfo metadata and announced in the DHT.
+  bytes do not hash to the filename stem are skipped. Files whose provenance is
+  not known are tagged as `cache`. All indexed nars are annotated with any
+  matching local narinfo metadata and announced in the DHT.
 - **Serving**: Incoming block requests are served from the nar store. The
   `NarStore::handle_request()` method dispatches to handshake replies (with
   block hashes) or block data reads. Outbound responses pass through
@@ -661,7 +664,8 @@ stream served by substitute servers.
 The web dashboard (`--dashboard`) includes a **seeds** panel that shows all
 locally-seeded nars in real time:
 
-- **Seed list**: Each seeded nar is displayed with its hash, size, and block
+- **Seed list**: Each seeded nar is displayed with source tag (`manual`,
+  `auto`, or `cache`), package/store path when known, hash, size, and block
   count. Clicking a row opens a detail overlay.
 - **Real-time events**: `BlockServed` events stream via WebSocket showing
   which blocks are being uploaded to which peers. Served rows flash green
@@ -677,7 +681,7 @@ locally-seeded nars in real time:
 - **Seed count** in the header bar updates as nars are seeded or auto-saved
   after downloads.
 - The `/api/seeds` endpoint returns the full list of seeded nars with size,
-  block count, and block size.
+  block count, block size, store path when known, and seed source.
 - The `/api/packages` endpoint lists installed packages from
   `/run/current-system/profile`, `/run/current-system/kernel`, and
   `$HOME/.guix-home/profile` using

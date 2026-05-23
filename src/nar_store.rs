@@ -39,6 +39,28 @@ struct NarEntry {
     nar_size: u64,
     block_info: BlockInfo,
     store_path: Option<String>,
+    source: SeedSource,
+}
+
+/// Why a NAR is available for serving.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeedSource {
+    /// Seeded explicitly from a store path through config, CLI, or dashboard.
+    Manual,
+    /// Cached after a successful substitute download.
+    Downloaded,
+    /// Found in the cache at startup without persisted provenance.
+    Cache,
+}
+
+impl SeedSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SeedSource::Manual => "manual",
+            SeedSource::Downloaded => "downloaded",
+            SeedSource::Cache => "cache",
+        }
+    }
 }
 
 /// Summary info for a seeded nar, used by the dashboard API.
@@ -48,6 +70,7 @@ pub struct SeededNarInfo {
     pub block_count: u32,
     pub block_size: u32,
     pub store_path: Option<String>,
+    pub source: SeedSource,
 }
 
 impl NarStore {
@@ -103,7 +126,16 @@ impl NarStore {
                 nar_size,
                 block_info.block_count,
             );
-            self.index.insert(stem, NarEntry { path, nar_size, block_info, store_path: None });
+            self.index.insert(
+                stem,
+                NarEntry {
+                    path,
+                    nar_size,
+                    block_info,
+                    store_path: None,
+                    source: SeedSource::Cache,
+                },
+            );
         }
 
         tracing::info!("nar store: {} nars indexed", self.index.len());
@@ -111,7 +143,7 @@ impl NarStore {
 
     /// Save a nar to the store after a successful download.
     pub fn save(&mut self, nar_hash_hex: &str, nar_data: &[u8]) -> anyhow::Result<()> {
-        self.save_with_store_path(nar_hash_hex, nar_data, None)
+        self.save_with_source(nar_hash_hex, nar_data, None, SeedSource::Downloaded)
     }
 
     /// Save a nar and retain the originating store path when it is known.
@@ -120,6 +152,16 @@ impl NarStore {
         nar_hash_hex: &str,
         nar_data: &[u8],
         store_path: Option<String>,
+    ) -> anyhow::Result<()> {
+        self.save_with_source(nar_hash_hex, nar_data, store_path, SeedSource::Downloaded)
+    }
+
+    fn save_with_source(
+        &mut self,
+        nar_hash_hex: &str,
+        nar_data: &[u8],
+        store_path: Option<String>,
+        source: SeedSource,
     ) -> anyhow::Result<()> {
         let path = self.cache_dir.join(format!("{}.nar", nar_hash_hex));
         let mut f = std::fs::File::create(&path).context("failed to create nar file")?;
@@ -135,8 +177,10 @@ impl NarStore {
             block_info.block_count,
         );
 
-        self.index
-            .insert(nar_hash_hex.to_string(), NarEntry { path, nar_size, block_info, store_path });
+        self.index.insert(
+            nar_hash_hex.to_string(),
+            NarEntry { path, nar_size, block_info, store_path, source },
+        );
         Ok(())
     }
 
@@ -148,13 +192,19 @@ impl NarStore {
         if self.index.contains_key(&nar_hash_hex) {
             if let Some(entry) = self.index.get_mut(&nar_hash_hex) {
                 entry.store_path.get_or_insert_with(|| store_path.to_string());
+                entry.source = SeedSource::Manual;
             }
             tracing::info!("nar already seeded: {}..", &nar_hash_hex[..16]);
             return Ok(nar_hash_hex);
         }
 
         let nar_data = export_nar(store_path).context("failed to export nar")?;
-        self.save_with_store_path(&nar_hash_hex, &nar_data, Some(store_path.to_string()))?;
+        self.save_with_source(
+            &nar_hash_hex,
+            &nar_data,
+            Some(store_path.to_string()),
+            SeedSource::Manual,
+        )?;
         Ok(nar_hash_hex)
     }
 
@@ -204,6 +254,7 @@ impl NarStore {
             block_count: entry.block_info.block_count,
             block_size: self.block_size as u32,
             store_path: entry.store_path.clone(),
+            source: entry.source,
         })
     }
 
@@ -218,6 +269,7 @@ impl NarStore {
             block_count: entry.block_info.block_count,
             block_size: self.block_size as u32,
             store_path: entry.store_path,
+            source: entry.source,
         })
     }
 
@@ -594,6 +646,21 @@ mod tests {
         let hashes = store.seeded_hashes();
         assert_eq!(hashes.len(), 1);
         assert_eq!(hashes[0], hash);
+        assert_eq!(store.seed_info(&hash).unwrap().source, SeedSource::Downloaded);
+    }
+
+    #[test]
+    fn scanned_nars_are_marked_as_cache_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = b"cached nar bytes";
+        let hash = hex::encode(Sha256::digest(data));
+        let nar_dir = tmp.path().join("nar");
+        std::fs::create_dir_all(&nar_dir).unwrap();
+        std::fs::write(nar_dir.join(format!("{hash}.nar")), data).unwrap();
+
+        let store = NarStore::new(tmp.path(), 512);
+
+        assert_eq!(store.seed_info(&hash).unwrap().source, SeedSource::Cache);
     }
 
     #[test]
