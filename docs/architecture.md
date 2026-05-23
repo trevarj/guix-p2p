@@ -514,7 +514,9 @@ Integration contract:
 - Substitute mode receives base64-framed raw NAR bytes from the daemon, stores
   them in a temporary file, restores them into Guix's requested destination
   with `(guix serialization) restore-file`, and then forwards the terminal
-  `success` or failure reply on fd 4.
+  `success` or failure reply on fd 4. Like query mode, substitute mode is
+  interactive: the extension handles one `substitute` command and terminal
+  reply before waiting for another stdin line.
 - `GUIX_P2P_BIN` is only used by older relay/wrapper setups; the Scheme
   extension does not exec it.
 
@@ -522,6 +524,15 @@ No `GUIX` wrapper is required for the recommended path.
 
 The Rust `guix-p2p-wrapper` binary remains installed for compatibility with
 older setups that set the daemon's `GUIX` environment variable.
+
+### Peer Address Hygiene
+
+Addresses learned from LAN mDNS may include private LAN addresses and are only
+used for local discovery. Addresses learned from identify are treated as
+non-LAN advertisements and must be publicly dialable DNS/IP multiaddrs before
+they are added to the DHT, connection manager, or persistent peer store. This
+prevents a public bootstrap node from repeatedly dialing a client's loopback,
+home-LAN, or VPN interface addresses.
 
 ### Shepherd Service (Daemon Mode)
 

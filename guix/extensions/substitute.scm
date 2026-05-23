@@ -129,14 +129,20 @@
         ((string-prefix? "fd4:" line)
          (let ((data (string-drop line 4)))
            (write-reply-line reply-port data)
-           (loop destinations
-                 expected-terminal-replies
-                 nar-destination
-                 nar-port
-                 nar-temp-path
-                 (if (terminal-substitute-reply? data)
-                     (+ terminal-replies 1)
-                     terminal-replies))))
+           (let ((terminal-replies*
+                  (if (terminal-substitute-reply? data)
+                      (+ terminal-replies 1)
+                      terminal-replies)))
+             (if (and (> expected-terminal-replies 0)
+                      (>= terminal-replies* expected-terminal-replies)
+                      (not nar-port))
+                 #t
+                 (loop destinations
+                       expected-terminal-replies
+                       nar-destination
+                       nar-port
+                       nar-temp-path
+                       terminal-replies*)))))
         ((string-prefix? "out:" line)
          (write-trace-line (string-drop line 4))
          (loop destinations
@@ -206,6 +212,26 @@
        (handle-query-reply socket-port reply-port)
        (loop)))))
 
+(define (relay-substitute-through-socket socket-port reply-port)
+  (write-line socket-port "mode: substitute")
+  (force-output socket-port)
+  (let loop ()
+    (match (read-line)
+      ((? eof-object?)
+       (shutdown socket-port 1)
+       #t)
+      (line
+       ;; Guix keeps substitute --substitute alive while waiting for the
+       ;; terminal reply, so handle one substitute request before reading the
+       ;; next stdin line.
+       (write-line socket-port line)
+       (force-output socket-port)
+       (let ((destination (substitute-destination line)))
+         (unless destination
+           (error "invalid substitute command" line))
+         (handle-relay-output socket-port reply-port (list destination)))
+       (loop)))))
+
 (define (relay-through-socket args socket-path)
   (match args
     (("--query" _ ...)
@@ -219,9 +245,8 @@
      (call-with-relay-socket
       socket-path
       (lambda (socket-port)
-        (let* ((reply-port (reply-port))
-               (destinations (relay-stdin-to-socket 'substitute socket-port)))
-          (handle-relay-output socket-port reply-port destinations)
+        (let ((reply-port (reply-port)))
+          (relay-substitute-through-socket socket-port reply-port)
           #t))))
     (_ #f)))
 

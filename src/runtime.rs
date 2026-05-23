@@ -80,13 +80,13 @@ pub async fn run_swarm_task(
                         if let libp2p::identify::Event::Received { peer_id, info, .. } = *e {
                             for addr in info.listen_addrs {
                                 tracing::debug!("Identify learned peer {} at {}", peer_id, addr);
-                                if peer_store::is_peer_address(&addr) {
+                                if peer_store::is_public_peer_address(&addr) {
                                     conn_mgr.lock().unwrap().add_address(peer_id, addr.to_string());
                                     record_peer_address(&peer_store, peer_id, &addr);
                                     swarm.behaviour_mut().kad.add_address(&peer_id, addr);
                                 } else {
                                     tracing::debug!(
-                                        "ignored non-dialable identify address {} for {}",
+                                        "ignored non-public identify address {} for {}",
                                         addr,
                                         peer_id
                                     );

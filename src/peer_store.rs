@@ -159,6 +159,14 @@ pub fn is_peer_address(address: &Multiaddr) -> bool {
     clean_peer_address(address).is_some()
 }
 
+/// Return true when an address is suitable for non-LAN peer advertisement.
+pub fn is_public_peer_address(address: &Multiaddr) -> bool {
+    let Some(addr) = clean_peer_address(address) else {
+        return false;
+    };
+    !has_private_ip(&addr)
+}
+
 fn clean_peer_address(address: &Multiaddr) -> Option<Multiaddr> {
     let addr = clean_address(address)?;
     if is_local_interface_address(&addr) {
@@ -195,6 +203,14 @@ fn multiaddr_ip(address: &Multiaddr) -> Option<IpAddr> {
         Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
         Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
         _ => None,
+    })
+}
+
+fn has_private_ip(address: &Multiaddr) -> bool {
+    address.iter().any(|protocol| match protocol {
+        Protocol::Ip4(ip) => ip.is_private() || ip.is_link_local(),
+        Protocol::Ip6(ip) => ip.is_unique_local() || ip.is_unicast_link_local(),
+        _ => false,
     })
 }
 
@@ -285,6 +301,21 @@ mod tests {
         store.record_address(peer, &addr);
 
         assert!(store.bootstrap_peers().is_empty());
+    }
+
+    #[test]
+    fn public_peer_address_rejects_private_addresses() {
+        let private: Multiaddr = "/ip4/192.168.1.111/udp/6881/quic-v1".parse().unwrap();
+        let vpn: Multiaddr = "/ip4/10.1.29.35/udp/6881/quic-v1".parse().unwrap();
+        let loopback: Multiaddr = "/ip4/127.0.0.1/udp/6881/quic-v1".parse().unwrap();
+        let documentation_public: Multiaddr = "/ip4/198.51.100.10/tcp/443".parse().unwrap();
+        let dns: Multiaddr = "/dns4/guix-p2p.example/tcp/443".parse().unwrap();
+
+        assert!(!is_public_peer_address(&private));
+        assert!(!is_public_peer_address(&vpn));
+        assert!(!is_public_peer_address(&loopback));
+        assert!(is_public_peer_address(&documentation_public));
+        assert!(is_public_peer_address(&dns));
     }
 
     #[test]

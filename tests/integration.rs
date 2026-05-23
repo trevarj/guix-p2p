@@ -277,19 +277,15 @@ mod scheme_extension {
         let daemon = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut lines = Vec::new();
-            loop {
-                let mut line = String::new();
-                let read = reader.read_line(&mut line).unwrap();
-                if read == 0 {
-                    break;
-                }
-                lines.push(line.trim_end().to_string());
-            }
 
-            assert_eq!(lines[0], "mode: substitute");
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            assert_eq!(line.trim_end(), "mode: substitute");
+
+            line.clear();
+            reader.read_line(&mut line).unwrap();
             assert_eq!(
-                lines[1],
+                line.trim_end(),
                 format!("substitute /gnu/store/abc-test {}", expected_destination.display())
             );
 
@@ -297,6 +293,13 @@ mod scheme_extension {
             writeln!(stream, "nar:{encoded}").unwrap();
             writeln!(stream, "nar-end").unwrap();
             writeln!(stream, "fd4:success sha256:dummy {}", nar_bytes.len()).unwrap();
+
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).unwrap() == 0 {
+                    break;
+                }
+            }
         });
 
         let fd4_file = File::create(&fd4_path).unwrap();
@@ -359,6 +362,120 @@ mod scheme_extension {
             fd4_output.contains("success sha256:dummy"),
             "fd4 output missing reply; fd4={fd4_output:?}, stdout={}",
             String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    #[test]
+    fn substitute_extension_substitute_replies_before_stdin_eof() {
+        if !extension_loads() {
+            eprintln!("skipping Scheme extension test because guile/guix modules are unavailable");
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let socket_path = temp.path().join("guix-p2p.sock");
+        let destination = temp.path().join("substitute-out");
+        let fd4_path = temp.path().join("fd4");
+        let restored_bytes = b"interactive substitute bytes";
+        let nar_bytes = make_test_nar(&temp, restored_bytes);
+
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let expected_destination = destination.clone();
+        let daemon = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            assert_eq!(line.trim_end(), "mode: substitute");
+
+            line.clear();
+            reader.read_line(&mut line).unwrap();
+            assert_eq!(
+                line.trim_end(),
+                format!("substitute /gnu/store/abc-test {}", expected_destination.display())
+            );
+
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&nar_bytes);
+            writeln!(stream, "nar:{encoded}").unwrap();
+            writeln!(stream, "nar-end").unwrap();
+            writeln!(stream, "fd4:success sha256:dummy {}", nar_bytes.len()).unwrap();
+
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).unwrap() == 0 {
+                    break;
+                }
+            }
+        });
+
+        let fd4_file = File::create(&fd4_path).unwrap();
+        let fd4 = std::os::fd::AsRawFd::as_raw_fd(&fd4_file);
+        let mut command = Command::new("guile");
+        command
+            .args([
+                "-L",
+                ".",
+                "-c",
+                "(use-modules (guix extensions substitute)) (guix-substitute \"--substitute\")",
+            ])
+            .env("GUIX_P2P_SOCKET", &socket_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        // SAFETY: the child process only duplicates an already-open temp file
+        // descriptor onto fd 4 before exec; no shared Rust state is touched in
+        // the pre-exec closure.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::dup2(fd4, 4) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::fcntl(4, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().unwrap();
+
+        writeln!(
+            child.stdin.as_mut().unwrap(),
+            "substitute /gnu/store/abc-test {}",
+            destination.display()
+        )
+        .unwrap();
+        child.stdin.as_mut().unwrap().flush().unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut fd4_output = String::new();
+        while std::time::Instant::now() < deadline {
+            fd4_output.clear();
+            File::open(&fd4_path).unwrap().read_to_string(&mut fd4_output).unwrap();
+            if fd4_output.contains("success sha256:dummy") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+
+        assert!(
+            fd4_output.contains("success sha256:dummy"),
+            "substitute reply was not written before stdin EOF; fd4={fd4_output:?}"
+        );
+
+        let mut restored = Vec::new();
+        File::open(&destination).unwrap().read_to_end(&mut restored).unwrap();
+        assert_eq!(restored, restored_bytes);
+
+        drop(child.stdin.take());
+        let output = child.wait_with_output().unwrap();
+        daemon.join().unwrap();
+
+        assert!(
+            output.status.success(),
+            "guile failed\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
         );
     }
 
