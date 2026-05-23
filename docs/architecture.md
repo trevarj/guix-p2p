@@ -746,7 +746,8 @@ locally-seeded nars in real time:
   compact readiness band that always shows node health, connectivity role, and
   latest transfer source. Version/commit, uptime, peer/DHT summary, and tester
   gates are hidden behind a details control so the primary workspace remains
-  focused on transfers and active seeds.
+  focused on transfers and active seeds. The readiness band is a single
+  keyboard-accessible card; clicking it expands the less-frequent details.
 - The primary workspace gives the transfer proof path full width, places
   Packages as a secondary add-seed list, and gives Active Seeds the wider
   management area.
@@ -754,8 +755,9 @@ locally-seeded nars in real time:
   substitute lookup rows with narinfo/build metadata, showing store path,
   size, P2P/HTTP availability, and provider count when known. Rows with build
   metadata still open the existing signed narinfo/build detail overlay.
-- Events remain a compact full-width bottom log for recent failures,
-  connectivity trace, and transfer proof breadcrumbs.
+- Events remain a full-width bottom log for recent failures, connectivity
+  trace, and transfer proof breadcrumbs. The event row has a larger minimum
+  height and wraps messages instead of squeezing them into a thin strip.
 - Detailed counts live in the panels that own them. The header intentionally
   avoids duplicating package, seed, peer, catalog, DHT, and uptime counters.
 - The tester checklist appears only in readiness details and summarizes the
@@ -770,6 +772,10 @@ locally-seeded nars in real time:
 - Each main dashboard panel exposes one faded `?` affordance in the top-right
   corner. Clicking it opens a concise overview for that panel, including the
   important controls and row elements inside it.
+- Dashboard HTML keeps actions in data attributes and uses delegated click and
+  keyboard handlers for dynamic rows, filters, help, overlays, and raw narinfo
+  toggles. This keeps generated package/seed/discovery rows inspectable and
+  avoids inline JavaScript handlers.
 - Dashboard colors are selected from a named theme dropdown. Terminal yellow,
   green, and amber preserve the console look; Tokyo Night provides a more
   conventional high-contrast dark palette. Scrollbars follow the active theme,

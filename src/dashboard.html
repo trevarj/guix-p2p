@@ -72,7 +72,8 @@ button:focus-visible,input:focus-visible,.theme-select:focus-visible{outline:1px
 .status-pill.offline::before{background:var(--err);box-shadow:0 0 8px rgba(210,75,75,.45)}
 .status-pill.demo{color:var(--warn)}
 main{
-  display:grid;grid-template-columns:.85fr 1.1fr 1.1fr;grid-template-rows:minmax(78px,.24fr) minmax(150px,.52fr) minmax(280px,1.18fr) minmax(210px,.8fr) minmax(120px,.34fr);
+  display:grid;grid-template-columns:minmax(320px,.85fr) minmax(360px,1.1fr) minmax(360px,1.1fr);
+  grid-template-rows:auto minmax(210px,.55fr) minmax(360px,1.15fr) minmax(280px,.85fr) minmax(320px,1fr);
   grid-template-areas:
     "overview overview overview"
     "transfer transfer transfer"
@@ -82,7 +83,7 @@ main{
   flex:1;min-height:0;overflow:auto;gap:8px;padding:8px
 }
 .panel{
-  border:1px solid var(--line);background:var(--panel);overflow-y:auto;padding:10px;position:relative;min-height:0;
+  border:1px solid var(--line);background:var(--panel);overflow-y:auto;padding:10px;position:relative;min-height:260px;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.025)
 }
 .packages-panel{grid-area:packages}
@@ -91,7 +92,7 @@ main{
 .overview-panel{grid-area:overview}
 .peers-panel{grid-area:peers}
 .metadata-panel{grid-area:metadata}
-.events{grid-area:events;min-height:120px}
+.events{grid-area:events;min-height:320px}
 .panel h2{
   font-size:11px;text-transform:uppercase;letter-spacing:1.5px;
   color:var(--acc);margin:-2px 0 8px;position:sticky;top:-10px;
@@ -117,7 +118,7 @@ main{
   font-family:var(--font);font-size:10px;padding:3px 7px;cursor:pointer;border-radius:4px
 }
 .event-filter.active{color:var(--bg);background:var(--acc);border-color:var(--acc)}
-.events .entry{display:grid;grid-template-columns:74px 22px 92px 1fr;gap:6px;align-items:start;font-size:11px;padding:3px 0;border-bottom:1px solid var(--line)}
+.events .entry{display:grid;grid-template-columns:82px 24px 108px 1fr;gap:8px;align-items:start;font-size:12px;padding:5px 0;border-bottom:1px solid var(--line)}
 .events .entry.added{animation:slidein .3s ease}
 .events .entry .ts{color:var(--dim);margin-right:8px}
 .events .entry .kind{color:var(--muted);text-transform:uppercase;font-size:10px}
@@ -205,11 +206,21 @@ main{
 .package-row .seed-action:hover{border-color:var(--acc)}
 .package-row.seeded .seed-action{color:var(--dim)}
 .package-row .seed-action:disabled{cursor:not-allowed;opacity:.55;border-color:var(--line)}
-.overview-grid{display:grid;grid-template-columns:minmax(230px,1.2fr) minmax(180px,.9fr) minmax(150px,.8fr) auto;gap:8px;align-items:stretch}
+.overview-panel{min-height:0;overflow:visible;padding:0;background:transparent;border:0;box-shadow:none}
+.readiness-card{
+  border:1px solid var(--line);background:var(--panel);padding:8px 10px;position:relative;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025);cursor:pointer
+}
+.readiness-card:hover{border-color:var(--acc);background:var(--panel2)}
+.readiness-card:focus-visible{outline:1px solid var(--acc);outline-offset:2px}
+.readiness-summary{display:grid;grid-template-columns:minmax(240px,1.25fr) minmax(220px,1fr) minmax(170px,.75fr) 64px;gap:12px;align-items:center}
 .health-card,.info-card,.check-card,.network-card{
   border:1px solid var(--line);background:var(--bg2);border-radius:6px;padding:9px;min-width:0
 }
-.health-card{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center}
+.readiness-card .health-card,.readiness-card .info-card,.readiness-card .network-card{
+  border:0;background:transparent;padding:0;border-radius:0
+}
+.health-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:center}
 .health-dot{width:14px;height:14px;border-radius:50%;background:var(--warn);box-shadow:0 0 16px rgba(216,166,66,.4)}
 .health-dot.ready{background:var(--ok);box-shadow:0 0 16px rgba(103,200,121,.45)}
 .health-dot.error{background:var(--err);box-shadow:0 0 16px rgba(227,106,106,.45)}
@@ -221,13 +232,14 @@ main{
 .network-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start}
 .network-card .detail{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
 .network-card .line{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.readiness-toggle{
-  align-self:stretch;background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
-  padding:0 12px;font-family:var(--font);font-size:11px;cursor:pointer;border-radius:4px
-}
-.readiness-toggle:hover{border-color:var(--acc)}
-.readiness-detail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
+.readiness-toggle{justify-self:end;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.8px}
+.readiness-detail{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
 .readiness-detail.hidden{display:none}
+.readiness-action{
+  align-self:stretch;background:var(--bg3);color:var(--fg);border:1px solid var(--dim);
+  padding:8px 10px;font-family:var(--font);font-size:11px;cursor:pointer;border-radius:4px
+}
+.readiness-action:hover{border-color:var(--acc)}
 .tester-grid{display:grid;grid-template-columns:repeat(5,minmax(72px,1fr));gap:6px}
 .check-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px;align-items:center;padding:6px}
 .check-card .mark{width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;font-size:11px;background:var(--bg3);color:var(--warn);border:1px solid var(--line)}
@@ -358,7 +370,7 @@ main{
 @media (max-width:1100px){
   header{align-items:flex-start;flex-wrap:wrap}
   main{
-    grid-template-columns:1fr 1fr;grid-template-rows:auto minmax(0,.7fr) minmax(0,1fr) minmax(0,1fr) minmax(0,.8fr) auto;
+    grid-template-columns:1fr 1fr;grid-template-rows:auto minmax(220px,.6fr) minmax(320px,1fr) minmax(280px,.9fr) minmax(260px,.8fr) minmax(340px,1fr);
     grid-template-areas:
       "overview overview"
       "transfer transfer"
@@ -372,21 +384,21 @@ main{
   .transfer-open{text-align:left}
   .transfer-compact-stages{grid-template-columns:repeat(3,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:repeat(3,1fr)}
-  .overview-grid{grid-template-columns:1fr 1fr}
-  .readiness-detail{grid-template-columns:1fr}
+  .readiness-summary{grid-template-columns:1fr 1fr}
+  .readiness-detail{grid-template-columns:1fr 1fr}
   .tester-grid{grid-template-columns:repeat(3,1fr)}
 }
 @media (max-width:720px){
   body{overflow:auto}
   main{display:block;overflow:visible}
-  .panel{min-height:220px;max-height:360px}
-  .events{max-height:260px}
+  .panel{min-height:260px;max-height:none;margin-bottom:8px}
+  .events{min-height:320px}
   .package-tools{display:block}
   .package-hint{text-align:left;margin-top:4px}
   .transfer-compact-stages{grid-template-columns:repeat(2,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:1fr 1fr}
   .transfer-peers{grid-template-columns:1fr}
-  .overview-grid,.readiness-detail,.tester-grid{grid-template-columns:1fr}
+  .readiness-summary,.readiness-detail,.tester-grid{grid-template-columns:1fr}
   .events .entry{grid-template-columns:62px 18px 1fr}
   .events .entry .kind{display:none}
 }
@@ -426,9 +438,8 @@ main{
   </div>
 </header>
 <main>
-  <div class="panel overview-panel" data-help="overview">
-    <h2 data-tip="Readiness, version, network role, and first-run checks for the local daemon.">readiness</h2>
-    <div class="overview-grid">
+  <section class="overview-panel" data-help="overview">
+    <div class="readiness-card" id="readiness-summary" role="button" tabindex="0" aria-expanded="false" aria-controls="readiness-detail" data-tip="Click for version, uptime, swarm summary, setup gates, and full network details.">
       <div class="health-card" id="health-card">
         <span class="health-dot" id="health-dot"></span>
         <span>
@@ -436,7 +447,7 @@ main{
           <span class="health-detail" id="health-detail">waiting for dashboard API</span>
         </span>
       </div>
-      <div class="network-card" id="network-diagnostics" role="button" tabindex="0" data-tip="Open full doctor-style diagnostics.">
+      <div class="network-card" id="network-summary" data-tip="Network role and first configured share/bootstrap address.">
         <span class="source-badge" id="connectivity-badge">unknown</span>
         <span>
           <span class="k">network</span>
@@ -453,25 +464,26 @@ main{
         <span class="v" id="overview-source">none</span>
         <span class="sub" id="overview-transfer">no transfer</span>
       </div>
-      <button type="button" class="readiness-toggle" id="readiness-toggle" onclick="toggleReadinessDetail()">details</button>
+      <span class="readiness-toggle" id="readiness-toggle">details</span>
+      <div class="readiness-detail hidden" id="readiness-detail">
+        <div class="info-card" data-tip="guix-p2p version and embedded commit.">
+          <span class="k">version</span>
+          <span class="v" id="node-version">--</span>
+          <span class="sub" id="uptime">uptime --</span>
+        </div>
+        <div class="info-card" data-tip="Peer and DHT summary. Detailed peer rows live in the Peers panel.">
+          <span class="k">swarm</span>
+          <span class="v" id="overview-connected">0 connected</span>
+          <span class="sub" id="overview-known">0 known / 0 dht</span>
+        </div>
+        <div class="info-card" data-tip="First-run setup gates that usually block tester onboarding.">
+          <span class="k">setup gates</span>
+          <div class="tester-grid" id="tester-checks"></div>
+        </div>
+        <button type="button" class="readiness-action" id="network-diagnostics" data-tip="Open full doctor-style network diagnostics.">diagnostics</button>
+      </div>
     </div>
-    <div class="readiness-detail hidden" id="readiness-detail">
-      <div class="info-card" data-tip="guix-p2p version and embedded commit.">
-        <span class="k">version</span>
-        <span class="v" id="node-version">--</span>
-        <span class="sub" id="uptime">uptime --</span>
-      </div>
-      <div class="info-card" data-tip="Peer and DHT summary. Detailed peer rows live in the Peers panel.">
-        <span class="k">swarm</span>
-        <span class="v" id="overview-connected">0 connected</span>
-        <span class="sub" id="overview-known">0 known / 0 dht</span>
-      </div>
-      <div class="info-card" data-tip="First-run setup gates that usually block tester onboarding.">
-        <span class="k">setup gates</span>
-        <div class="tester-grid" id="tester-checks"></div>
-      </div>
-    </div>
-  </div>
+  </section>
   <div class="panel transfer-panel" data-help="transfer">
     <h2 data-tip="Latest P2P proof path: observed package, trusted narinfo, providers, block movement, import, and re-seeding.">transfer path</h2>
     <div id="transfer-path"><div class="empty">no transfer observed</div></div>
@@ -500,12 +512,12 @@ main{
     <div class="events-header">
       <h2 data-tip="Daemon event history. Reloading the page keeps the latest 500 events from daemon memory.">events</h2>
       <div class="event-tools">
-        <button class="event-filter active" data-filter="all" onclick="setEventFilter('all')" data-tip="Show every persisted and live dashboard event.">all</button>
-        <button class="event-filter" data-filter="transfer" onclick="setEventFilter('transfer')" data-tip="Downloads, block movement, transfer success, and transfer failures.">transfers</button>
-        <button class="event-filter" data-filter="seed" onclick="setEventFilter('seed')" data-tip="Seed creation/removal and local seed actions.">seeds</button>
-        <button class="event-filter" data-filter="peer" onclick="setEventFilter('peer')" data-tip="Peer connection and disconnection activity.">peers</button>
-        <button class="event-filter" data-filter="discovery" onclick="setEventFilter('discovery')" data-tip="Narinfo, catalog, and provider discovery events.">discovery</button>
-        <button class="event-filter" data-filter="failure" onclick="setEventFilter('failure')" data-tip="Only failed downloads and local dashboard action failures.">failures</button>
+        <button class="event-filter active" type="button" data-filter="all" data-tip="Show every persisted and live dashboard event.">all</button>
+        <button class="event-filter" type="button" data-filter="transfer" data-tip="Downloads, block movement, transfer success, and transfer failures.">transfers</button>
+        <button class="event-filter" type="button" data-filter="seed" data-tip="Seed creation/removal and local seed actions.">seeds</button>
+        <button class="event-filter" type="button" data-filter="peer" data-tip="Peer connection and disconnection activity.">peers</button>
+        <button class="event-filter" type="button" data-filter="discovery" data-tip="Narinfo, catalog, and provider discovery events.">discovery</button>
+        <button class="event-filter" type="button" data-filter="failure" data-tip="Only failed downloads and local dashboard action failures.">failures</button>
       </div>
     </div>
     <div id="events-list"></div>
@@ -513,13 +525,13 @@ main{
 </main>
 <div class="overlay hidden" id="overlay">
   <div class="detail">
-    <button class="close" onclick="closeDetail()">x</button>
+    <button class="close" id="close-detail" type="button" aria-label="close detail">x</button>
     <div id="detail-content"></div>
   </div>
 </div>
 <div class="tip hidden" id="tip"></div>
 <div class="help-popover hidden" id="help-popover">
-  <button class="close-help" onclick="closeHelp()" aria-label="close help">x</button>
+  <button class="close-help" id="close-help" type="button" aria-label="close help">x</button>
   <h3 id="help-title"></h3>
   <p id="help-body"></p>
 </div>
@@ -626,10 +638,8 @@ function esc(v){
 
 function attr(v){return esc(v)}
 
-function jsArg(v){return String(v==null?'':v).replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
-
 function helpButton(id){
-  return '<button class="help-btn" type="button" aria-label="help" data-help-key="'+attr(id)+'" onclick="openHelp(event,\''+jsArg(id)+'\')">?</button>'
+  return '<button class="help-btn" type="button" aria-label="help" data-help-key="'+attr(id)+'">?</button>'
 }
 
 function decorateHelpButtons(root){
@@ -804,8 +814,10 @@ function renderTesterChecklist(){
 function toggleReadinessDetail(){
   var detail=document.getElementById('readiness-detail');
   var button=document.getElementById('readiness-toggle');
-  if(!detail||!button)return;
+  var summary=document.getElementById('readiness-summary');
+  if(!detail||!button||!summary)return;
   var hidden=detail.classList.toggle('hidden');
+  summary.setAttribute('aria-expanded',hidden?'false':'true');
   button.textContent=hidden?'details':'hide'
 }
 
@@ -1094,8 +1106,8 @@ function renderMetadata(){
     var name=row.store_path?storePathName(row.store_path):String(row.id||'unknown').slice(0,16)+'...';
     var sz=row.nar_size!=null?fmtSize(row.nar_size):'?';
     var p2p=row.p2p_available?'yes':'no';
-    var open=row.lookup?' onclick="openDetail(\''+jsArg(row.lookup)+'\')"':'';
-    return '<div class="metadata-row"'+open+'>'
+    var lookup=row.lookup?' data-lookup="'+attr(row.lookup)+'" role="button" tabindex="0"':'';
+    return '<div class="metadata-row"'+lookup+'>'
       +'<span class="path" data-tip="'+attr(row.tip||name)+'">'+esc(name)+'</span>'
       +'<span class="size">'+esc(sz)+'</span>'
       +'<span class="p2p '+p2p+'">'+(row.p2p_available?'P2P':'http')+'</span>'
@@ -1137,7 +1149,7 @@ function renderPackages(){
       +'<span class="source-meta">'+esc(src)+'</span>'
       +'<span class="meta">'+esc(pkg.store_path||'')+'</span></span>'
       +'<span class="state">'+esc(state)+'</span>'
-      +'<button class="seed-action" type="button" '+(pkg.seeded?'disabled ':'')+'data-tip="'+attr(pkg.seeded?'Already seeded locally.':'Seed this installed store path into the local P2P cache.')+'" onclick="seedPackage(event,\''+jsArg(pkg.store_path||'')+'\')">'+esc(button)+'</button>'
+      +'<button class="seed-action" type="button" '+(pkg.seeded?'disabled ':'')+'data-seed-store="'+attr(pkg.store_path||'')+'" data-tip="'+attr(pkg.seeded?'Already seeded locally.':'Seed this installed store path into the local P2P cache.')+'">'+esc(button)+'</button>'
       +'</div>';
   });
   if(arr.length>200)h+='<div class="empty">showing 200 of '+arr.length+' matches, refine search</div>';
@@ -1312,7 +1324,7 @@ function renderTransferPath(){
   if(!TRANSFER){el.innerHTML='<div class="empty">no transfer observed</div>';return}
   var downloadPeers=Object.keys(TRANSFER.download_peers||{}).length;
   var servingPeers=Object.keys(TRANSFER.serving_peers||{}).length;
-  el.innerHTML='<div class="transfer-card" onclick="openTransferDetail()">'
+  el.innerHTML='<div class="transfer-card" data-action="transfer-detail" role="button" tabindex="0">'
     +'<div class="transfer-summary">'
     +'<div class="transfer-subject">'
     +'<div class="transfer-name">'+esc(transferSubjectName(TRANSFER))+'</div>'
@@ -1355,7 +1367,7 @@ function openTransferDetail(){
 }
 
 function seedPackage(ev,storePath){
-  ev.stopPropagation();
+  if(ev)ev.stopPropagation();
   if(!storePath)return;
   var seeded=PACKAGES.some(function(pkg){return pkg.store_path===storePath&&pkg.seeded});
   if(seeded){
@@ -1429,11 +1441,11 @@ function renderSeeds(){
     var source=seedSource(s);
     var seedTitle=s.store_path?storePathName(s.store_path):seedSourceTitle(source);
     var seedSubtitle=s.store_path?s.store_path:k;
-    h+='<div class="seed-row" data-hash="'+attr(k)+'" onclick="openSeedDetail(\''+jsArg(k)+'\')">'
+    h+='<div class="seed-row" data-hash="'+attr(k)+'" role="button" tabindex="0">'
       +'<span class="seed-name"><span class="seed-title"><span class="seed-tag '+attr(source)+'">'+esc(seedSourceLabel(source))+'</span><span class="seed-title-text">'+esc(seedTitle)+'</span></span>'
       +'<span class="seed-subtitle" data-tip="'+attr(seedSubtitle)+'">'+esc(seedSubtitle)+'</span></span>'
       +'<span class="seed-meta"><span class="sz">'+esc(sz)+'</span><span class="bl">'+esc(bl+' x '+bs)+'</span></span>'
-      +'<button class="stop-seed" data-tip="Stop serving this cached NAR and remove its persisted seed path when known." onclick="event.stopPropagation();stopSeedByHash(\''+jsArg(k)+'\',\''+jsArg(s.store_path||'')+'\')">stop</button>'
+      +'<button class="stop-seed" type="button" data-stop-seed="'+attr(k)+'" data-store-path="'+attr(s.store_path||'')+'" data-tip="Stop serving this cached NAR and remove its persisted seed path when known.">stop</button>'
       +'</div>';
   });
   el.innerHTML=h;
@@ -1499,7 +1511,7 @@ function openDetail(hash){
     });
 
     var rawNarinfo=b.narinfo_raw||'';
-    var rawBlock=rawNarinfo?'<div class="narinfo-toggle" onclick="toggleNarinfo(this)">\u25b6 narinfo (raw signed text)</div>'
+    var rawBlock=rawNarinfo?'<div class="narinfo-toggle" role="button" tabindex="0">\u25b6 narinfo (raw signed text)</div>'
       +'<div class="narinfo-raw">'+esc(rawNarinfo)+'</div>':'';
 
     c.innerHTML='<h2>'+esc(b.nar_hash.slice(0,24)+'...')+'</h2>'
@@ -1793,6 +1805,65 @@ document.addEventListener('click',function(ev){
   if(pop&&!pop.classList.contains('hidden')&&!pop.contains(ev.target)&&!ev.target.closest('.help-btn')){
     closeHelp()
   }
+  var help=ev.target.closest('.help-btn');
+  if(help&&help.dataset.helpKey){
+    openHelp(ev,help.dataset.helpKey);
+    return
+  }
+  if(ev.target.closest('#close-detail')){
+    closeDetail();
+    return
+  }
+  if(ev.target.closest('#close-help')){
+    closeHelp();
+    return
+  }
+  var readiness=ev.target.closest('#readiness-summary');
+  if(readiness&&!ev.target.closest('.help-btn')&&!ev.target.closest('#network-diagnostics')){
+    toggleReadinessDetail();
+    return
+  }
+  if(ev.target.closest('#network-diagnostics')){
+    ev.stopPropagation();
+    openDiagnosticsDetail();
+    return
+  }
+  var filter=ev.target.closest('.event-filter');
+  if(filter&&filter.dataset.filter){
+    setEventFilter(filter.dataset.filter);
+    return
+  }
+  var transfer=ev.target.closest('[data-action="transfer-detail"]');
+  if(transfer){
+    openTransferDetail();
+    return
+  }
+  var seedButton=ev.target.closest('.seed-action');
+  if(seedButton&&seedButton.dataset.seedStore){
+    seedPackage(ev,seedButton.dataset.seedStore);
+    return
+  }
+  var stopButton=ev.target.closest('.stop-seed');
+  if(stopButton&&stopButton.dataset.stopSeed){
+    ev.stopPropagation();
+    stopSeedByHash(stopButton.dataset.stopSeed,stopButton.dataset.storePath||'');
+    return
+  }
+  var seedRow=ev.target.closest('.seed-row');
+  if(seedRow&&seedRow.dataset.hash){
+    openSeedDetail(seedRow.dataset.hash);
+    return
+  }
+  var metadataRow=ev.target.closest('.metadata-row');
+  if(metadataRow&&metadataRow.dataset.lookup){
+    openDetail(metadataRow.dataset.lookup);
+    return
+  }
+  var narinfo=ev.target.closest('.narinfo-toggle');
+  if(narinfo){
+    toggleNarinfo(narinfo);
+    return
+  }
   var copy=ev.target.closest('#copy-share');
   if(copy){
     var value=copy.dataset.value||'';
@@ -1812,9 +1883,6 @@ document.addEventListener('click',function(ev){
     shareInfo.textContent='copied';
     setTimeout(function(){shareInfo.textContent='copy peer'},900)
   }
-  if(ev.target.closest('#network-diagnostics')){
-    openDiagnosticsDetail()
-  }
 });
 document.addEventListener('keydown',function(ev){
   if(ev.key==='Escape'){
@@ -1824,6 +1892,29 @@ document.addEventListener('keydown',function(ev){
   if((ev.key==='Enter'||ev.key===' ')&&ev.target&&ev.target.closest('#network-diagnostics')){
     ev.preventDefault();
     openDiagnosticsDetail()
+  }
+  if((ev.key==='Enter'||ev.key===' ')&&ev.target&&ev.target.id==='readiness-summary'){
+    ev.preventDefault();
+    toggleReadinessDetail()
+  }
+  if((ev.key==='Enter'||ev.key===' ')&&ev.target&&ev.target.closest('[data-action="transfer-detail"]')){
+    ev.preventDefault();
+    openTransferDetail()
+  }
+  if((ev.key==='Enter'||ev.key===' ')&&ev.target&&ev.target.closest('.seed-row')){
+    ev.preventDefault();
+    openSeedDetail(ev.target.closest('.seed-row').dataset.hash)
+  }
+  if((ev.key==='Enter'||ev.key===' ')&&ev.target&&ev.target.closest('.metadata-row')){
+    var row=ev.target.closest('.metadata-row');
+    if(row.dataset.lookup){
+      ev.preventDefault();
+      openDetail(row.dataset.lookup)
+    }
+  }
+  if((ev.key==='Enter'||ev.key===' ')&&ev.target&&ev.target.closest('.narinfo-toggle')){
+    ev.preventDefault();
+    toggleNarinfo(ev.target.closest('.narinfo-toggle'))
   }
 });
 
