@@ -823,16 +823,20 @@ locally-seeded nars in real time:
   `prefers-reduced-motion`.
 - Active seed rows display the package/store item name when store-path metadata
   is available, with the full store path and NAR hash available in details.
+  Hash-only rows include provenance text such as startup cache, manual cache
+  entry, or P2P download plus `metadata pending`, so users can understand why a
+  NAR is listed before narinfo/catalog metadata has identified the package.
   Each active seed row can stop seeding directly by NAR hash, which works even
   when older cached seeds do not have store-path metadata. Package rows remain
   seed-only; removal is intentionally centralized in Active Seeds.
 - The transfer path panel is driven by dashboard events and tracks the latest
   observed package/NAR through package observation, narinfo trust, provider
   discovery, block movement, verification/import, and local re-seeding. The
-  inline view stays compact with package, size, block totals, peer counts, byte
-  totals, and a six-stage progress strip. Clicking the panel opens the detail
-  overlay with per-stage values, per-peer block counts, download byte counts,
-  and the most recent block indices accepted from or served to each peer.
+  inline view stays compact with package, current proof stage, stage detail,
+  size, block totals, peer counts, byte totals, and a six-stage progress strip.
+  Clicking the panel opens the detail overlay with per-stage values, per-peer
+  block counts, download byte counts, and the most recent block indices
+  accepted from or served to each peer.
 - `POST /api/seeds` accepts `{ "store_path": "/gnu/store/..." }` only when the
   dashboard bind address is loopback. It validates the path, seeds and caches
   the NAR immediately, sends `StartProviding`, emits `SeedAdded`, and persists

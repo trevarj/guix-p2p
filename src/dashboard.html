@@ -287,12 +287,14 @@ main{
 .transfer-metrics{min-width:0}
 .transfer-name{font-size:14px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .transfer-hash{font-size:10px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:4px}
+.transfer-progress{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:6px}
+.transfer-progress strong{color:var(--acc);font-weight:400}
 .transfer-meta{display:inline-block;font-size:10px;color:var(--acc);margin:6px 10px 0 0}
 .transfer-metrics{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .transfer-metric{border:1px solid var(--line);background:var(--panel);padding:5px 7px;border-radius:4px;min-width:72px;text-align:right}
 .transfer-metric .k{display:block;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim)}
 .transfer-metric .v{display:block;font-size:12px;color:var(--fg);margin-top:2px}
-.transfer-open{width:100%;font-size:10px;color:var(--dim);text-align:right;margin-top:2px}
+.transfer-open{width:100%;font-size:10px;color:var(--dim);text-align:right;margin-top:2px;text-transform:uppercase;letter-spacing:.5px}
 .transfer-compact-stages{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;margin-top:8px}
 .transfer-dot{height:6px;border:1px solid var(--line);background:var(--bg3);border-radius:8px}
 .transfer-dot.done{background:var(--ok);border-color:var(--ok)}
@@ -1360,6 +1362,21 @@ function transferStageLabels(){
   ]
 }
 
+function transferProgressSummary(t){
+  if(!t)return{label:'idle',detail:'no transfer observed'};
+  var labels=transferStageLabels();
+  var done=0;
+  for(var i=0;i<labels.length;i++){
+    if(t.stages&&t.stages[labels[i][0]])done++
+  }
+  var active=labels[Math.min(done,labels.length-1)];
+  var label=done===labels.length?'complete':(active?active[1]:'starting');
+  var detail=done+' / '+labels.length+' stages';
+  if(done===labels.length)detail='verified and ready to re-share';
+  else if(t.values&&active&&t.values[active[0]])detail=t.values[active[0]];
+  return{label:label,detail:detail}
+}
+
 function phaseLabel(name){
   return String(name||'').replace(/_/g,' ')
 }
@@ -1410,11 +1427,13 @@ function renderTransferPath(){
   if(!TRANSFER){el.innerHTML='<div class="empty">no transfer observed</div>';return}
   var downloadPeers=Object.keys(TRANSFER.download_peers||{}).length;
   var servingPeers=Object.keys(TRANSFER.serving_peers||{}).length;
+  var progress=transferProgressSummary(TRANSFER);
   el.innerHTML='<div class="transfer-card" data-action="transfer-detail" role="button" tabindex="0">'
     +'<div class="transfer-summary">'
     +'<div class="transfer-subject">'
     +'<div class="transfer-name">'+esc(transferSubjectName(TRANSFER))+'</div>'
     +'<div class="transfer-hash">'+esc(TRANSFER.nar_hash||'?')+'</div>'
+    +'<div class="transfer-progress"><strong>'+esc(progress.label)+'</strong> · '+esc(progress.detail)+'</div>'
     +'<div class="transfer-meta">'+esc(TRANSFER.nar_size!=null?fmtSize(TRANSFER.nar_size):'size unknown')+'</div>'
     +'<div class="transfer-meta"><span class="source-badge '+attr((TRANSFER.source||'').indexOf('http')>=0?'http':'p2p')+'">'+esc(sourceDisplay(TRANSFER.source))+'</span></div>'
     +'<div class="transfer-meta">'+esc((TRANSFER.total_blocks_received||0)+' blocks down / '+(TRANSFER.total_blocks_served||0)+' blocks up')+'</div>'
@@ -1425,7 +1444,7 @@ function renderTransferPath(){
     +'<div class="transfer-metric"><span class="k">providers</span><span class="v">'+esc(downloadPeers)+'</span></div>'
     +'<div class="transfer-metric"><span class="k">requesters</span><span class="v">'+esc(servingPeers)+'</span></div>'
     +'<div class="transfer-metric"><span class="k">bytes down</span><span class="v">'+esc(fmtBytes(TRANSFER.total_bytes_received||0))+'</span></div>'
-    +'<div class="transfer-open">details &gt;</div>'
+    +'<div class="transfer-open">open evidence &gt;</div>'
     +'</div>'
     +'</div>';
   decorateHelpButtons(el)
@@ -1575,7 +1594,10 @@ function seedDisplayTitle(seed,hash){
 
 function seedDisplaySubtitle(seed,hash){
   if(seed&&seed.store_path)return seed.store_path;
-  return 'metadata pending · '+seedHashShort(hash)
+  var source=seedSource(seed);
+  if(source==='downloaded')return 'from p2p download · metadata pending · '+seedHashShort(hash);
+  if(source==='manual')return 'manual cache entry · metadata pending · '+seedHashShort(hash);
+  return 'startup cache · metadata pending · '+seedHashShort(hash)
 }
 
 function seedSourceReason(source,hasStorePath){
