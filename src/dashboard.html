@@ -1167,7 +1167,8 @@ function renderMetadata(){
     var sz=row.nar_size!=null?fmtSize(row.nar_size):'?';
     var p2p=row.p2p_available?'yes':'no';
     var lookup=row.lookup?' data-lookup="'+attr(row.lookup)+'" role="button" tabindex="0"':'';
-    return '<div class="metadata-row"'+lookup+'>'
+    var aria=row.lookup?' aria-label="'+attr('Open discovery detail for '+name)+'"':'';
+    return '<div class="metadata-row"'+lookup+aria+'>'
       +'<span class="path" data-tip="'+attr(row.tip||name)+'">'+esc(name)+'</span>'
       +'<span class="size">'+esc(sz)+'</span>'
       +'<span class="p2p '+p2p+'">'+(row.p2p_available?'p2p':'http')+'</span>'
@@ -1204,7 +1205,7 @@ function renderPackages(){
     var title=(pkg.name||'?')+' '+(pkg.version||'');
     var state=pkg.seeded?'seeded':'ready';
     var button=pkg.seeded?'seeded':'seed';
-    h+='<div class="package-row '+(pkg.seeded?'seeded':'')+'" data-tip="'+attr(pkg.store_path||'')+'">'
+    h+='<div class="package-row '+(pkg.seeded?'seeded':'')+'" data-tip="'+attr(pkg.store_path||'')+'" aria-label="'+attr(title+' from '+src+' profile, '+state)+'">'
       +'<span class="pkg"><span class="name">'+esc(title)+'</span>'
       +'<span class="source-meta">'+esc(src)+'</span>'
       +'<span class="meta">'+esc(pkg.store_path||'')+'</span></span>'
@@ -1432,7 +1433,7 @@ function renderTransferPath(){
   var downloadPeers=Object.keys(TRANSFER.download_peers||{}).length;
   var servingPeers=Object.keys(TRANSFER.serving_peers||{}).length;
   var progress=transferProgressSummary(TRANSFER);
-  el.innerHTML='<div class="transfer-card" data-action="transfer-detail" role="button" tabindex="0">'
+  el.innerHTML='<div class="transfer-card" data-action="transfer-detail" role="button" tabindex="0" aria-label="'+attr('Open transfer evidence for '+transferSubjectName(TRANSFER)+', '+progress.label)+'">'
     +'<div class="transfer-summary">'
     +'<div class="transfer-subject">'
     +'<div class="transfer-name">'+esc(transferSubjectName(TRANSFER))+'</div>'
@@ -1555,7 +1556,7 @@ function renderSeeds(){
     var seedTitle=seedDisplayTitle(s,k);
     var seedSubtitle=seedDisplaySubtitle(s,k);
     var rowTip=s.store_path?s.store_path:seedSourceReason(source,false)+'\n'+k;
-    h+='<div class="seed-row '+(unresolved?'unresolved':'')+'" data-hash="'+attr(k)+'" role="button" tabindex="0" data-tip="'+attr(rowTip)+'">'
+    h+='<div class="seed-row '+(unresolved?'unresolved':'')+'" data-hash="'+attr(k)+'" role="button" tabindex="0" data-tip="'+attr(rowTip)+'" aria-label="'+attr('Open seed detail for '+seedTitle+', '+seedSourceLabel(source))+'">'
       +'<span class="seed-name"><span class="seed-title"><span class="seed-tag '+attr(source)+'">'+esc(seedSourceLabel(source))+'</span><span class="seed-title-text">'+esc(seedTitle)+'</span></span>'
       +'<span class="seed-subtitle" data-tip="'+attr(seedSubtitle)+'">'+esc(seedSubtitle)+'</span></span>'
       +'<span class="seed-meta"><span class="sz">'+esc(sz)+'</span><span class="bl">'+esc(bl+' x '+bs)+'</span></span>'

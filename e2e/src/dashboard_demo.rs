@@ -436,6 +436,28 @@ mod tests {
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let body = String::from_utf8(bytes.to_vec()).unwrap();
         assert!(body.contains("guix-p2p dashboard"));
+        assert!(body.contains("open evidence"));
+        assert!(body.contains("stop seeding this nar"));
+        assert!(body.contains("metadata pending"));
+        assert!(body.contains("aria-label"));
+    }
+
+    #[tokio::test]
+    async fn demo_seeds_include_hash_only_downloaded_seed() {
+        let response = router()
+            .oneshot(Request::builder().uri("/api/seeds").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(
+            body.as_array()
+                .unwrap()
+                .iter()
+                .any(|seed| { seed["source"] == "downloaded" && seed.get("store_path").is_none() })
+        );
     }
 
     #[tokio::test]

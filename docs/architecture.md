@@ -820,7 +820,9 @@ locally-seeded nars in real time:
   metadata, and stop controls to avoid overlap.
 - Keyboard focus is visible on interactive row cards, detail affordances, and
   controls. Motion-heavy row flash and drawer animations respect
-  `prefers-reduced-motion`.
+  `prefers-reduced-motion`. Transfer, seed, package, and discovery rows expose
+  concise accessible labels so keyboard and assistive-technology users get the
+  same operational context as pointer users.
 - Active seed rows display the package/store item name when store-path metadata
   is available, with the full store path and NAR hash available in details.
   Hash-only rows include provenance text such as startup cache, manual cache
