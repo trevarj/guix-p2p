@@ -48,6 +48,34 @@ branches and tags are mirrored.
 - Port any GitHub pull request changes to Codeberg manually.
 - Do not configure GitHub-to-Codeberg mirroring.
 - Keep generated benchmark reports out of automated CI commits.
+- If the public website looks stale after a Codeberg push, verify that the
+  GitHub mirror has received the same commit. GitHub Pages deploys from the
+  GitHub mirror, not directly from Codeberg.
+
+Check mirror freshness from a checkout:
+
+```sh
+scripts/check-github-mirror.sh
+```
+
+The script uses HTTPS remotes by default and a 15-second timeout so a temporary
+Codeberg SSH/DNS problem does not hang the check. Override remotes only when
+needed:
+
+```sh
+CODEBERG_REMOTE=origin GITHUB_REMOTE=git@github.com:trevarj/guix-p2p.git \
+  scripts/check-github-mirror.sh
+```
+
+Expected output ends with:
+
+```text
+ok: GitHub mirror matches Codeberg
+```
+
+If it reports a stale mirror, use Codeberg's `Synchronize Now` control or push
+the same signed commit to the GitHub mirror before expecting Pages to rebuild.
+Then check `Actions > Pages` on GitHub.
 
 ## GitHub CI
 
@@ -166,6 +194,11 @@ falls back to the markdown report tables when a docs-only Pages deploy does not
 include a fresh CSV artifact.
 The static renderer also provides dependency-free code block language labels
 and lightweight highlighting for Scheme, shell, and TOML examples.
+
+Pages cache-busts `markdown.js`, `doc-page.js`, and `charts.js` with the short
+Git commit used by the Pages workflow. If text changes appear but rendered
+Markdown still looks stale, confirm the page source references the expected
+commit, for example `markdown.js?v=<short-commit>`.
 
 ## References
 
