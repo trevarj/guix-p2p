@@ -61,7 +61,9 @@ header button,.theme-select{
   padding:5px 10px;font-family:var(--font);font-size:11px;cursor:pointer;border-radius:4px
 }
 header button:hover,.theme-select:hover{border-color:var(--acc)}
-button:focus-visible,input:focus-visible,.theme-select:focus-visible{outline:1px solid var(--acc);outline-offset:2px}
+button:focus-visible,input:focus-visible,.theme-select:focus-visible,[role="button"]:focus-visible{
+  outline:1px solid var(--acc);outline-offset:2px
+}
 .header-readiness{
   flex:1 1 640px;max-width:820px;min-width:340px;text-align:left;
   display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,.9fr) minmax(150px,.8fr);
@@ -133,6 +135,17 @@ main{
   font-family:var(--font);font-size:10px;padding:3px 7px;cursor:pointer;border-radius:4px
 }
 .event-filter.active{color:var(--bg);background:var(--acc);border-color:var(--acc)}
+.list-head{
+  display:grid;align-items:center;gap:6px;color:var(--dim);font-size:9px;
+  text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--line);
+  padding:0 3px 5px;margin:0 0 2px
+}
+.list-head span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.packages-head{grid-template-columns:minmax(0,1fr) 58px 56px}
+.seeds-head{grid-template-columns:minmax(0,1fr) minmax(96px,auto) 44px}
+.peers-head{grid-template-columns:24px minmax(0,1fr) minmax(70px,.45fr) 118px}
+.metadata-head{grid-template-columns:minmax(0,1fr) 74px 56px 70px}
+.events-head{grid-template-columns:82px 24px minmax(88px,110px) minmax(0,1fr);margin-bottom:0}
 .events .entry{
   display:grid;grid-template-columns:82px 24px minmax(88px,110px) minmax(0,1fr);
   gap:8px;align-items:start;font-size:12px;padding:6px 0;border-bottom:1px solid var(--line)
@@ -213,6 +226,7 @@ main{
 }
 .package-search:focus{outline:none;border-color:var(--acc)}
 .package-hint{min-width:150px;text-align:right;font-size:10px;color:var(--dim)}
+.package-row{display:grid;grid-template-columns:minmax(0,1fr) 58px 56px;column-gap:6px}
 .package-row .pkg{flex:1;min-width:0}
 .package-row .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .package-row .source-meta{color:var(--dim);font-size:10px;margin-left:6px}
@@ -314,6 +328,9 @@ main{
 /* transfer flash animation */
 .seed-row.flash{animation:flash .6s ease}
 @keyframes flash{0%{background:var(--acc);color:var(--bg)}100%{background:transparent;color:var(--fg)}}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+}
 
 /* detail panel overlay */
 .overlay{
@@ -1018,10 +1035,10 @@ function renderEvents(){
     return EVENT_FILTER==='all'||e.category===EVENT_FILTER
   });
   if(!visible.length){
-    el.innerHTML='<div class="empty">no matching events</div>';
+    el.innerHTML='<div class="empty">no matching events yet</div>';
     return
   }
-  el.innerHTML=visible.slice(-500).reverse().map(function(e){
+  el.innerHTML=listHead('events-head',['time','','type','message'])+visible.slice(-500).reverse().map(function(e){
     var d=new Date(e.timestamp_ms||Date.now());
     var ts=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0');
     return '<div class="entry '+esc(e.cls)+(e.added?' added':'')+'">'
@@ -1050,8 +1067,8 @@ function renderPeers(){
   var el=document.getElementById('peers-list');
   var keys=Object.keys(PEERS);
   updatePeerCount();
-  if(!keys.length){el.innerHTML='<div class="empty">no peers yet</div>';return}
-  var h='';
+  if(!keys.length){el.innerHTML='<div class="empty">no peers connected or remembered yet</div>';return}
+  var h=listHead('peers-head',['geo','peer','score','state']);
   keys.sort(function(a,b){
     return Number(Boolean(PEERS[b].connected))-Number(Boolean(PEERS[a].connected))
       ||(PEERS[b].score||0)-(PEERS[a].score||0)
@@ -1138,8 +1155,8 @@ function renderMetadata(){
       ||String(a.store_path||a.id).localeCompare(String(b.store_path||b.id))
   });
   setText('metadata-badge',rows.length);
-  if(!rows.length){el.innerHTML='<div class="empty">no metadata discovered</div>';return}
-  el.innerHTML=rows.map(function(row){
+  if(!rows.length){el.innerHTML='<div class="empty">no substitute metadata observed yet</div>';return}
+  el.innerHTML=listHead('metadata-head',['store item','size','path','providers'])+rows.map(function(row){
     var name=row.store_path?storePathName(row.store_path):String(row.id||'unknown').slice(0,16)+'...';
     var sz=row.nar_size!=null?fmtSize(row.nar_size):'?';
     var p2p=row.p2p_available?'yes':'no';
@@ -1147,7 +1164,7 @@ function renderMetadata(){
     return '<div class="metadata-row"'+lookup+'>'
       +'<span class="path" data-tip="'+attr(row.tip||name)+'">'+esc(name)+'</span>'
       +'<span class="size">'+esc(sz)+'</span>'
-      +'<span class="p2p '+p2p+'">'+(row.p2p_available?'P2P':'http')+'</span>'
+      +'<span class="p2p '+p2p+'">'+(row.p2p_available?'p2p':'http')+'</span>'
       +'<span class="providers">'+esc((row.providers||0)+' peers')+'</span>'
       +'</div>'
   }).join('');
@@ -1168,14 +1185,14 @@ function renderPackages(){
   setText('package-badge',arr.length);
   renderTesterChecklist();
   if(!PACKAGES.length){el.innerHTML='<div class="empty">no installed packages found</div>';return}
-  if(!arr.length){el.innerHTML='<div class="empty">no packages match</div>';return}
+  if(!arr.length){el.innerHTML='<div class="empty">no packages match this filter</div>';return}
   arr.sort(function(a,b){
     return (a.name||'').localeCompare(b.name||'')
       ||(a.version||'').localeCompare(b.version||'')
       ||(a.source||'').localeCompare(b.source||'')
       ||(a.store_path||'').localeCompare(b.store_path||'')
   });
-  var h='';
+  var h=listHead('packages-head',['package','state','action']);
   arr.slice(0,200).forEach(function(pkg){
     var src=pkg.source==='system'?'sys':(pkg.source==='kernel'?'kern':'home');
     var title=(pkg.name||'?')+' '+(pkg.version||'');
@@ -1501,10 +1518,10 @@ function renderSeeds(){
   setText('seed-badge',count);
   renderOverview();
   renderTesterChecklist();
-  if(!count){el.innerHTML='<div class="empty">not seeding</div>';return}
+  if(!count){el.innerHTML='<div class="empty">not seeding any NARs yet</div>';return}
   var arr=keys.map(function(k){var s=SEEDS[k];s._key=k;return s});
   arr.sort(function(a,b){return(b.nar_size||0)-(a.nar_size||0)});
-  var h='';
+  var h=listHead('seeds-head',['seed','cache','action']);
   arr.forEach(function(s){
     var k=s._key;
     var sz=fmtSize(s.nar_size||0);
@@ -1523,6 +1540,12 @@ function renderSeeds(){
       +'</div>';
   });
   el.innerHTML=h;
+}
+
+function listHead(cls,labels){
+  return '<div class="list-head '+attr(cls)+'" aria-hidden="true">'
+    +labels.map(function(label){return'<span>'+esc(label)+'</span>'}).join('')
+    +'</div>'
 }
 
 function seedSource(seed){

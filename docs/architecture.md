@@ -809,11 +809,18 @@ locally-seeded nars in real time:
   exposed as a polite log region, and grid cells that contain peer IDs,
   multiaddrs, store paths, or diagnostic strings explicitly allow truncation
   instead of overlapping adjacent controls.
+- Dense panels render compact column headers for scanability: Active Seeds
+  labels seed/cache/action, Packages labels package/state/action, Peers labels
+  geo/peer/score/state, Discovery labels store item/size/path/providers, and
+  Events labels time/type/message.
 - Dashboard colors are selected from a named theme dropdown. Terminal yellow,
   green, and amber preserve the console look; Tokyo Night provides a more
   conventional high-contrast dark palette. Scrollbars follow the active theme,
   and active seed rows reserve separate columns for package path, size/block
   metadata, and stop controls to avoid overlap.
+- Keyboard focus is visible on interactive row cards, detail affordances, and
+  controls. Motion-heavy row flash and drawer animations respect
+  `prefers-reduced-motion`.
 - Active seed rows display the package/store item name when store-path metadata
   is available, with the full store path and NAR hash available in details.
   Each active seed row can stop seeding directly by NAR hash, which works even
