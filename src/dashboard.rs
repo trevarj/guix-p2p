@@ -971,6 +971,26 @@ mod tests {
         (state, tmp)
     }
 
+    #[test]
+    fn embedded_dashboard_keeps_refined_ux_contract() {
+        let html = dashboard_html();
+        for expected in [
+            "aria-label=\"guix-p2p operational dashboard\"",
+            "aria-label=\"Open node details\"",
+            "aria-label=\"'+attr('Open transfer evidence for ",
+            "aria-label=\"'+attr('Open seed detail for ",
+            "aria-label=\"'+attr('Open discovery detail for ",
+            "open evidence &gt;",
+            "stop seeding this nar",
+            "metadata pending",
+            "prefers-reduced-motion",
+            "list-head",
+            "transfer-progress",
+        ] {
+            assert!(html.contains(expected), "dashboard html missing {expected}");
+        }
+    }
+
     #[tokio::test]
     async fn build_detail_can_be_loaded_by_registry_key_or_nar_hash() {
         let (state, _tmp) = dashboard_state();

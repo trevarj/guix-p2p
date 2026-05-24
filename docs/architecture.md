@@ -823,6 +823,8 @@ locally-seeded nars in real time:
   `prefers-reduced-motion`. Transfer, seed, package, and discovery rows expose
   concise accessible labels so keyboard and assistive-technology users get the
   same operational context as pointer users.
+  A dashboard unit test pins these embedded-HTML affordances so the refined
+  layout, labels, and copy cannot silently regress.
 - Active seed rows display the package/store item name when store-path metadata
   is available, with the full store path and NAR hash available in details.
   Hash-only rows include provenance text such as startup cache, manual cache
