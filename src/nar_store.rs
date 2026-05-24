@@ -547,6 +547,14 @@ fn export_nar(store_path: &str) -> anyhow::Result<Vec<u8>> {
 }
 
 fn preferred_profile_command(name: &str) -> OsString {
+    if name == "guile"
+        && let Some(command) = std::env::var_os("GUIX_P2P_GUILE").filter(|path| {
+            let path = PathBuf::from(path);
+            path.exists()
+        })
+    {
+        return command;
+    }
     if let Some(profile) = preferred_guix_profile() {
         let command = profile.join("bin").join(name);
         if command.exists() {

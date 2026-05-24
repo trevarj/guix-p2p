@@ -77,7 +77,9 @@ query, substitute, seed, and fetcher log tails. CI sets
 fail the smoke before the seed dashboard starts. CI also sets
 `GUIX_P2P_E2E_NO_GUIX_SHELL=1` because GitHub-hosted runners reject the nested
 mount namespaces used by `guix shell -C`; the outer manifest still supplies the
-Guix, Guile, and native runtime dependencies.
+Guix and native runtime dependencies. In this mode, the harness points manual
+seeding at the Guile interpreter embedded in the active `guix` script so the
+NAR serializer uses Guile modules from the same Guix profile.
 
 ## E2E VM Proof
 

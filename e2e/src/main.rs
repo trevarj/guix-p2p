@@ -689,6 +689,7 @@ struct HarnessTools {
     guix_p2p_extension: PathBuf,
     guix_p2p_library_path: String,
     guix_p2p_runtime_roots: Vec<String>,
+    guix_script_guile: Option<PathBuf>,
 }
 
 struct P2pBuildSpec<'a> {
@@ -3306,6 +3307,7 @@ fn prepare_harness_tools(guix_p2p_bin: Option<&std::path::Path>) -> anyhow::Resu
     }
     let guix_p2p_extension = ensure_guix_p2p_extension()?;
     let (guix_p2p_library_path, guix_p2p_runtime_roots) = runtime_libraries(&guix_p2p)?;
+    let guix_script_guile = guix_script_interpreter(&real_guix);
     Ok(HarnessTools {
         guix,
         guix_daemon,
@@ -3316,7 +3318,16 @@ fn prepare_harness_tools(guix_p2p_bin: Option<&std::path::Path>) -> anyhow::Resu
         guix_p2p_extension,
         guix_p2p_library_path,
         guix_p2p_runtime_roots,
+        guix_script_guile,
     })
+}
+
+fn guix_script_interpreter(guix: &std::path::Path) -> Option<PathBuf> {
+    let first_line =
+        std::fs::read_to_string(guix).ok()?.lines().next()?.strip_prefix("#!")?.trim().to_string();
+    let interpreter = first_line.split_whitespace().next()?;
+    let path = PathBuf::from(interpreter);
+    path.exists().then_some(path)
 }
 
 fn runtime_libraries(binary: &std::path::Path) -> anyhow::Result<(String, Vec<String>)> {
@@ -3628,6 +3639,9 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
             .env("HOME", &seed_dir)
             .env("XDG_CONFIG_HOME", &seed_config_home)
             .env("RUST_LOG", "guix_p2p=trace,info");
+        if let Some(guile) = &spec.tools.guix_script_guile {
+            seed_cmd.env("GUIX_P2P_GUILE", guile);
+        }
         let seed_log = logs_dir.join(format!("seed-{seed_idx}.log"));
         processes.spawn_logged(&format!("seed-{seed_idx}"), &mut seed_cmd, &seed_log)?;
         wait_dashboard(dashboard_port, &format!("seed {seed_idx}"), Some(&seed_log))?;
@@ -3698,6 +3712,9 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         .env("HOME", &node_b_dir)
         .env("XDG_CONFIG_HOME", &node_b_config_home)
         .env("RUST_LOG", "guix_p2p=trace,info");
+    if let Some(guile) = &spec.tools.guix_script_guile {
+        node_b_cmd.env("GUIX_P2P_GUILE", guile);
+    }
     let node_b_log = logs_dir.join("node-b.log");
     processes.spawn_logged("node-b", &mut node_b_cmd, &node_b_log)?;
     wait_dashboard(spec.node_b_dashboard_port, "node B", Some(&node_b_log))?;
@@ -6308,6 +6325,17 @@ mod tests {
             Some("/gnu/store/raw-guix-daemon/bin/guix-daemon")
         );
         assert_eq!(parse_guix_daemon_launcher_exec("#!/bin/sh\nexec guix-daemon"), None);
+    }
+
+    #[test]
+    fn parses_guix_script_interpreter_from_shebang() {
+        let tmp = tempfile::tempdir().unwrap();
+        let guile = tmp.path().join("guile");
+        let guix = tmp.path().join("guix");
+        std::fs::write(&guile, b"").unwrap();
+        std::fs::write(&guix, format!("#!{} --no-auto-compile\n!#\n", guile.display())).unwrap();
+
+        assert_eq!(guix_script_interpreter(&guix), Some(guile));
     }
 
     #[test]

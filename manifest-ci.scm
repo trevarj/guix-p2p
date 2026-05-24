@@ -4,7 +4,6 @@
              (gnu packages commencement)
              (gnu packages crypto)
              (gnu packages gnupg)
-             (gnu packages guile)
              (gnu packages nss)
              (gnu packages package-management)
              (gnu packages rust)
@@ -33,5 +32,4 @@
   ;; Native libraries and helpers needed by sys crates and build scripts.
   openssl
   libgcrypt
-  guile-3.0
   perl))
