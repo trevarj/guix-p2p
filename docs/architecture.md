@@ -826,6 +826,9 @@ locally-seeded nars in real time:
   Hash-only rows include provenance text such as startup cache, manual cache
   entry, or P2P download plus `metadata pending`, so users can understand why a
   NAR is listed before narinfo/catalog metadata has identified the package.
+  The seed detail drawer groups identity and cache/provenance fields and
+  exposes the same stop action as the row, so a tester can inspect a seed and
+  remove it without returning to the list.
   Each active seed row can stop seeding directly by NAR hash, which works even
   when older cached seeds do not have store-path metadata. Package rows remain
   seed-only; removal is intentionally centralized in Active Seeds.

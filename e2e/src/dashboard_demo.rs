@@ -310,14 +310,23 @@ async fn seeds() -> Json<Value> {
             "nar_size": 712704,
             "block_count": 11,
             "block_size": 65536,
-            "store_path": "/gnu/store/1xq2v3demohello-hello-2.12.1"
+            "store_path": "/gnu/store/1xq2v3demohello-hello-2.12.1",
+            "source": "manual"
         },
         {
             "nar_hash": "sha256:profile-demo-seed",
             "nar_size": 221184,
             "block_count": 4,
             "block_size": 65536,
-            "store_path": "/gnu/store/9zzzdemo-profile-hook-0.1"
+            "store_path": "/gnu/store/9zzzdemo-profile-hook-0.1",
+            "source": "cache"
+        },
+        {
+            "nar_hash": "sha256:demo-downloaded-seed-without-store-path",
+            "nar_size": 98304,
+            "block_count": 2,
+            "block_size": 65536,
+            "source": "downloaded"
         }
     ]))
 }

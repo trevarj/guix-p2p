@@ -354,6 +354,10 @@ main{
 .detail .field{margin-bottom:6px;font-size:12px}
 .detail .field label{color:var(--dim);display:inline-block;min-width:100px}
 .detail .field .val{color:var(--fg)}
+.detail-section{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:10px;margin:10px 0}
+.detail-section h3{margin:0 0 8px}
+.detail-actions{display:grid;gap:8px;margin-top:12px}
+.mono-wrap{font-size:11px;word-break:break-all}
 .diagnostic-row{
   display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px;
   border-top:1px solid var(--line);padding:8px 0;font-size:11px
@@ -1633,15 +1637,24 @@ function openSeedDetail(hash){
   var source=seedSource(s);
   var created=s.created_at?new Date(s.created_at*1000).toISOString().slice(0,16):'?';
   c.innerHTML='<h2>seeded nar</h2>'
+    +'<div class="detail-section">'
+    +'<h3>identity</h3>'
     +'<div class="field"><label>name</label><span class="val">'+esc(seedDisplayTitle(s,hash))+'</span></div>'
+    +'<div class="field"><label>store</label><span class="val mono-wrap">'+esc(s.store_path||'metadata pending')+'</span></div>'
+    +'<div class="field"><label>hash</label><span class="val mono-wrap">'+esc(hash)+'</span></div>'
+    +'</div>'
+    +'<div class="detail-section">'
+    +'<h3>cache</h3>'
     +'<div class="field"><label>source</label><span class="val">'+esc(seedSourceLabel(source))+'</span></div>'
     +'<div class="field"><label>why seeded</label><span class="val">'+esc(seedSourceReason(source,!!s.store_path))+'</span></div>'
     +'<div class="field"><label>cached</label><span class="val">'+esc(created)+'</span></div>'
-    +'<div class="field"><label>store</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(s.store_path||'?')+'</span></div>'
-    +'<div class="field"><label>hash</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(hash)+'</span></div>'
     +'<div class="field"><label>size</label><span class="val">'+esc(sz)+'</span></div>'
     +'<div class="field"><label>blocks</label><span class="val">'+esc(bl+' x '+bs)+'</span></div>'
-    +'<div class="field"><label>status</label><span class="val" style="color:var(--ok)">seeding</span></div>';
+    +'<div class="field"><label>status</label><span class="val" style="color:var(--ok)">serving to peers</span></div>'
+    +'</div>'
+    +'<div class="detail-actions">'
+    +'<button type="button" class="readiness-action stop-seed" data-stop-seed="'+attr(hash)+'" data-store-path="'+attr(s.store_path||'')+'">stop seeding this nar</button>'
+    +'</div>';
   var ov=document.getElementById('overlay');
   ov.classList.remove('hidden');
 }
