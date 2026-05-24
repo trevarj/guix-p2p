@@ -395,7 +395,14 @@ main{
 }
 .detail .narinfo-raw.open{display:block}
 
-.empty{text-align:center;padding:20px;color:var(--dim);font-size:12px;font-style:italic}
+.empty{
+  display:grid;place-items:center;text-align:center;min-height:96px;padding:18px;
+  color:var(--dim);font-size:12px;border:1px dashed rgba(168,148,66,.28);
+  background:linear-gradient(180deg,rgba(255,255,255,.012),transparent);border-radius:6px
+}
+.empty.compact{min-height:auto;padding:12px;border-style:solid;background:transparent}
+.empty-title{color:var(--muted);font-size:12px;font-style:normal}
+.empty-detail{max-width:34ch;margin-top:4px;color:var(--dim);font-size:10px;line-height:1.45}
 .tip{
   position:fixed;z-index:1000;max-width:320px;background:#0b0c0a;color:var(--fg);
   border:1px solid var(--acc);padding:7px 8px;font-size:11px;line-height:1.35;
@@ -534,11 +541,11 @@ main{
 <main aria-label="guix-p2p operational dashboard">
   <section class="panel transfer-panel" data-help="transfer">
     <h2 data-tip="Latest P2P proof path: observed package, trusted narinfo, providers, block movement, import, and re-seeding.">transfer path</h2>
-    <div id="transfer-path"><div class="empty">no transfer observed</div></div>
+    <div id="transfer-path"><div class="empty"><div><div class="empty-title">no transfer observed</div><div class="empty-detail">Run a Guix build or substitute request to see the proof path.</div></div></div></div>
   </section>
   <section class="panel seeds-panel" data-help="seeds">
     <h2 data-tip="NARs this node can serve to other peers.">active seeds <span class="badge" id="seed-badge">0</span></h2>
-    <div id="seeds-list"><div class="empty">not seeding</div></div>
+    <div id="seeds-list"><div class="empty"><div><div class="empty-title">not seeding</div><div class="empty-detail">Seed a package manually or complete a P2P download.</div></div></div></div>
   </section>
   <section class="panel packages-panel" data-help="packages">
     <h2 data-tip="Installed store paths that can be seeded into the local P2P cache.">packages <span class="badge" id="package-badge">0</span></h2>
@@ -546,15 +553,15 @@ main{
       <input class="package-search" id="package-search" placeholder="search name, version, store path" data-tip="Filter installed packages by name, version, or full /gnu/store path.">
       <div class="package-hint" data-tip="Profiles scanned: system, kernel, and Guix Home.">installed profiles</div>
     </div>
-    <div id="packages-list"><div class="empty">loading packages</div></div>
+    <div id="packages-list"><div class="empty"><div><div class="empty-title">loading packages</div><div class="empty-detail">Scanning system, kernel, and Guix Home profiles.</div></div></div></div>
   </section>
   <section class="panel peers-panel" data-help="peers">
     <h2 data-tip="Peers known through reputation records and live connection events.">peers</h2>
-    <div id="peers-list"><div class="empty">no peers yet</div></div>
+    <div id="peers-list"><div class="empty"><div><div class="empty-title">no peers yet</div><div class="empty-detail">Configure bootstrap peers or wait for LAN discovery.</div></div></div></div>
   </section>
   <section class="panel metadata-panel" data-help="metadata">
     <h2 data-tip="Merged substitute lookup and narinfo/build metadata.">discovery <span class="badge" id="metadata-badge">0</span></h2>
-    <div id="metadata-list"><div class="empty">no metadata discovered</div></div>
+    <div id="metadata-list"><div class="empty"><div><div class="empty-title">no metadata discovered</div><div class="empty-detail">Substitute lookups will appear here as Guix requests store paths.</div></div></div></div>
   </section>
   <section class="panel events" data-help="events">
     <div class="events-header">
@@ -732,6 +739,13 @@ function closeOpsMenu(){
   if(!menu||menu.classList.contains('hidden'))return;
   menu.classList.add('hidden');
   if(toggle)toggle.setAttribute('aria-expanded','false')
+}
+
+function emptyState(title,detail,compact){
+  return '<div class="empty '+(compact?'compact':'')+'"><div>'
+    +'<div class="empty-title">'+esc(title)+'</div>'
+    +(detail?'<div class="empty-detail">'+esc(detail)+'</div>':'')
+    +'</div></div>'
 }
 
 function setText(id,value){
@@ -1089,7 +1103,7 @@ function renderEvents(){
     return EVENT_FILTER==='all'||e.category===EVENT_FILTER
   });
   if(!visible.length){
-    el.innerHTML='<div class="empty">no matching events yet</div>';
+    el.innerHTML=emptyState('no matching events','Try another filter or wait for daemon activity.');
     return
   }
   el.innerHTML=listHead('events-head',['time','','type','message'])+visible.slice(-500).reverse().map(function(e){
@@ -1121,7 +1135,7 @@ function renderPeers(){
   var el=document.getElementById('peers-list');
   var keys=Object.keys(PEERS);
   updatePeerCount();
-  if(!keys.length){el.innerHTML='<div class="empty">no peers connected or remembered yet</div>';return}
+  if(!keys.length){el.innerHTML=emptyState('no peers known','Configure bootstrap peers, share your address, or wait for LAN discovery.');return}
   var h=listHead('peers-head',['geo','peer','score','state']);
   keys.sort(function(a,b){
     return Number(Boolean(PEERS[b].connected))-Number(Boolean(PEERS[a].connected))
@@ -1209,7 +1223,7 @@ function renderMetadata(){
       ||String(a.store_path||a.id).localeCompare(String(b.store_path||b.id))
   });
   setText('metadata-badge',rows.length);
-  if(!rows.length){el.innerHTML='<div class="empty">no substitute metadata observed yet</div>';return}
+  if(!rows.length){el.innerHTML=emptyState('no substitute metadata','Guix substitute lookups will populate this panel.');return}
   el.innerHTML=listHead('metadata-head',['store item','size','path','providers'])+rows.map(function(row){
     var name=row.store_path?storePathName(row.store_path):String(row.id||'unknown').slice(0,16)+'...';
     var sz=row.nar_size!=null?fmtSize(row.nar_size):'?';
@@ -1240,8 +1254,8 @@ function renderPackages(){
   var arr=PACKAGES.filter(function(pkg){return packageMatches(pkg,q)});
   setText('package-badge',arr.length);
   renderTesterChecklist();
-  if(!PACKAGES.length){el.innerHTML='<div class="empty">no installed packages found</div>';return}
-  if(!arr.length){el.innerHTML='<div class="empty">no packages match this filter</div>';return}
+  if(!PACKAGES.length){el.innerHTML=emptyState('no installed packages found','The dashboard could not read system, kernel, or Guix Home profiles.');return}
+  if(!arr.length){el.innerHTML=emptyState('no packages match','Clear or narrow the search using package name, version, or store path.');return}
   arr.sort(function(a,b){
     return (a.name||'').localeCompare(b.name||'')
       ||(a.version||'').localeCompare(b.version||'')
@@ -1262,7 +1276,7 @@ function renderPackages(){
       +'<button class="seed-action" type="button" '+(pkg.seeded?'disabled ':'')+'data-seed-store="'+attr(pkg.store_path||'')+'" data-tip="'+attr(pkg.seeded?'Already seeded locally.':'Seed this installed store path into the local P2P cache.')+'">'+esc(button)+'</button>'
       +'</div>';
   });
-  if(arr.length>200)h+='<div class="empty">showing 200 of '+arr.length+' matches, refine search</div>';
+  if(arr.length>200)h+=emptyState('showing 200 of '+arr.length,'Refine search to keep the package list usable.',true);
   el.innerHTML=h;
 }
 
@@ -1401,7 +1415,7 @@ function renderTransferPeers(title,peers){
   if(ids.length>4)rows+='<div class="transfer-peer-row"><div class="transfer-peer-id">+'+(ids.length-4)+' more</div><div></div></div>';
   return '<div class="transfer-peer-group">'
     +'<div class="transfer-peer-title">'+esc(title)+'</div>'
-    +(rows||'<div class="empty">none observed</div>')
+    +(rows||emptyState('none observed','No accepted block movement for this direction yet.',true))
     +'</div>'
 }
 
@@ -1444,7 +1458,7 @@ function fmtMs(ms){
 function renderTransferPhases(phases){
   var keys=['narinfo','provider_lookup','provider_refresh','handshake','fallback_handshake','http_download','p2p_download','verify','import','total']
     .filter(function(k){return phases&&phases[k]!=null});
-  if(!keys.length)return'<div class="empty">no phase timings observed</div>';
+  if(!keys.length)return emptyState('no phase timings','Timing samples appear after completed transfer phases.',true);
   return '<div class="transfer-phases">'+keys.map(function(k){
     return '<div class="transfer-phase"><span>'+esc(phaseLabel(k))+'</span><strong>'+esc(fmtMs(phases[k]))+'</strong></div>'
   }).join('')+'</div>'
@@ -1478,7 +1492,7 @@ function renderTransferStageDots(t){
 
 function renderTransferPath(){
   var el=document.getElementById('transfer-path');
-  if(!TRANSFER){el.innerHTML='<div class="empty">no transfer observed</div>';return}
+  if(!TRANSFER){el.innerHTML=emptyState('no transfer observed','Run a Guix build or substitute request to see the proof path.');return}
   var downloadPeers=Object.keys(TRANSFER.download_peers||{}).length;
   var servingPeers=Object.keys(TRANSFER.serving_peers||{}).length;
   var progress=transferProgressSummary(TRANSFER);
@@ -1591,7 +1605,7 @@ function renderSeeds(){
   setText('seed-badge',count);
   renderOverview();
   renderTesterChecklist();
-  if(!count){el.innerHTML='<div class="empty">not seeding any NARs yet</div>';return}
+  if(!count){el.innerHTML=emptyState('not seeding','Seed an installed package manually or complete a P2P download.');return}
   var arr=keys.map(function(k){var s=SEEDS[k];s._key=k;return s});
   arr.sort(function(a,b){return(b.nar_size||0)-(a.nar_size||0)});
   var h=listHead('seeds-head',['seed','cache','action']);
@@ -2267,7 +2281,7 @@ document.addEventListener('keydown',function(ev){
       PACKAGES=ps||[];
       renderPackages()
     }).catch(function(){
-      document.getElementById('packages-list').innerHTML='<div class="empty">failed to load packages</div>'
+      document.getElementById('packages-list').innerHTML=emptyState('failed to load packages','Check guix-p2p daemon logs and Guix profile accessibility.')
     })
   }
 

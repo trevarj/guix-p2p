@@ -817,6 +817,10 @@ locally-seeded nars in real time:
   metadata get pointer/focus treatment, while package rows reserve the explicit
   seed button as the action target. Discovery rows without detail metadata are
   rendered as read-only so testers do not chase dead drill-downs.
+- Empty and loading states use a shared compact pattern with a short title and a
+  next-step hint. Panels explain whether the user should run a Guix build,
+  configure bootstrap peers, seed a package, or inspect daemon logs instead of
+  showing only a blank or terse placeholder.
 - Dashboard colors are selected from a named theme dropdown. Terminal yellow,
   green, and amber preserve the console look; Tokyo Night provides a more
   conventional high-contrast dark palette. Scrollbars follow the active theme,

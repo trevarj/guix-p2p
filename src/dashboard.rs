@@ -989,6 +989,8 @@ mod tests {
             "trapDetailFocus",
             "DETAIL_RETURN_FOCUS",
             "toggleOpsMenu",
+            "emptyState",
+            "empty-title",
             "open evidence &gt;",
             "stop seeding this nar",
             "metadata pending",
