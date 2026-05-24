@@ -49,7 +49,7 @@ peer_store_max_entries = 100
 external_addresses = "/dns4/node.example.org/udp/6881/quic-v1"
 cache_dir = "/var/cache/guix-p2p"
 socket_path = "/var/cache/guix-p2p/guix-p2p.sock"
-substitute_policy = "p2p-first"
+substitute_policy = "http-first"
 substitute_urls = "https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org"
 min_providers = 3
 max_upload_rate_kbps = 0
@@ -73,7 +73,7 @@ seed_paths = ["/gnu/store/...-hello"]
 | `listen_addr` | `/ip4/0.0.0.0/udp/6881/quic-v1` | `--listen-addr` | libp2p listen multiaddr. TCP and QUIC are both supported by the binary. |
 | `cache_dir` | `$XDG_CACHE_HOME/guix-p2p` or `~/.cache/guix-p2p` | `--cache-dir` | Identity, nar cache, and reputation storage. |
 | `substitute_urls` | `https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org` | `--substitute-urls` | HTTP substitute servers used for narinfo metadata and allowed HTTP nar fallback. |
-| `substitute_policy` | `p2p-first` | `--policy` | `p2p-only`, `p2p-first`, or `http-first`. |
+| `substitute_policy` | `http-first` | `--policy` | `p2p-only`, `p2p-first`, or `http-first`. |
 | `block_size` | `262144` | none | Nar block size in bytes for swarm requests. |
 | `request_timeout_secs` | `30` | none | Provider lookup timeout and floor for the size-scaled P2P block download deadline. |
 | `stall_timeout_secs` | `30` | none | Abort a P2P download after this many seconds without block progress. |
@@ -107,12 +107,13 @@ command line:
           (dashboard? #t)
           (auto-seed-downloads "p2p")
           (external-addresses '())
-          (policy "p2p-first")))
+          (policy "http-first")))
 ```
 
-The service default includes the project bootstrap node. Override
-`bootstrap-peers` with a custom list, or set `(bootstrap-peers '())` for an
-isolated node.
+The service default includes the project bootstrap node and `http-first`
+policy. Override `bootstrap-peers` with a custom list, or set
+`(bootstrap-peers '())` for an isolated node. Use `(policy "p2p-first")` when
+deliberately validating peer transfer behavior.
 
 Use `extra-options` only for flags that do not yet have service fields.
 

@@ -591,10 +591,10 @@ async fn try_swarm_substitute(
                         config,
                         &narinfo,
                         client,
-                        event_tx,
                         reply,
                         &store_path,
                         bandwidth_limiter,
+                        "http-fallback",
                     )
                     .await
                 },
@@ -610,10 +610,10 @@ async fn try_swarm_substitute(
                 config,
                 &narinfo,
                 client,
-                event_tx,
                 reply,
                 &store_path,
                 bandwidth_limiter,
+                "http-first",
             )
             .await
             {
@@ -1022,10 +1022,10 @@ async fn try_http_download(
     config: &Config,
     narinfo: &crate::narinfo::Narinfo,
     client: &reqwest::Client,
-    _event_tx: &dashboard::EventBus,
     reply: &mut ReplyWriter,
     store_path: &str,
     bandwidth_limiter: &Arc<BandwidthLimiter>,
+    detail_source: &'static str,
 ) -> Result<DownloadedNar, String> {
     tracing::info!(store = %store_path, "Attempting HTTP nar download");
 
@@ -1054,7 +1054,7 @@ async fn try_http_download(
                 data: download.data,
                 trace_url: download.source_url,
                 source: DownloadSource::Http,
-                detail_source: "http-fallback",
+                detail_source,
             })
         },
         Err(HttpClientError::NotFound) => Err("HTTP nar not found on any substitute server".into()),

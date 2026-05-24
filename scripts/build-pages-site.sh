@@ -1111,7 +1111,7 @@ cat > "$site_dir/index.html" <<'HTML'
 
     <section id="getting-started">
       <h2>Get Started</h2>
-      <p>Add the authenticated repository channel, pull it, enable the system service, then use normal Guix commands. The persistent service defaults to the project bootstrap node and a loopback dashboard.</p>
+      <p>Add the authenticated repository channel, pull it, enable the system service, then use normal Guix commands. The persistent service defaults to http-first policy, the project bootstrap node, and a loopback dashboard.</p>
       <pre data-language="Scheme"><code class="language-scheme"><span class="tok-keyword">(cons*</span>
  (channel
   (<span class="tok-keyword">name</span> <span class="tok-symbol">'guix-p2p</span>)

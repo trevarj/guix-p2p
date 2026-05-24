@@ -548,11 +548,15 @@ fn transfer_peer_entries(peers: &HashMap<String, PeerTransferStats>) -> Vec<ApiT
 }
 
 async fn api_seeds(State(state): State<DashboardState>) -> Json<Vec<ApiSeededNar>> {
-    let store = state.nar_store.lock().unwrap();
+    let known_store_paths = known_seed_store_paths(&state);
+    let mut store = state.nar_store.lock().unwrap();
     let mut seeds: Vec<ApiSeededNar> = store
         .seeded_hashes()
         .into_iter()
         .filter_map(|hash| {
+            if let Some(store_path) = known_store_paths.get(&hash) {
+                store.annotate_seed_store_path(&hash, store_path);
+            }
             let info = store.seed_info(&hash)?;
             Some(ApiSeededNar {
                 nar_hash: hash,
@@ -567,6 +571,29 @@ async fn api_seeds(State(state): State<DashboardState>) -> Json<Vec<ApiSeededNar
         .collect();
     seeds.sort_by(|a, b| b.nar_size.cmp(&a.nar_size).then_with(|| a.nar_hash.cmp(&b.nar_hash)));
     Json(seeds)
+}
+
+fn known_seed_store_paths(state: &DashboardState) -> HashMap<String, String> {
+    let mut paths = HashMap::new();
+
+    for build in state.build_registry.lock().unwrap().values() {
+        if let Some(store_path) = &build.store_path {
+            paths.insert(normalize_nar_hash(&build.nar_hash), store_path.clone());
+        }
+    }
+
+    for item in state.catalog.lock().unwrap().values() {
+        let (Some(nar_hash), Some(store_path)) = (&item.nar_hash, &item.store_path) else {
+            continue;
+        };
+        paths.entry(normalize_nar_hash(nar_hash)).or_insert_with(|| store_path.clone());
+    }
+
+    paths
+}
+
+fn normalize_nar_hash(hash: &str) -> String {
+    hash.strip_prefix("sha256:").unwrap_or(hash).to_string()
 }
 
 async fn api_packages(State(state): State<DashboardState>) -> Json<Vec<ApiPackage>> {
@@ -885,6 +912,7 @@ mod tests {
     use std::{fs, path::PathBuf};
 
     use axum::http::{Method, Request};
+    use sha2::Digest;
     use tower::ServiceExt;
 
     use super::{
@@ -1400,6 +1428,40 @@ mod tests {
         let status = api_seed_delete(State(state), Path("abcd".repeat(16))).await.unwrap();
 
         assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn seeds_api_labels_cached_nar_from_build_metadata() {
+        let (state, tmp) = dashboard_state();
+        let nar_data = b"nar bytes";
+        let nar_hash = hex::encode(sha2::Sha256::digest(nar_data));
+        let store_path = "/gnu/store/abcd-package";
+        let nar_dir = tmp.path().join("nar");
+        std::fs::create_dir_all(&nar_dir).unwrap();
+        std::fs::write(nar_dir.join(format!("{nar_hash}.nar")), nar_data).unwrap();
+        *state.nar_store.lock().unwrap() = NarStore::new(tmp.path(), 262144);
+        state.build_registry.lock().unwrap().insert(
+            "abcd-package".to_string(),
+            ObservedBuild {
+                nar_hash: nar_hash.clone(),
+                store_path: Some(store_path.to_string()),
+                nar_size: Some(9),
+                references: vec![],
+                deriver: None,
+                narinfo_raw: None,
+                providers: vec![],
+                downloaded_at: None,
+                download_size: None,
+            },
+        );
+
+        let Json(seeds) = api_seeds(State(state.clone())).await;
+
+        assert_eq!(seeds[0].store_path.as_deref(), Some(store_path));
+        assert_eq!(
+            state.nar_store.lock().unwrap().seed_info(&nar_hash).unwrap().store_path.as_deref(),
+            Some(store_path)
+        );
     }
 
     #[tokio::test]

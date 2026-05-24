@@ -559,7 +559,7 @@ var HELP_TEXT={
   theme:['Theme','Selects the dashboard color theme. This only affects the current browser and is saved in local storage.'],
   packages:['Packages','Installed package rows let you seed local store paths into the P2P cache.\n\nSearch filters the current installed-package snapshot by name, version, or /gnu/store path. The profile label shows whether an item came from the system, kernel, or Guix Home profile. The seed action serializes the selected store path, caches its NAR, and announces it to peers.'],
   'package-search':['Package Search','Filters the installed package snapshot by package name, version, and full /gnu/store path. It does not query Guix again; the package list refreshes periodically.'],
-  seeds:['Active Seeds','Shows cached NARs this node can serve to other peers.\n\nEach row shows the package/store item when known, the full path as secondary text, size and block metadata, and a stop action. Open a row for hash, size, block count, and seeding status. Stop removes the cached NAR and persisted seed path when metadata is available.'],
+  seeds:['Active Seeds','Shows cached NARs this node can serve to other peers.\n\nManual rows came from the package list or configured seed paths. Auto rows came from successful P2P downloads. Cache rows are older cache files found on startup; they may show only a NAR hash until trusted narinfo/catalog metadata identifies the store path. Open a row for hash, size, block count, source, and seeding status.'],
   transfer:['Transfer Path','Shows the latest proof path for P2P substitution.\n\nThe compact row shows package identity, NAR hash, size, total block movement, peer counts, downloaded bytes, and the six-stage progress strip: observed, trusted, providers, blocks, verified, and re-seeded. Click the row for detailed stage values and per-peer block contribution evidence.'],
   peers:['Peers','Ranks known peers by reputation score and connection state.\n\nRows show peer identity, score, and available address metadata. Offline rows are peers remembered from reputation history rather than active connections. Use this panel to confirm whether local or VM nodes are actually connected.'],
   metadata:['Discovery','Merged substitute lookup and narinfo/build metadata.\n\nRows show observed store paths, known sizes when available, whether P2P providers were found, and provider counts when narinfo/build detail is known. Open a row with build metadata to inspect signed narinfo details.'],
@@ -719,7 +719,9 @@ function healthState(){
 function sourceDisplay(source){
   if(!source)return'none';
   if(source.indexOf('connected-fallback')>=0)return'p2p fallback';
+  if(source.indexOf('p2p-dht')>=0)return'p2p dht';
   if(source.indexOf('p2p')>=0)return'p2p';
+  if(source.indexOf('http-first')>=0)return'http first';
   if(source.indexOf('http')>=0)return'http fallback';
   return source
 }
@@ -1377,6 +1379,7 @@ function openTransferDetail(){
     +'<div class="field"><label>store</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(TRANSFER.store_path||'?')+'</span></div>'
     +'<div class="field"><label>hash</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(TRANSFER.nar_hash||'?')+'</span></div>'
     +'<div class="field"><label>size</label><span class="val">'+esc(TRANSFER.nar_size!=null?fmtSize(TRANSFER.nar_size):'unknown')+'</span></div>'
+    +'<div class="field"><label>source</label><span class="val">'+esc(sourceDisplay(TRANSFER.source))+'</span></div>'
     +'<div class="field"><label>downloaded</label><span class="val">'+esc((TRANSFER.total_blocks_received||0)+' blocks, '+fmtBytes(TRANSFER.total_bytes_received||0))+'</span></div>'
     +'<div class="field"><label>served</label><span class="val">'+esc((TRANSFER.total_blocks_served||0)+' blocks')+'</span></div>'
     +'<h3>proof stages</h3>'
@@ -1464,7 +1467,7 @@ function renderSeeds(){
     var bs=s.block_size?fmtSize(s.block_size):'256KB';
     var source=seedSource(s);
     var seedTitle=s.store_path?storePathName(s.store_path):seedSourceTitle(source);
-    var seedSubtitle=s.store_path?s.store_path:k;
+    var seedSubtitle=s.store_path?s.store_path:seedHashSummary(k);
     h+='<div class="seed-row" data-hash="'+attr(k)+'" role="button" tabindex="0">'
       +'<span class="seed-name"><span class="seed-title"><span class="seed-tag '+attr(source)+'">'+esc(seedSourceLabel(source))+'</span><span class="seed-title-text">'+esc(seedTitle)+'</span></span>'
       +'<span class="seed-subtitle" data-tip="'+attr(seedSubtitle)+'">'+esc(seedSubtitle)+'</span></span>'
@@ -1489,7 +1492,18 @@ function seedSourceLabel(source){
 function seedSourceTitle(source){
   if(source==='downloaded')return'Auto-seeded download';
   if(source==='manual')return'Manual seed';
-  return'Cached NAR'
+  return'Unknown cached NAR'
+}
+
+function seedSourceReason(source,hasStorePath){
+  if(source==='manual')return'Explicitly seeded from the package list or configured seed paths.';
+  if(source==='downloaded')return'Cached after a successful P2P download so this node can re-share it.';
+  if(hasStorePath)return'Found in the local NAR cache at startup and later matched to trusted metadata.';
+  return'Found in the local NAR cache at startup without trusted store-path metadata yet. It can be stopped safely if you do not want to serve it.'
+}
+
+function seedHashSummary(hash){
+  return 'metadata pending · '+hash
 }
 
 function storePathName(storePath){
@@ -1510,6 +1524,7 @@ function openSeedDetail(hash){
   c.innerHTML='<h2>seeded nar</h2>'
     +'<div class="field"><label>package</label><span class="val">'+esc(s.store_path?storePathName(s.store_path):'?')+'</span></div>'
     +'<div class="field"><label>source</label><span class="val">'+esc(seedSourceLabel(source))+'</span></div>'
+    +'<div class="field"><label>why seeded</label><span class="val">'+esc(seedSourceReason(source,!!s.store_path))+'</span></div>'
     +'<div class="field"><label>cached</label><span class="val">'+esc(created)+'</span></div>'
     +'<div class="field"><label>store</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(s.store_path||'?')+'</span></div>'
     +'<div class="field"><label>hash</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(hash)+'</span></div>'

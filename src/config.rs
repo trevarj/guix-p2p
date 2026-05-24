@@ -7,9 +7,9 @@ pub enum SubstitutePolicy {
     /// Only use P2P swarm. Return not-found if no peers have the nar.
     P2pOnly,
     /// Try P2P first. Fall back to HTTP nar download if swarm fails.
-    #[default]
     P2pFirst,
     /// Try HTTP first. Fall back to P2P if HTTP fails or is slow.
+    #[default]
     HttpFirst,
 }
 
@@ -465,7 +465,7 @@ mod tests {
         assert_eq!(config.stall_timeout_secs, 30);
         assert_eq!(config.dashboard_port, 3030);
         assert!(!config.dashboard_enabled);
-        assert_eq!(config.substitute_policy, SubstitutePolicy::P2pFirst);
+        assert_eq!(config.substitute_policy, SubstitutePolicy::HttpFirst);
         assert_eq!(config.auto_seed_downloads, AutoSeedDownloads::P2p);
     }
 

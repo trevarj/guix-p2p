@@ -55,7 +55,7 @@
   (external-addresses guix-p2p-configuration-external-addresses
                       (default '()))
   (policy guix-p2p-configuration-policy
-          (default #f))
+          (default "http-first"))
   (dashboard? guix-p2p-configuration-dashboard?
               (default #f))
   (dashboard-bind guix-p2p-configuration-dashboard-bind

@@ -315,7 +315,9 @@ or `substitute_policy` in the TOML config file:
 | `p2p-first` | Try P2P first. Fall back to HTTP nar download if swarm fails (not enough providers, handshake failure, download error). |
 | `http-first` | Try HTTP nar download first. Fall back to P2P if HTTP fails or returns 404. |
 
-Default: `p2p-first`.
+Default: `http-first`. Sparse early-test networks should use HTTP first for
+normal Guix work, then opt into `p2p-first` when deliberately validating peer
+transfer behavior.
 
 The policy also affects the `have` query:
 - `http-first` and `p2p-first`: Always respond with the path (we can serve via HTTP fallback).
@@ -559,11 +561,12 @@ user's TOML file:
          (guix-p2p-configuration
           (dashboard? #t)
           (external-addresses '())
-          (policy "p2p-first")))
+          (policy "http-first")))
 ```
 
-The service defaults to the project bootstrap node. Set `(bootstrap-peers '())`
-to run without default bootstrap peers.
+The service defaults to the project bootstrap node and `http-first` policy. Set
+`(bootstrap-peers '())` to run without default bootstrap peers, or set
+`(policy "p2p-first")` for transfer-validation sessions.
 
 For standalone bootstrap-node operations, use the Shepherd-first guide in
 [`bootstrap-node.md`](bootstrap-node.md). The equivalent low-level service shape
@@ -590,7 +593,7 @@ See [`configuration.md`](configuration.md) for every supported key, default,
 and CLI override.
 
 ```toml
-substitute_policy = "p2p-first"
+substitute_policy = "http-first"
 bootstrap_peers = "/ip4/1.2.3.4/udp/6881/quic-v1/p2p/QmPeer1,/ip4/5.6.7.8/udp/6881/quic-v1/p2p/QmPeer2"
 peer_store_enabled = true
 peer_store_max_entries = 100
@@ -659,8 +662,10 @@ serving, and seed provenance labels.
   and indexes each file by its filename stem (the hex sha256). Files whose
   bytes do not hash to the filename stem are skipped. Matching sidecar metadata
   restores the source tag, store path, and creation time. Files whose
-  provenance is not known are tagged as `cache`. All indexed nars are annotated
-  with any matching local narinfo metadata and announced in the DHT.
+  provenance is not known are tagged as `cache`. Cache files without sidecar
+  metadata can later be annotated when trusted narinfo/catalog metadata for
+  that NAR hash is observed. All indexed nars are annotated with any matching
+  local narinfo metadata and announced in the DHT.
 - **Serving**: Incoming block requests are served from the nar store. The
   `NarStore::handle_request()` method dispatches to handshake replies (with
   block hashes) or block data reads. Outbound responses pass through
@@ -709,7 +714,9 @@ locally-seeded nars in real time:
 
 - **Seed list**: Each seeded nar is displayed with source tag (`manual`,
   `auto`, or `cache`), package/store path when known, hash, size, and block
-  count. Clicking a row opens a detail overlay.
+  count. Cache-only rows show that metadata is pending instead of pretending
+  the hash is a package name. Clicking a row opens a detail overlay with the
+  reason the NAR is being seeded.
 - **Real-time events**: `BlockServed` events stream via WebSocket showing
   which blocks are being uploaded to which peers. Served rows flash green
   momentarily.

@@ -95,8 +95,8 @@ through `GUIX_EXTENSIONS_PATH`. The helper prepends the package extension
 directory to any existing `GUIX_EXTENSIONS_PATH`; it does not replace or
 discard other Guix extensions. Ordinary Guix commands are unchanged; only the
 internal substitute protocol calls that `guix-daemon` makes during a build or
-reconfigure are intercepted. The service defaults to the project bootstrap node
-and a loopback dashboard on port `3030`.
+reconfigure are intercepted. The service defaults to `http-first`, the project
+bootstrap node, and a loopback dashboard on port `3030`.
 
 Reconfigure and restart the long-running services:
 

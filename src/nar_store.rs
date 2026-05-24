@@ -269,6 +269,30 @@ impl NarStore {
         updated
     }
 
+    /// Attach trusted store-path metadata to one cached nar when it was
+    /// originally indexed without sidecar metadata.
+    pub fn annotate_seed_store_path(&mut self, nar_hash_hex: &str, store_path: &str) -> bool {
+        if store_path.is_empty() {
+            return false;
+        }
+
+        let Some(entry) = self.index.get_mut(nar_hash_hex) else {
+            return false;
+        };
+        if entry.store_path.is_some() {
+            return false;
+        }
+
+        entry.store_path = Some(store_path.to_string());
+        let source = entry.source;
+        let created_at = entry.created_at;
+        let metadata_store_path = entry.store_path.clone();
+        if let Err(e) = self.write_metadata(nar_hash_hex, metadata_store_path, source, created_at) {
+            tracing::warn!("failed to update cached nar metadata {}: {}", nar_hash_hex, e);
+        }
+        true
+    }
+
     /// Number of seeded nars.
     pub fn len(&self) -> usize {
         self.index.len()
@@ -810,5 +834,26 @@ mod tests {
 
         assert_eq!(updated, 1);
         assert_eq!(store.seed_info(&hash).unwrap().store_path, Some(store_path));
+    }
+
+    #[test]
+    fn annotate_seed_store_path_persists_cached_seed_label() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = vec![2u8; 100];
+        let hash = hex::encode(Sha256::digest(&data));
+        let store_path = "/gnu/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar";
+        let nar_dir = tmp.path().join("nar");
+        std::fs::create_dir_all(&nar_dir).unwrap();
+        std::fs::write(nar_dir.join(format!("{hash}.nar")), &data).unwrap();
+
+        {
+            let mut store = NarStore::new(tmp.path(), 512);
+            assert!(store.annotate_seed_store_path(&hash, store_path));
+        }
+
+        let store = NarStore::new(tmp.path(), 512);
+        let info = store.seed_info(&hash).unwrap();
+        assert_eq!(info.store_path.as_deref(), Some(store_path));
+        assert_eq!(info.source, SeedSource::Cache);
     }
 }

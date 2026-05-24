@@ -123,6 +123,9 @@ Put this in the `services` field of your `operating-system` configuration:
 system profile, and creates the default cache directory. System daemon
 bootstrap peers default to the project bootstrap node and can be overridden in
 `guix-p2p-configuration`; set `(bootstrap-peers '())` to disable the default.
+The service uses `http-first` by default while the public P2P network is
+sparse. Set `(policy "p2p-first")` when deliberately validating peer-transfer
+behavior.
 System daemon bootstrap peers should live in `guix-p2p-configuration`, not in a user's
 `~/.config/guix-p2p/config.toml`, because Shepherd starts the daemon from the
 system service definition with explicit command-line options. Installing the
@@ -223,9 +226,11 @@ downloads are not auto-seeded unless explicitly enabled. Set
 `--auto-seed-downloads MODE`, or set `(auto-seed-downloads "p2p")` in
 `guix-p2p-configuration`. `--no-auto-seed-downloads` is a shorthand for
 `off`. The dashboard tags seeds as `manual`, `auto`, or `cache` so users can
-distinguish explicit seeds from downloaded or pre-existing cached NARs. New
-cached NARs write a `<hash>.json` sidecar next to the `<hash>.nar` file so
-source and store-path labels survive daemon restarts.
+distinguish explicit seeds from downloaded or pre-existing cached NARs. Cache
+rows without sidecar metadata may show only a NAR hash until trusted
+narinfo/catalog metadata identifies the store path. New cached NARs write a
+`<hash>.json` sidecar next to the `<hash>.nar` file so source and store-path
+labels survive daemon restarts.
 
 ## Checks
 

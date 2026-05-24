@@ -2,7 +2,9 @@
 
 This is the known-tester path for a Guix System machine. It assumes the node is
 allowed to use normal Guix HTTP substitutes for narinfo metadata and fallback,
-but should prefer P2P NAR downloads when a peer can serve the requested item.
+and uses `http-first` by default while the public P2P network is sparse.
+Switch to `p2p-first` only when deliberately validating that a seeded package
+can be fetched from a peer.
 
 ## 1. Add The Channel
 
@@ -139,18 +141,22 @@ The dashboard `active seeds` panel should show the package with a readable
 store-path label. Rows tagged `manual` came from the package list or explicit
 seed paths. Rows tagged `auto` came from successful P2P downloads cached for
 re-sharing. Rows tagged `cache` were found in the cache at daemon startup
-without stored provenance.
+without stored provenance; they may show only a NAR hash until the daemon
+observes trusted narinfo/catalog metadata that identifies the store path.
 
 ## 6. Fetch From Another Node
 
 On the fetching node, choose a package that is seeded by the other node and not
-already in the local store. For a small test package:
+already in the local store. Temporarily set `(policy "p2p-first")` in the
+fetching node service config when you want to force a P2P attempt before HTTP.
+For a small test package:
 
 ```sh
 guix build sl
 ```
 
-A successful P2P-preferred fetch prints a P2P attempt before any fallback. When
+A normal `http-first` fetch can complete from HTTP without touching P2P. A
+successful P2P-preferred fetch prints a P2P attempt before any fallback. When
 connected-provider fallback is used, the Guix output includes:
 
 ```text
