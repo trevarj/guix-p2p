@@ -774,9 +774,11 @@ locally-seeded nars in real time:
   existing side drawer, so expanded details never overlap the transfer
   workspace. The header keeps connectivity to one truncating summary line to
   avoid overlap with long multiaddrs or diagnostic strings.
-- The primary workspace gives the transfer proof path full width, places
-  Packages as a secondary add-seed list, and gives Active Seeds the wider
-  management area.
+- The primary desktop workspace is a 12-column operations grid: Transfer Path
+  gets the widest first-row area, Active Seeds sits beside it for seeding
+  inventory, Packages is the secondary add-seed list, Peers and Discovery share
+  the middle row, and Events gets a full-width bottom lane for readable failure
+  and transfer history.
 - Catalog and Builds are merged into one Discovery panel. It combines
   substitute lookup rows with narinfo/build metadata, showing store path,
   size, P2P/HTTP availability, and provider count when known. Rows with build
@@ -803,7 +805,7 @@ locally-seeded nars in real time:
   toggles. This keeps generated package/seed/discovery rows inspectable and
   avoids inline JavaScript handlers.
 - Dashboard panels are semantic sections in visual/tab order: transfer proof,
-  packages, active seeds, peers, discovery, and event log. The event stream is
+  active seeds, packages, peers, discovery, and event log. The event stream is
   exposed as a polite log region, and grid cells that contain peer IDs,
   multiaddrs, store paths, or diagnostic strings explicitly allow truncation
   instead of overlapping adjacent controls.
