@@ -623,7 +623,11 @@ seed_paths = ["/gnu/store/abc-foo", "/gnu/store/def-bar"]
 The `guix-p2p-e2e container-smoke` harness has its own CLI surface for local
 proofs. It supports `--dashboard-bind` for VM port forwarding and `--hold` to
 keep validated smoke-test dashboards running until Ctrl-C. These flags do not
-change production daemon configuration.
+change production daemon configuration. Container smoke exercises the copied
+Scheme substitute extension directly for `--query` and `--substitute`; full
+`guix-daemon` integration remains covered by VM e2e because the isolated
+container daemon can leave a spawned query substituter idle without sending a
+query line.
 
 The strict store-isolation proof uses `guix-p2p-e2e vm`, which builds one
 qcow2 Guix System base image and auto-creates named node disks from it. Any

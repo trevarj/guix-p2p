@@ -693,6 +693,7 @@ struct HarnessTools {
 struct P2pBuildSpec<'a> {
     base: &'a std::path::Path,
     store_path: &'a str,
+    build_target: &'a str,
     nar_hash: &'a str,
     closure_paths: &'a [String],
     transport: HarnessTransport,
@@ -704,6 +705,7 @@ struct P2pBuildSpec<'a> {
     node_b_policy: &'a str,
     substitute_urls: &'a str,
     strict_p2p_evidence: bool,
+    run_guix_build: bool,
     hold_after_success: bool,
     vm_direct: bool,
     tools: &'a HarnessTools,
@@ -2254,6 +2256,7 @@ async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> 
     std::fs::create_dir_all(base.join("logs"))?;
     ensure_container_guix_store_writable(&tools, &base, opts.vm_direct)?;
 
+    let explicit_store_path = opts.store_path.is_some();
     let store_path = match opts.store_path {
         Some(path) => {
             if !std::path::Path::new(&path).exists() {
@@ -2266,6 +2269,8 @@ async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> 
             resolve_package(&tools.guix, &opts.package)?
         },
     };
+    let build_target =
+        if explicit_store_path { store_path.as_str() } else { opts.package.as_str() };
     let nar_hash = compute_nar_hash(&tools.guix, &store_path)?;
     let closure_paths = resolve_requisites(&tools.guix, &store_path)?;
 
@@ -2276,6 +2281,7 @@ async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> 
     let outcome = run_p2p_build(P2pBuildSpec {
         base: &base,
         store_path: &store_path,
+        build_target,
         nar_hash: &nar_hash,
         closure_paths: &closure_paths,
         transport: opts.transport,
@@ -2287,6 +2293,7 @@ async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> 
         node_b_policy: "p2p-only",
         substitute_urls: "https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org",
         strict_p2p_evidence: true,
+        run_guix_build: false,
         hold_after_success: opts.hold,
         vm_direct: opts.vm_direct,
         tools: &tools,
@@ -2467,6 +2474,7 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                                 run_p2p_build(P2pBuildSpec {
                                     base: &run_dir,
                                     store_path: &package.store_path,
+                                    build_target: &package.store_path,
                                     nar_hash: &package.nar_hash,
                                     closure_paths: &package.closure_paths,
                                     transport: opts.transport,
@@ -2478,6 +2486,7 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                                     node_b_policy: policy,
                                     substitute_urls: &substitute_urls,
                                     strict_p2p_evidence: *mode == BenchmarkMode::P2pOnly,
+                                    run_guix_build: true,
                                     hold_after_success: false,
                                     vm_direct: false,
                                     tools: &tools,
@@ -3484,6 +3493,8 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
     let seed_paths: Vec<&str> = p2p_closure_paths.iter().map(String::as_str).collect();
     let seed_arg = seed_paths.join(",");
     write_local_narinfo_metadata(&local_narinfo_path, spec.tools, &p2p_closure_paths)?;
+    let guix_state = prepare_guix_daemon_state(&node_b_dir)?;
+    let node_b_acl_path = guix_state.config_dir.join("acl");
 
     write_node_config(NodeConfigSpec {
         xdg_config_home: &node_b_config_home,
@@ -3497,6 +3508,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         bootstrap_peers: None,
         seed_paths: &[],
         local_narinfo_path: Some(&local_narinfo_path),
+        acl_path: Some(&node_b_acl_path),
         substitute_urls: spec.substitute_urls,
     })?;
 
@@ -3530,6 +3542,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
             bootstrap_peers: None,
             seed_paths: &seed_paths,
             local_narinfo_path: None,
+            acl_path: None,
             substitute_urls: spec.substitute_urls,
         })?;
 
@@ -3597,6 +3610,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         bootstrap_peers: Some(&bootstrap),
         seed_paths: &[],
         local_narinfo_path: Some(&local_narinfo_path),
+        acl_path: Some(&node_b_acl_path),
         substitute_urls: spec.substitute_urls,
     })?;
 
@@ -3643,58 +3657,78 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
     wait_dashboard(spec.node_b_dashboard_port, "node B", Some(&node_b_log))?;
     wait_unix_socket(&node_b_socket, "node B relay socket")?;
 
-    let guix_state = prepare_guix_daemon_state(&node_b_dir)?;
-    let daemon_exposes =
-        combined_exposes(&spec.tools.guix_daemon_closure, &spec.tools.real_guix_closure);
-    let mut daemon_cmd = guix_container_command_with_packages_and_exposes(
-        spec.tools,
-        spec.base,
-        spec.vm_direct,
-        &["libgcrypt", "gcc-toolchain"],
-        &daemon_exposes,
-    );
-    daemon_cmd
-        .arg("/bin/sh")
-        .arg("-c")
-        .arg(format!(
-            "export HOME={}; export GUIX={}; export GUIX_STATE_DIRECTORY={}; export \
-             GUIX_CONFIGURATION_DIRECTORY={}; export GUIX_EXTENSIONS_PATH={}${{GUIX_EXTENSIONS_PATH:+:$GUIX_EXTENSIONS_PATH}}; export \
-             GUIX_P2P_SOCKET={}; export GUIX_P2P_BIN={}; export \
-             LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}; exec \"$@\"",
-            shell_quote(&node_b_dir.display().to_string()),
-            shell_quote(&spec.tools.real_guix.display().to_string()),
-            shell_quote(&guix_state.state_dir.display().to_string()),
-            shell_quote(&guix_state.config_dir.display().to_string()),
-            shell_quote(&extension_path.parent().unwrap().display().to_string()),
-            shell_quote(&node_b_socket.display().to_string()),
-            shell_quote(&spec.tools.guix_p2p.display().to_string()),
-            shell_quote(&spec.tools.guix_p2p_library_path)
-        ))
-        .arg("guix-daemon-wrapper")
-        .arg(&spec.tools.guix_daemon)
-        .arg("--disable-chroot")
-        .arg("--max-jobs=0")
-        .arg(format!("--listen={}", daemon_socket.display()));
-    processes.spawn_logged("guix-daemon", &mut daemon_cmd, &logs_dir.join("guix-daemon.log"))?;
-    wait_unix_socket(&daemon_socket, "isolated guix-daemon socket")?;
+    if spec.run_guix_build {
+        let daemon_exposes =
+            combined_exposes(&spec.tools.guix_daemon_closure, &spec.tools.real_guix_closure);
+        let mut daemon_cmd = guix_container_command_with_packages_and_exposes(
+            spec.tools,
+            spec.base,
+            spec.vm_direct,
+            &["libgcrypt", "gcc-toolchain"],
+            &daemon_exposes,
+        );
+        daemon_cmd
+            .arg("/bin/sh")
+            .arg("-c")
+            .arg(format!(
+                "export HOME={}; export GUIX={}; export GUIX_STATE_DIRECTORY={}; export \
+                 GUIX_CONFIGURATION_DIRECTORY={}; export GUIX_EXTENSIONS_PATH={}${{GUIX_EXTENSIONS_PATH:+:$GUIX_EXTENSIONS_PATH}}; export \
+                 GUIX_P2P_SOCKET={}; export GUIX_P2P_BIN={}; export \
+                 LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}; exec \"$@\"",
+                shell_quote(&node_b_dir.display().to_string()),
+                shell_quote(&spec.tools.real_guix.display().to_string()),
+                shell_quote(&guix_state.state_dir.display().to_string()),
+                shell_quote(&guix_state.config_dir.display().to_string()),
+                shell_quote(&extension_path.parent().unwrap().display().to_string()),
+                shell_quote(&node_b_socket.display().to_string()),
+                shell_quote(&spec.tools.guix_p2p.display().to_string()),
+                shell_quote(&spec.tools.guix_p2p_library_path)
+            ))
+            .arg("guix-daemon-wrapper")
+            .arg(&spec.tools.guix_daemon)
+            .arg("--disable-chroot")
+            .arg("--max-jobs=0")
+            .arg(format!("--listen={}", daemon_socket.display()));
+        processes.spawn_logged(
+            "guix-daemon",
+            &mut daemon_cmd,
+            &logs_dir.join("guix-daemon.log"),
+        )?;
+        wait_unix_socket(&daemon_socket, "isolated guix-daemon socket")?;
+    }
 
-    let elapsed_ms = run_guix_build_logged(
-        spec.tools,
-        spec.base,
-        spec.store_path,
-        &daemon_socket,
-        &logs_dir.join("build.log"),
-        spec.vm_direct,
-        Some(spec.substitute_urls),
-    )?;
-    run_direct_substitute_logged(
+    run_direct_query_logged(
         spec.tools,
         spec.base,
         spec.store_path,
         &node_b_socket,
+        extension_path.parent().unwrap(),
+        &logs_dir.join("direct-query.log"),
+        spec.vm_direct,
+    )?;
+    let direct_substitute_elapsed_ms = run_direct_substitute_logged(
+        spec.tools,
+        spec.base,
+        spec.store_path,
+        &node_b_socket,
+        extension_path.parent().unwrap(),
         &logs_dir.join("direct-substitute.log"),
         spec.vm_direct,
     )?;
+
+    let elapsed_ms = if spec.run_guix_build {
+        run_guix_build_logged(
+            spec.tools,
+            spec.base,
+            spec.build_target,
+            &daemon_socket,
+            &logs_dir.join("build.log"),
+            spec.vm_direct,
+            Some(spec.substitute_urls),
+        )?
+    } else {
+        direct_substitute_elapsed_ms
+    };
 
     let mut nar_size = None;
     for (idx, &dashboard_port) in spec.seed_dashboard_ports.iter().enumerate() {
@@ -3852,6 +3886,7 @@ struct NodeConfigSpec<'a> {
     bootstrap_peers: Option<&'a str>,
     seed_paths: &'a [&'a str],
     local_narinfo_path: Option<&'a std::path::Path>,
+    acl_path: Option<&'a std::path::Path>,
     substitute_urls: &'a str,
 }
 
@@ -3881,6 +3916,9 @@ fn write_node_config(spec: NodeConfigSpec<'_>) -> anyhow::Result<()> {
             "local_narinfo_path = {}\n",
             toml_string(&path.display().to_string())
         ));
+    }
+    if let Some(path) = spec.acl_path {
+        toml.push_str(&format!("acl_path = {}\n", toml_string(&path.display().to_string())));
     }
     toml.push_str("seed_paths = [");
     for (idx, path) in spec.seed_paths.iter().enumerate() {
@@ -3978,9 +4016,10 @@ fn run_direct_substitute_logged(
     base: &std::path::Path,
     store_path: &str,
     relay_socket: &std::path::Path,
+    extension_dir: &std::path::Path,
     log_path: &std::path::Path,
     vm_direct: bool,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<u128> {
     let dest = base.join("manual-substitute-output");
     if dest.exists() {
         std::fs::remove_dir_all(&dest)
@@ -3991,24 +4030,28 @@ fn run_direct_substitute_logged(
     let log = std::fs::OpenOptions::new().create(true).append(true).open(log_path)?;
     let stderr = log.try_clone()?;
     let fd4 = log.try_clone()?;
-    let mut command = guix_container_command_with_packages(
+    let mut command = guix_container_command_with_packages_and_exposes(
         tools,
         base,
         vm_direct,
         &["guix", "libgcrypt", "gcc-toolchain"],
+        &tools.real_guix_closure,
     );
     command
         .arg("/bin/sh")
         .arg("-c")
         .arg(format!(
-            "LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{} exec \"$@\"",
+            "export GUIX_EXTENSIONS_PATH={}; export GUIX_P2P_SOCKET={}; export GUIX_P2P_BIN={}; \
+             export LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{}; exec \"$@\"",
+            shell_quote(&extension_dir.display().to_string()),
+            shell_quote(&relay_socket.display().to_string()),
+            shell_quote(&tools.guix_p2p.display().to_string()),
             shell_quote(&tools.guix_p2p_library_path)
         ))
         .arg("guix-p2p-direct-substitute")
-        .arg(&tools.guix_p2p)
+        .arg(&tools.real_guix)
+        .arg("substitute")
         .arg("--substitute")
-        .arg("--socket")
-        .arg(relay_socket)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::from(log))
         .stderr(std::process::Stdio::from(stderr));
@@ -4025,6 +4068,8 @@ fn run_direct_substitute_logged(
         writeln!(stdin, "substitute {store_path} {}", dest.display())
             .context("failed to write direct substitute command")?;
     }
+    drop(child.stdin.take());
+    let started = std::time::Instant::now();
     let status = wait_child_with_timeout(
         &mut child,
         &format!("direct substitute {store_path}"),
@@ -4042,13 +4087,82 @@ fn run_direct_substitute_logged(
     if !dest.exists() {
         anyhow::bail!("direct substitute did not restore {}", dest.display());
     }
-    if !dest.is_file() {
-        anyhow::bail!("direct substitute wrote {} but it is not a NAR file", dest.display());
+    if dest.is_dir() && std::fs::read_dir(&dest)?.next().is_none() {
+        anyhow::bail!("direct substitute restored an empty directory: {}", dest.display());
     }
-    let header = std::fs::read(&dest)
-        .with_context(|| format!("failed to read direct substitute output {}", dest.display()))?;
-    if !header.starts_with(b"\r\0\0\0\0\0\0\0nix-arch") {
-        anyhow::bail!("direct substitute output is not a NAR archive: {}", dest.display());
+    Ok(started.elapsed().as_millis())
+}
+
+fn run_direct_query_logged(
+    tools: &HarnessTools,
+    base: &std::path::Path,
+    store_path: &str,
+    relay_socket: &std::path::Path,
+    extension_dir: &std::path::Path,
+    log_path: &std::path::Path,
+    vm_direct: bool,
+) -> anyhow::Result<()> {
+    let log = std::fs::OpenOptions::new().create(true).append(true).open(log_path)?;
+    let stderr = log.try_clone()?;
+    let fd4 = log.try_clone()?;
+    let mut command = guix_container_command_with_packages_and_exposes(
+        tools,
+        base,
+        vm_direct,
+        &["libgcrypt", "gcc-toolchain"],
+        &tools.real_guix_closure,
+    );
+    command
+        .arg("/bin/sh")
+        .arg("-c")
+        .arg(format!(
+            "export GUIX_EXTENSIONS_PATH={}; export GUIX_P2P_SOCKET={}; export GUIX_P2P_BIN={}; \
+             export LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{}; exec \"$@\"",
+            shell_quote(&extension_dir.display().to_string()),
+            shell_quote(&relay_socket.display().to_string()),
+            shell_quote(&tools.guix_p2p.display().to_string()),
+            shell_quote(&tools.guix_p2p_library_path)
+        ))
+        .arg("guix-p2p-direct-query")
+        .arg(&tools.real_guix)
+        .arg("substitute")
+        .arg("--query")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::from(log))
+        .stderr(std::process::Stdio::from(stderr));
+    unsafe {
+        command.pre_exec(move || {
+            if dup2(fd4.as_raw_fd(), 4) < 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
+        });
+    }
+
+    let mut child =
+        command.spawn().with_context(|| format!("failed to run direct query for {store_path}"))?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        writeln!(stdin, "have {store_path}").context("failed to write direct have query")?;
+    }
+    drop(child.stdin.take());
+    let status = wait_child_with_timeout(
+        &mut child,
+        &format!("direct query {store_path}"),
+        std::time::Duration::from_secs(30),
+        log_path,
+    )?;
+    if !status.success() {
+        anyhow::bail!(
+            "direct query {} failed with {}; log tail:\n{}",
+            store_path,
+            status,
+            read_tail(log_path, 80)
+        );
+    }
+    let output = std::fs::read_to_string(log_path).unwrap_or_default();
+    if !output.lines().any(|line| line == store_path) {
+        anyhow::bail!(
+            "direct query did not report {}; log tail:\n{}",
+            store_path,
+            read_tail(log_path, 80)
+        );
     }
     Ok(())
 }

@@ -43,14 +43,20 @@ The harness:
 - preflights `guix shell -CN` with writable `/gnu/store`
 - starts Node A in a Guix container with the resolved store path seeded
 - starts Node B in a separate Guix container with `substitute_policy = "p2p-only"` and `min_providers = 1`
-- starts an isolated raw `guix-daemon` in Node B's Guix container with `GUIX_EXTENSIONS_PATH` prepended to include the copied substitute extension directory
-- runs `guix build <package>` in a Guix container through Node B's daemon socket
+- runs the copied substitute extension directly for `--query` and `--substitute`
+- verifies Node B claims the seeded path and restores it from P2P
 - captures logs under `$BASE/logs/`
 - with `--hold`, keeps daemons and dashboards alive after validation until Ctrl-C
 
+The container smoke intentionally avoids a full isolated `guix-daemon` build.
+The isolated daemon can spawn `guix substitute --query` and then keep the
+substituter idle without sending a query line, which makes the container smoke
+an unreliable oracle for daemon integration. Use the VM e2e for that path.
+
 Acceptance checks:
 
-- `guix build` exits successfully.
+- Direct extension `--query` reports the seeded path.
+- Direct extension `--substitute` restores the seeded path from P2P.
 - Node A `/api/seeds` includes the seeded nar.
 - Node B `/api/catalog` includes the requested store path or nar hash.
 - Node A logs show block serving.
