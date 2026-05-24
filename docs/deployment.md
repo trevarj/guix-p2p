@@ -1,5 +1,10 @@
 # Deployment Guide
 
+For the shortest known-tester path, start with
+[`tester-quickstart.md`](tester-quickstart.md). This page is the deeper
+reference for the Guix channel, system service, substitute extension, and VM
+deployment proof.
+
 ## Daemon
 
 For a persistent Guix System setup, add this repository as a Guix channel:

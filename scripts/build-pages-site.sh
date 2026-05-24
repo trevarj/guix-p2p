@@ -53,6 +53,7 @@ else
 fi
 
 cp docs/benchmarks.md "$site_dir/benchmark-methodology.md"
+cp docs/tester-quickstart.md "$site_dir/tester-quickstart.md"
 cp docs/deployment.md "$site_dir/deployment.md"
 cp docs/configuration.md "$site_dir/configuration.md"
 
@@ -1068,6 +1069,7 @@ cat > "$site_dir/index.html" <<'HTML'
       <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
       <nav aria-label="Site navigation">
         <a href="index.html" aria-current="page">Home</a>
+        <a href="tester-quickstart.html">Quickstart</a>
         <a href="#configure">Configure</a>
         <a href="#development">Develop</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -1080,6 +1082,7 @@ cat > "$site_dir/index.html" <<'HTML'
       <p class="lead muted">guix-p2p is a libp2p daemon and Guix substitute extension. It lets Guix machines discover peers through a Kademlia DHT, download NAR blocks from those peers, verify official Guix nar hashes, and fall back to configured HTTP substitutes when policy allows it.</p>
       <p class="actions">
         <a class="button" href="#getting-started">Get started</a>
+        <a class="button" href="tester-quickstart.html">Tester quickstart</a>
         <a class="button" href="configuration.html">Configuration reference</a>
         <a class="button" href="deployment.html">Deployment guide</a>
         <a class="button" href="benchmarks.html">Benchmarks</a>
@@ -1108,7 +1111,7 @@ cat > "$site_dir/index.html" <<'HTML'
 
     <section id="getting-started">
       <h2>Get Started</h2>
-      <p>Add the repository as a Guix channel, then run <code>guix pull</code>:</p>
+      <p>Add the authenticated repository channel, pull it, enable the system service, then use normal Guix commands. The persistent service defaults to the project bootstrap node and a loopback dashboard.</p>
       <pre data-language="Scheme"><code class="language-scheme"><span class="tok-keyword">(cons*</span>
  (channel
   (<span class="tok-keyword">name</span> <span class="tok-symbol">'guix-p2p</span>)
@@ -1126,12 +1129,19 @@ cat > "$site_dir/index.html" <<'HTML'
 
 (<span class="tok-keyword">services</span>
   (<span class="tok-keyword">modify-services</span>
-      (cons (<span class="tok-keyword">service</span> guix-p2p-service-type) <span class="tok-symbol">%base-services</span>)
+      (cons (<span class="tok-keyword">service</span> guix-p2p-service-type
+                     (guix-p2p-configuration
+                      (dashboard? #t)))
+            <span class="tok-symbol">%base-services</span>)
     (<span class="tok-keyword">guix-service-type</span> config =>
       (<span class="tok-keyword">guix-p2p-enable-guix-daemon-extension</span> config))))</code></pre>
-      <p>After reconfiguring, use Guix normally:</p>
-      <pre data-language="Shell"><code class="language-sh"><span class="tok-keyword">guix</span> build hello
-<span class="tok-keyword">sudo</span> <span class="tok-keyword">guix</span> system reconfigure /etc/config.scm</code></pre>
+      <p>Pull, reconfigure, restart both services, and check readiness:</p>
+      <pre data-language="Shell"><code class="language-sh"><span class="tok-keyword">guix</span> pull
+<span class="tok-keyword">sudo</span> <span class="tok-keyword">guix</span> system reconfigure /etc/config.scm
+<span class="tok-keyword">sudo</span> herd restart guix-p2p
+<span class="tok-keyword">sudo</span> herd restart guix-daemon
+guix-p2p --doctor</code></pre>
+      <p>Open <code>http://127.0.0.1:3030</code> for dashboard readiness, then follow the <a href="tester-quickstart.html">tester quickstart</a> for a real seed/fetch validation.</p>
     </section>
 
     <section id="configure">
@@ -1143,7 +1153,7 @@ cat > "$site_dir/index.html" <<'HTML'
         </article>
         <article class="info-card">
           <h3>Bootstrap peers</h3>
-          <p class="muted">Use full peer multiaddrs such as <code>/dns4/node.example.org/udp/6881/quic-v1/p2p/12D3KooW...</code> in <code>bootstrap_peers</code>. Do not share <code>/ip4/0.0.0.0/...</code>; that is only a local bind address.</p>
+          <p class="muted">The Guix System service defaults to the project bootstrap node. Use full peer multiaddrs such as <code>/dns4/node.example.org/udp/6881/quic-v1/p2p/12D3KooW...</code> when overriding <code>bootstrap-peers</code>. Do not share <code>/ip4/0.0.0.0/...</code>; that is only a local bind address.</p>
           <pre data-language="TOML"><code class="language-toml">bootstrap_peers = <span class="tok-string">"/dns4/guix-p2p.trevs.site/tcp/443/p2p/12D3KooWDnvPgCuPTPaMbnbLpXP7kCxmXc9F7agJPuAJWXGoDNPT"</span></code></pre>
         </article>
         <article class="info-card">
@@ -1202,6 +1212,7 @@ cat > "$site_dir/index.html" <<'HTML'
     <section>
       <h2>Reference</h2>
       <div class="doc-grid">
+        <a class="doc-link" href="tester-quickstart.html">Tester quickstart<span>Known-tester onboarding, dashboard checks, and real seed/fetch validation.</span></a>
         <a class="doc-link" href="configuration.html">Configuration<span>Runtime options, paths, and substitute settings.</span></a>
         <a class="doc-link" href="deployment.html">Deployment<span>Bootstrap node and deployment notes.</span></a>
         <a class="doc-link" href="benchmark-methodology.md">Benchmark methodology<span>How local and VM benchmark suites are run.</span></a>
@@ -1228,6 +1239,7 @@ cat > "$site_dir/configuration.html" <<'HTML'
       <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
       <nav aria-label="Site navigation">
         <a href="index.html">Home</a>
+        <a href="tester-quickstart.html">Quickstart</a>
         <a href="configuration.html" aria-current="page">Configuration</a>
         <a href="deployment.html">Deployment</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -1256,6 +1268,50 @@ cat > "$site_dir/configuration.html" <<'HTML'
 </html>
 HTML
 
+cat > "$site_dir/tester-quickstart.html" <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>guix-p2p tester quickstart</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
+      <nav aria-label="Site navigation">
+        <a href="index.html">Home</a>
+        <a href="tester-quickstart.html" aria-current="page">Quickstart</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="deployment.html">Deployment</a>
+        <a href="benchmarks.html">Benchmarks</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="hero">
+      <h1 id="document-title">Tester Quickstart</h1>
+      <p class="lead muted">Known-tester onboarding, dashboard checks, and real seed/fetch validation.</p>
+      <p class="actions">
+        <a id="raw-markdown-link" class="button" href="tester-quickstart.md">Raw Markdown</a>
+      </p>
+    </section>
+    <section>
+      <div id="document-body" class="markdown muted">Loading tester-quickstart.md...</div>
+    </section>
+  </main>
+
+  <script src="markdown.js?v=__SITE_ASSET_VERSION__"></script>
+  <script src="doc-page.js?v=__SITE_ASSET_VERSION__"></script>
+  <script>
+    loadMarkdownDocument("tester-quickstart.md", "Tester Quickstart");
+  </script>
+</body>
+</html>
+HTML
+
 cat > "$site_dir/deployment.html" <<'HTML'
 <!doctype html>
 <html lang="en">
@@ -1271,6 +1327,7 @@ cat > "$site_dir/deployment.html" <<'HTML'
       <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
       <nav aria-label="Site navigation">
         <a href="index.html">Home</a>
+        <a href="tester-quickstart.html">Quickstart</a>
         <a href="configuration.html">Configuration</a>
         <a href="deployment.html" aria-current="page">Deployment</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -1314,6 +1371,9 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
       <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
       <nav aria-label="Site navigation">
         <a href="index.html">Home</a>
+        <a href="tester-quickstart.html">Quickstart</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="deployment.html">Deployment</a>
         <a href="benchmarks.html" aria-current="page">Benchmarks</a>
       </nav>
     </div>
@@ -1426,6 +1486,6 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
 </html>
 HTML
 
-for html_file in "$site_dir/configuration.html" "$site_dir/deployment.html" "$site_dir/benchmarks.html"; do
+for html_file in "$site_dir/configuration.html" "$site_dir/tester-quickstart.html" "$site_dir/deployment.html" "$site_dir/benchmarks.html"; do
   sed -i "s/__SITE_ASSET_VERSION__/$asset_version/g" "$html_file"
 done

@@ -81,7 +81,10 @@ configuration and configure the system daemon environment with
 
 (services
   (modify-services
-      (cons (service guix-p2p-service-type) %base-services)
+      (cons (service guix-p2p-service-type
+                     (guix-p2p-configuration
+                      (dashboard? #t)))
+            %base-services)
     (guix-service-type config =>
       (guix-p2p-enable-guix-daemon-extension config))))
 ```
@@ -92,17 +95,26 @@ through `GUIX_EXTENSIONS_PATH`. The helper prepends the package extension
 directory to any existing `GUIX_EXTENSIONS_PATH`; it does not replace or
 discard other Guix extensions. Ordinary Guix commands are unchanged; only the
 internal substitute protocol calls that `guix-daemon` makes during a build or
-reconfigure are intercepted.
+reconfigure are intercepted. The service defaults to the project bootstrap node
+and a loopback dashboard on port `3030`.
 
-After reconfiguring, keep using normal Guix commands:
+Reconfigure and restart the long-running services:
 
 ```sh
-guix build hello
 sudo guix system reconfigure /etc/config.scm
+sudo herd restart guix-p2p
+sudo herd restart guix-daemon
+guix-p2p --doctor
 ```
 
-After updating the channel, rebuild the system and restart the services that
-hold old store paths:
+Open the dashboard:
+
+```text
+http://127.0.0.1:3030
+```
+
+After updating the channel, run the same pull/reconfigure/restart sequence so
+the daemon and `guix-daemon` stop using old store paths:
 
 ```sh
 guix pull
@@ -112,6 +124,12 @@ sudo herd restart guix-daemon
 guix-p2p --doctor
 ```
 
+Then keep using normal Guix commands:
+
+```sh
+guix build hello
+```
+
 The extension defaults to:
 
 - relay socket: `/var/cache/guix-p2p/guix-p2p.sock`
@@ -119,7 +137,9 @@ The extension defaults to:
 
 `guix-p2p-wrapper` remains installed for compatibility with older setups.
 
-See [docs/deployment.md](docs/deployment.md) for persistent service details.
+See [docs/tester-quickstart.md](docs/tester-quickstart.md) for the known-tester
+onboarding playbook and [docs/deployment.md](docs/deployment.md) for persistent
+service details.
 
 ## Local Development
 
@@ -223,6 +243,7 @@ and [docs/benchmarks.md](docs/benchmarks.md) for benchmark runs and artifacts.
 |------|-------|
 | [docs/architecture.md](docs/architecture.md) | Architecture, data flow, dashboard surfaces |
 | [docs/configuration.md](docs/configuration.md) | TOML keys, defaults, CLI overrides |
+| [docs/tester-quickstart.md](docs/tester-quickstart.md) | Known-tester onboarding and real seed/fetch validation |
 | [docs/deployment.md](docs/deployment.md) | Daemon, relay, extension, and isolated Guix flow |
 | [docs/scripts.md](docs/scripts.md) | Script inventory and Rust migration status |
 | [docs/bootstrap-node.md](docs/bootstrap-node.md) | Shepherd-first bootstrap node operation |
