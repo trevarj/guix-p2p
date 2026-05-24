@@ -58,6 +58,8 @@ cp docs/troubleshooting.md "$site_dir/troubleshooting.md"
 cp docs/connectivity.md "$site_dir/connectivity.md"
 cp docs/deployment.md "$site_dir/deployment.md"
 cp docs/configuration.md "$site_dir/configuration.md"
+cp docs/bootstrap-node.md "$site_dir/bootstrap-node.md"
+cp docs/release.md "$site_dir/release.md"
 rm -f "$site_dir/agent-brief.html" "$site_dir/agent-brief.md"
 
 cat > "$site_dir/styles.css" <<'CSS'
@@ -1249,6 +1251,8 @@ guix-p2p --doctor</code></pre>
         <a class="doc-link" href="connectivity.html">Connectivity<span>Bootstrap, NAT, firewall, and dashboard network signals.</span></a>
         <a class="doc-link" href="configuration.html">Configuration<span>Runtime options, paths, and substitute settings.</span></a>
         <a class="doc-link" href="deployment.html">Deployment<span>Bootstrap node and deployment notes.</span></a>
+        <a class="doc-link" href="bootstrap-node.html">Bootstrap node<span>Operator checklist, upgrade, restart, and incident checks.</span></a>
+        <a class="doc-link" href="release.html">Release process<span>Versioning, tagging, source build, and binary release policy.</span></a>
         <a class="doc-link" href="benchmark-methodology.md">Benchmark methodology<span>How local and VM benchmark suites are run.</span></a>
         <a class="doc-link" href="benchmarks.html">Benchmark results<span>Rendered latest report, CSV, charts, and workflow-run links.</span></a>
       </div>
@@ -1488,6 +1492,98 @@ cat > "$site_dir/deployment.html" <<'HTML'
 </html>
 HTML
 
+cat > "$site_dir/bootstrap-node.html" <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>guix-p2p bootstrap node</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
+      <nav aria-label="Site navigation">
+        <a href="index.html">Home</a>
+        <a href="tester-quickstart.html">Quickstart</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
+        <a href="connectivity.html">Connectivity</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="deployment.html">Deployment</a>
+        <a href="benchmarks.html">Benchmarks</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="hero">
+      <h1 id="document-title">Bootstrap Node Guide</h1>
+      <p class="lead muted">Operator checklist, upgrade, restart, and incident checks.</p>
+      <p class="actions">
+        <a id="raw-markdown-link" class="button" href="bootstrap-node.md">Raw Markdown</a>
+      </p>
+    </section>
+    <section>
+      <div id="document-body" class="markdown muted">Loading bootstrap-node.md...</div>
+    </section>
+  </main>
+
+  <script src="markdown.js?v=__SITE_ASSET_VERSION__"></script>
+  <script src="doc-page.js?v=__SITE_ASSET_VERSION__"></script>
+  <script>
+    loadMarkdownDocument("bootstrap-node.md", "Bootstrap Node Guide");
+  </script>
+</body>
+</html>
+HTML
+
+cat > "$site_dir/release.html" <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>guix-p2p release process</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
+      <nav aria-label="Site navigation">
+        <a href="index.html">Home</a>
+        <a href="tester-quickstart.html">Quickstart</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
+        <a href="connectivity.html">Connectivity</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="deployment.html">Deployment</a>
+        <a href="benchmarks.html">Benchmarks</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="hero">
+      <h1 id="document-title">Release Process</h1>
+      <p class="lead muted">Versioning, tagging, source build, and binary release policy.</p>
+      <p class="actions">
+        <a id="raw-markdown-link" class="button" href="release.md">Raw Markdown</a>
+      </p>
+    </section>
+    <section>
+      <div id="document-body" class="markdown muted">Loading release.md...</div>
+    </section>
+  </main>
+
+  <script src="markdown.js?v=__SITE_ASSET_VERSION__"></script>
+  <script src="doc-page.js?v=__SITE_ASSET_VERSION__"></script>
+  <script>
+    loadMarkdownDocument("release.md", "Release Process");
+  </script>
+</body>
+</html>
+HTML
+
 cat > "$site_dir/benchmarks.html" <<'HTML'
 <!doctype html>
 <html lang="en">
@@ -1620,6 +1716,6 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
 </html>
 HTML
 
-for html_file in "$site_dir/configuration.html" "$site_dir/troubleshooting.html" "$site_dir/connectivity.html" "$site_dir/tester-quickstart.html" "$site_dir/deployment.html" "$site_dir/benchmarks.html"; do
+for html_file in "$site_dir/configuration.html" "$site_dir/troubleshooting.html" "$site_dir/connectivity.html" "$site_dir/tester-quickstart.html" "$site_dir/deployment.html" "$site_dir/bootstrap-node.html" "$site_dir/release.html" "$site_dir/benchmarks.html"; do
   sed -i "s/__SITE_ASSET_VERSION__/$asset_version/g" "$html_file"
 done
