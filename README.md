@@ -241,6 +241,7 @@ and [docs/benchmarks.md](docs/benchmarks.md) for benchmark runs and artifacts.
 
 | File | Topic |
 |------|-------|
+| [docs/agent-brief.md](docs/agent-brief.md) | Fast task routing, invariants, and verification for coding agents |
 | [docs/architecture.md](docs/architecture.md) | Architecture, data flow, dashboard surfaces |
 | [docs/configuration.md](docs/configuration.md) | TOML keys, defaults, CLI overrides |
 | [docs/tester-quickstart.md](docs/tester-quickstart.md) | Known-tester onboarding and real seed/fetch validation |

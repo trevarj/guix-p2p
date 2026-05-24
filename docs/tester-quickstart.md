@@ -6,6 +6,33 @@ and uses `http-first` by default while the public P2P network is sparse.
 Switch to `p2p-first` only when deliberately validating that a seeded package
 can be fetched from a peer.
 
+## Fast Path
+
+Use this checklist when you already know where the relevant Guix system config
+lives:
+
+1. Add the authenticated `guix-p2p` channel.
+2. Add `guix-p2p-service-type` to the system services.
+3. Enable the Guix daemon extension with `guix-p2p-enable-guix-daemon-extension`.
+4. Run:
+
+```sh
+guix pull
+sudo guix system reconfigure /etc/config.scm
+sudo herd restart guix-p2p
+sudo herd restart guix-daemon
+guix-p2p --doctor
+```
+
+5. Open `http://127.0.0.1:3030`.
+
+Expected result:
+
+- `guix-p2p --doctor` reports no errors.
+- The dashboard shows bootstrap configured.
+- A laptop/client node may still warn that it has no public shareable address.
+- Normal Guix commands still work if P2P cannot provide a substitute.
+
 ## 1. Add The Channel
 
 Add `guix-p2p` to `~/.config/guix/channels.scm` or to the channels file you use

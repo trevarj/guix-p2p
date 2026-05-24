@@ -3,8 +3,16 @@
 Active docs are the current source of truth for operating, validating, and
 developing `guix-p2p`.
 
+Start with:
+
+- Human tester: [tester-quickstart.md](tester-quickstart.md)
+- Coding agent: [agent-brief.md](agent-brief.md)
+- Operator/deployer: [deployment.md](deployment.md)
+- Configuration lookup: [configuration.md](configuration.md)
+
 | File | Purpose |
 |------|---------|
+| [agent-brief.md](agent-brief.md) | Fast task routing, invariants, and verification for coding agents |
 | [architecture.md](architecture.md) | Architecture, crate map, data flow, dashboard surfaces |
 | [configuration.md](configuration.md) | TOML keys, defaults, CLI overrides |
 | [tester-quickstart.md](tester-quickstart.md) | First-run tester flow, dashboard basics, and failure report shape |

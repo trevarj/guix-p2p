@@ -53,6 +53,7 @@ else
 fi
 
 cp docs/benchmarks.md "$site_dir/benchmark-methodology.md"
+cp docs/agent-brief.md "$site_dir/agent-brief.md"
 cp docs/tester-quickstart.md "$site_dir/tester-quickstart.md"
 cp docs/deployment.md "$site_dir/deployment.md"
 cp docs/configuration.md "$site_dir/configuration.md"
@@ -277,6 +278,13 @@ h2 {
 }
 .markdown {
   overflow-wrap: anywhere;
+}
+.markdown ol,
+.markdown ul {
+  padding-left: 1.4rem;
+}
+.markdown li + li {
+  margin-top: 0.25rem;
 }
 .table-wrap {
   background: var(--surface);
@@ -576,6 +584,7 @@ function renderMarkdown(markdown) {
   const html = [];
   let paragraph = [];
   let list = [];
+  let orderedList = [];
   let inFence = false;
   let fence = [];
   let fenceLanguage = "";
@@ -592,6 +601,12 @@ function renderMarkdown(markdown) {
     list = [];
   }
 
+  function flushOrderedList() {
+    if (orderedList.length === 0) return;
+    html.push(`<ol>${orderedList.map((item) => `<li>${renderInline(item)}</li>`).join("")}</ol>`);
+    orderedList = [];
+  }
+
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
 
@@ -604,6 +619,7 @@ function renderMarkdown(markdown) {
       } else {
         flushParagraph();
         flushList();
+        flushOrderedList();
         fenceLanguage = line.slice(3).trim().split(/\s+/)[0] || "";
         inFence = true;
       }
@@ -617,6 +633,7 @@ function renderMarkdown(markdown) {
     if (line.trim() === "") {
       flushParagraph();
       flushList();
+      flushOrderedList();
       continue;
     }
 
@@ -624,6 +641,7 @@ function renderMarkdown(markdown) {
     if (line.includes("|") && isSeparatorRow(tableNext)) {
       flushParagraph();
       flushList();
+      flushOrderedList();
       const headers = splitTableRow(line);
       i += 2;
       const rows = [];
@@ -640,6 +658,7 @@ function renderMarkdown(markdown) {
     if (heading) {
       flushParagraph();
       flushList();
+      flushOrderedList();
       const level = heading[1].length;
       html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
       continue;
@@ -648,7 +667,16 @@ function renderMarkdown(markdown) {
     const item = /^-\s+(.+)$/.exec(line);
     if (item) {
       flushParagraph();
+      flushOrderedList();
       list.push(item[1]);
+      continue;
+    }
+
+    const orderedItem = /^\d+\.\s+(.+)$/.exec(line);
+    if (orderedItem) {
+      flushParagraph();
+      flushList();
+      orderedList.push(orderedItem[1]);
       continue;
     }
 
@@ -657,6 +685,7 @@ function renderMarkdown(markdown) {
 
   flushParagraph();
   flushList();
+  flushOrderedList();
   return html.join("\n");
 }
 JS
@@ -1070,6 +1099,7 @@ cat > "$site_dir/index.html" <<'HTML'
       <nav aria-label="Site navigation">
         <a href="index.html" aria-current="page">Home</a>
         <a href="tester-quickstart.html">Quickstart</a>
+        <a href="agent-brief.html">Agent brief</a>
         <a href="#configure">Configure</a>
         <a href="#development">Develop</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -1083,6 +1113,7 @@ cat > "$site_dir/index.html" <<'HTML'
       <p class="actions">
         <a class="button" href="#getting-started">Get started</a>
         <a class="button" href="tester-quickstart.html">Tester quickstart</a>
+        <a class="button" href="agent-brief.html">Agent brief</a>
         <a class="button" href="configuration.html">Configuration reference</a>
         <a class="button" href="deployment.html">Deployment guide</a>
         <a class="button" href="benchmarks.html">Benchmarks</a>
@@ -1213,6 +1244,7 @@ guix-p2p --doctor</code></pre>
       <h2>Reference</h2>
       <div class="doc-grid">
         <a class="doc-link" href="tester-quickstart.html">Tester quickstart<span>Known-tester onboarding, dashboard checks, and real seed/fetch validation.</span></a>
+        <a class="doc-link" href="agent-brief.html">Agent brief<span>Task routing, invariants, and checks for coding agents.</span></a>
         <a class="doc-link" href="configuration.html">Configuration<span>Runtime options, paths, and substitute settings.</span></a>
         <a class="doc-link" href="deployment.html">Deployment<span>Bootstrap node and deployment notes.</span></a>
         <a class="doc-link" href="benchmark-methodology.md">Benchmark methodology<span>How local and VM benchmark suites are run.</span></a>
@@ -1240,6 +1272,7 @@ cat > "$site_dir/configuration.html" <<'HTML'
       <nav aria-label="Site navigation">
         <a href="index.html">Home</a>
         <a href="tester-quickstart.html">Quickstart</a>
+        <a href="agent-brief.html">Agent brief</a>
         <a href="configuration.html" aria-current="page">Configuration</a>
         <a href="deployment.html">Deployment</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -1268,6 +1301,51 @@ cat > "$site_dir/configuration.html" <<'HTML'
 </html>
 HTML
 
+cat > "$site_dir/agent-brief.html" <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>guix-p2p agent brief</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
+      <nav aria-label="Site navigation">
+        <a href="index.html">Home</a>
+        <a href="tester-quickstart.html">Quickstart</a>
+        <a href="agent-brief.html" aria-current="page">Agent brief</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="deployment.html">Deployment</a>
+        <a href="benchmarks.html">Benchmarks</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="hero">
+      <h1 id="document-title">Agent Brief</h1>
+      <p class="lead muted">Fast task routing, invariants, and verification for coding agents.</p>
+      <p class="actions">
+        <a id="raw-markdown-link" class="button" href="agent-brief.md">Raw Markdown</a>
+      </p>
+    </section>
+    <section>
+      <div id="document-body" class="markdown muted">Loading agent-brief.md...</div>
+    </section>
+  </main>
+
+  <script src="markdown.js?v=__SITE_ASSET_VERSION__"></script>
+  <script src="doc-page.js?v=__SITE_ASSET_VERSION__"></script>
+  <script>
+    loadMarkdownDocument("agent-brief.md", "Agent Brief");
+  </script>
+</body>
+</html>
+HTML
+
 cat > "$site_dir/tester-quickstart.html" <<'HTML'
 <!doctype html>
 <html lang="en">
@@ -1284,6 +1362,7 @@ cat > "$site_dir/tester-quickstart.html" <<'HTML'
       <nav aria-label="Site navigation">
         <a href="index.html">Home</a>
         <a href="tester-quickstart.html" aria-current="page">Quickstart</a>
+        <a href="agent-brief.html">Agent brief</a>
         <a href="configuration.html">Configuration</a>
         <a href="deployment.html">Deployment</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -1328,6 +1407,7 @@ cat > "$site_dir/deployment.html" <<'HTML'
       <nav aria-label="Site navigation">
         <a href="index.html">Home</a>
         <a href="tester-quickstart.html">Quickstart</a>
+        <a href="agent-brief.html">Agent brief</a>
         <a href="configuration.html">Configuration</a>
         <a href="deployment.html" aria-current="page">Deployment</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -1372,6 +1452,7 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
       <nav aria-label="Site navigation">
         <a href="index.html">Home</a>
         <a href="tester-quickstart.html">Quickstart</a>
+        <a href="agent-brief.html">Agent brief</a>
         <a href="configuration.html">Configuration</a>
         <a href="deployment.html">Deployment</a>
         <a href="benchmarks.html" aria-current="page">Benchmarks</a>
@@ -1486,6 +1567,6 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
 </html>
 HTML
 
-for html_file in "$site_dir/configuration.html" "$site_dir/tester-quickstart.html" "$site_dir/deployment.html" "$site_dir/benchmarks.html"; do
+for html_file in "$site_dir/configuration.html" "$site_dir/agent-brief.html" "$site_dir/tester-quickstart.html" "$site_dir/deployment.html" "$site_dir/benchmarks.html"; do
   sed -i "s/__SITE_ASSET_VERSION__/$asset_version/g" "$html_file"
 done
