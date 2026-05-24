@@ -1,5 +1,28 @@
 # Troubleshooting
 
+Start by collecting the local view of the node:
+
+```sh
+guix-p2p --version
+guix-p2p --doctor
+curl -s http://127.0.0.1:3030/api/status
+curl -s http://127.0.0.1:3030/api/diagnostics
+```
+
+If the dashboard is open, `ops -> copy diag` copies the same kind of report for
+tester issues.
+
+## Symptom Map
+
+| Symptom | First Check |
+|---------|-------------|
+| `--doctor` reports `guix-integration` error | Restart `guix-daemon` after reconfigure; check the service extension. |
+| Dashboard says `local-only` | Add bootstrap peers for remote tests, or accept LAN-only mDNS. |
+| No peers connect | Check bootstrap multiaddrs, firewall, and whether peers include `/p2p/<peer-id>`. |
+| P2P falls back to HTTP | Check transfer detail for provider lookup, handshake, and block movement. |
+| Seed action fails | Confirm dashboard bind is `127.0.0.1` and the path starts with `/gnu/store/`. |
+| Package is already present | Pick another package or inspect live roots with `guix gc --referrers`. |
+
 ## No Peers Connected
 
 Run:

@@ -27,6 +27,7 @@ It is intentionally short and points to deeper docs only when needed.
 | Cache and seed metadata | `src/nar_store.rs`, `docs/configuration.md` |
 | Dashboard/API | `src/dashboard.rs`, `src/dashboard.html`, `docs/architecture.md` |
 | Guix service/channel | `channel/`, `docs/tester-quickstart.md`, `docs/deployment.md` |
+| Tester failure triage | `docs/troubleshooting.md`, `docs/tester-issue-template.md` |
 | E2E and benchmarks | `e2e/`, `docs/e2e.md`, `docs/benchmarks.md` |
 | Website | `scripts/build-pages-site.sh`, `site/` |
 

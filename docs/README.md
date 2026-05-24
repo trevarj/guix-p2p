@@ -6,6 +6,7 @@ developing `guix-p2p`.
 Start with:
 
 - Human tester: [tester-quickstart.md](tester-quickstart.md)
+- Tester failure: [troubleshooting.md](troubleshooting.md)
 - Coding agent: [agent-brief.md](agent-brief.md)
 - Operator/deployer: [deployment.md](deployment.md)
 - Configuration lookup: [configuration.md](configuration.md)

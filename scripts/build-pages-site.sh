@@ -55,6 +55,7 @@ fi
 cp docs/benchmarks.md "$site_dir/benchmark-methodology.md"
 cp docs/agent-brief.md "$site_dir/agent-brief.md"
 cp docs/tester-quickstart.md "$site_dir/tester-quickstart.md"
+cp docs/troubleshooting.md "$site_dir/troubleshooting.md"
 cp docs/deployment.md "$site_dir/deployment.md"
 cp docs/configuration.md "$site_dir/configuration.md"
 
@@ -1100,6 +1101,7 @@ cat > "$site_dir/index.html" <<'HTML'
         <a href="index.html" aria-current="page">Home</a>
         <a href="tester-quickstart.html">Quickstart</a>
         <a href="agent-brief.html">Agent brief</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a href="#configure">Configure</a>
         <a href="#development">Develop</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -1244,6 +1246,7 @@ guix-p2p --doctor</code></pre>
       <h2>Reference</h2>
       <div class="doc-grid">
         <a class="doc-link" href="tester-quickstart.html">Tester quickstart<span>Known-tester onboarding, dashboard checks, and real seed/fetch validation.</span></a>
+        <a class="doc-link" href="troubleshooting.html">Troubleshooting<span>Symptom-first checks for common tester failures.</span></a>
         <a class="doc-link" href="agent-brief.html">Agent brief<span>Task routing, invariants, and checks for coding agents.</span></a>
         <a class="doc-link" href="configuration.html">Configuration<span>Runtime options, paths, and substitute settings.</span></a>
         <a class="doc-link" href="deployment.html">Deployment<span>Bootstrap node and deployment notes.</span></a>
@@ -1273,6 +1276,7 @@ cat > "$site_dir/configuration.html" <<'HTML'
         <a href="index.html">Home</a>
         <a href="tester-quickstart.html">Quickstart</a>
         <a href="agent-brief.html">Agent brief</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a href="configuration.html" aria-current="page">Configuration</a>
         <a href="deployment.html">Deployment</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -1318,6 +1322,7 @@ cat > "$site_dir/agent-brief.html" <<'HTML'
         <a href="index.html">Home</a>
         <a href="tester-quickstart.html">Quickstart</a>
         <a href="agent-brief.html" aria-current="page">Agent brief</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a href="configuration.html">Configuration</a>
         <a href="deployment.html">Deployment</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -1346,6 +1351,52 @@ cat > "$site_dir/agent-brief.html" <<'HTML'
 </html>
 HTML
 
+cat > "$site_dir/troubleshooting.html" <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>guix-p2p troubleshooting</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand" href="index.html"><img src="assets/guix-p2p-wordmark.svg" alt="guix-p2p"></a>
+      <nav aria-label="Site navigation">
+        <a href="index.html">Home</a>
+        <a href="tester-quickstart.html">Quickstart</a>
+        <a href="agent-brief.html">Agent brief</a>
+        <a href="troubleshooting.html" aria-current="page">Troubleshooting</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="deployment.html">Deployment</a>
+        <a href="benchmarks.html">Benchmarks</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="hero">
+      <h1 id="document-title">Troubleshooting</h1>
+      <p class="lead muted">Symptom-first checks for common tester failures.</p>
+      <p class="actions">
+        <a id="raw-markdown-link" class="button" href="troubleshooting.md">Raw Markdown</a>
+      </p>
+    </section>
+    <section>
+      <div id="document-body" class="markdown muted">Loading troubleshooting.md...</div>
+    </section>
+  </main>
+
+  <script src="markdown.js?v=__SITE_ASSET_VERSION__"></script>
+  <script src="doc-page.js?v=__SITE_ASSET_VERSION__"></script>
+  <script>
+    loadMarkdownDocument("troubleshooting.md", "Troubleshooting");
+  </script>
+</body>
+</html>
+HTML
+
 cat > "$site_dir/tester-quickstart.html" <<'HTML'
 <!doctype html>
 <html lang="en">
@@ -1363,6 +1414,7 @@ cat > "$site_dir/tester-quickstart.html" <<'HTML'
         <a href="index.html">Home</a>
         <a href="tester-quickstart.html" aria-current="page">Quickstart</a>
         <a href="agent-brief.html">Agent brief</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a href="configuration.html">Configuration</a>
         <a href="deployment.html">Deployment</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -1408,6 +1460,7 @@ cat > "$site_dir/deployment.html" <<'HTML'
         <a href="index.html">Home</a>
         <a href="tester-quickstart.html">Quickstart</a>
         <a href="agent-brief.html">Agent brief</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a href="configuration.html">Configuration</a>
         <a href="deployment.html" aria-current="page">Deployment</a>
         <a href="benchmarks.html">Benchmarks</a>
@@ -1453,6 +1506,7 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
         <a href="index.html">Home</a>
         <a href="tester-quickstart.html">Quickstart</a>
         <a href="agent-brief.html">Agent brief</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a href="configuration.html">Configuration</a>
         <a href="deployment.html">Deployment</a>
         <a href="benchmarks.html" aria-current="page">Benchmarks</a>
@@ -1567,6 +1621,6 @@ cat > "$site_dir/benchmarks.html" <<'HTML'
 </html>
 HTML
 
-for html_file in "$site_dir/configuration.html" "$site_dir/agent-brief.html" "$site_dir/tester-quickstart.html" "$site_dir/deployment.html" "$site_dir/benchmarks.html"; do
+for html_file in "$site_dir/configuration.html" "$site_dir/agent-brief.html" "$site_dir/troubleshooting.html" "$site_dir/tester-quickstart.html" "$site_dir/deployment.html" "$site_dir/benchmarks.html"; do
   sed -i "s/__SITE_ASSET_VERSION__/$asset_version/g" "$html_file"
 done
