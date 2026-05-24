@@ -167,8 +167,14 @@ The dashboard should also show:
 
 - a transfer path entry
 - block movement events
+- phase timings in the transfer detail view
 - a successful import event
 - an `auto` seed if `auto_seed_downloads` is `p2p` or `all`
+
+For tiny packages, `p2p-first` may fall back quickly when no usable provider is
+found. This is expected while the public network is sparse; use the transfer
+detail timings to see whether time was spent in provider lookup, handshake,
+HTTP download, or import.
 
 ## 7. If The Package Already Exists
 

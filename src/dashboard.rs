@@ -101,6 +101,11 @@ pub enum DashboardEvent {
         store_path: String,
         nar_size: u64,
     },
+    TransferPhase {
+        nar_hash: String,
+        phase: String,
+        elapsed_ms: u64,
+    },
     BlockReceived {
         nar_hash: String,
         peer_id: String,
@@ -173,6 +178,7 @@ pub struct TransferStats {
     pub total_blocks_served: usize,
     pub download_peers: HashMap<String, PeerTransferStats>,
     pub serving_peers: HashMap<String, PeerTransferStats>,
+    pub phases_ms: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -254,6 +260,7 @@ struct ApiTransfer {
     total_blocks_served: usize,
     download_peers: Vec<ApiTransferPeer>,
     serving_peers: Vec<ApiTransferPeer>,
+    phases_ms: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -525,6 +532,7 @@ fn api_transfer_from_stats(stats: &TransferStats) -> ApiTransfer {
         total_blocks_served: stats.total_blocks_served,
         download_peers: transfer_peer_entries(&stats.download_peers),
         serving_peers: transfer_peer_entries(&stats.serving_peers),
+        phases_ms: stats.phases_ms.clone(),
     }
 }
 
@@ -839,6 +847,13 @@ async fn maintain_transfers(state: DashboardState) {
                 entry.total_bytes_received += bytes;
                 record_transfer_peer(&mut entry.download_peers, peer_id, indices, bytes);
             },
+            DashboardEvent::TransferPhase { nar_hash, phase, elapsed_ms } => {
+                let mut transfers = state.transfer_registry.lock().unwrap();
+                let entry = transfers
+                    .entry(nar_hash.clone())
+                    .or_insert_with(|| TransferStats { nar_hash, ..TransferStats::default() });
+                entry.phases_ms.insert(phase, elapsed_ms);
+            },
             DashboardEvent::BlockServed { nar_hash, peer_id, indices } => {
                 if indices.is_empty() {
                     continue;
@@ -1106,6 +1121,10 @@ mod tests {
                     total_blocks_received: 3,
                     total_bytes_received: 6144,
                     total_blocks_served: 2,
+                    phases_ms: HashMap::from([
+                        ("provider_lookup".to_string(), 120),
+                        ("p2p_download".to_string(), 340),
+                    ]),
                     download_peers: HashMap::from([
                         (
                             "peer-b".to_string(),
@@ -1133,6 +1152,7 @@ mod tests {
         assert_eq!(transfers[0].download_peers[0].last_indices, vec![0, 2]);
         assert_eq!(transfers[0].download_peers[1].peer_id, "peer-b");
         assert_eq!(transfers[0].serving_peers[0].peer_id, "peer-c");
+        assert_eq!(transfers[0].phases_ms["provider_lookup"], 120);
     }
 
     #[tokio::test]

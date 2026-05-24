@@ -58,6 +58,8 @@ pub use protocol::{
 };
 
 const MIN_P2P_DOWNLOAD_BYTES_PER_SEC: u64 = 1024 * 1024;
+const SMALL_NAR_FAST_FALLBACK_BYTES: u64 = 1024 * 1024;
+const SMALL_NAR_PROVIDER_LOOKUP_SECS: u64 = 2;
 
 pub fn extract_hash_part(store_path: &str) -> Result<String, String> {
     store_path::hash_part(store_path)
@@ -433,6 +435,7 @@ async fn try_swarm_substitute(
     nar_store: &Arc<Mutex<NarStore>>,
     bandwidth_limiter: &Arc<BandwidthLimiter>,
 ) {
+    let substitute_start = std::time::Instant::now();
     let hash_part = match extract_hash_part(path) {
         Ok(h) => h,
         Err(e) => {
@@ -511,6 +514,7 @@ async fn try_swarm_substitute(
         store_path: Some(store_path.clone()),
         nar_size: Some(nar_size),
     });
+    emit_transfer_phase(event_tx, &nar_hash_hex, "narinfo", substitute_start);
 
     let _ = event_tx.send(DashboardEvent::CatalogEntry {
         hash_part: hash_part.clone(),
@@ -541,6 +545,7 @@ async fn try_swarm_substitute(
                 event_tx,
                 client,
                 narinfo_cache,
+                provider_lookup_timeout(config, nar_size, false),
             )
             .await
             .map(|download| DownloadedNar {
@@ -568,6 +573,7 @@ async fn try_swarm_substitute(
                 event_tx,
                 client,
                 narinfo_cache,
+                provider_lookup_timeout(config, nar_size, true),
             )
             .await
             {
@@ -587,7 +593,8 @@ async fn try_swarm_substitute(
                         &http_trace_url(config, &narinfo),
                         nar_size,
                     ));
-                    try_http_download(
+                    let http_start = std::time::Instant::now();
+                    let http_result = try_http_download(
                         config,
                         &narinfo,
                         client,
@@ -596,7 +603,9 @@ async fn try_swarm_substitute(
                         bandwidth_limiter,
                         "http-fallback",
                     )
-                    .await
+                    .await;
+                    emit_transfer_phase(event_tx, &nar_hash_hex, "http_download", http_start);
+                    http_result
                 },
             }
         },
@@ -606,6 +615,7 @@ async fn try_swarm_substitute(
                 &http_trace_url(config, &narinfo),
                 nar_size,
             ));
+            let http_start = std::time::Instant::now();
             match try_http_download(
                 config,
                 &narinfo,
@@ -616,7 +626,9 @@ async fn try_swarm_substitute(
                 "http-first",
             )
             .await
-            {
+            .inspect(|_| {
+                emit_transfer_phase(event_tx, &nar_hash_hex, "http_download", http_start);
+            }) {
                 Ok(nar_data) => Ok(nar_data),
                 Err(e) => {
                     tracing::info!(
@@ -645,6 +657,7 @@ async fn try_swarm_substitute(
                         event_tx,
                         client,
                         narinfo_cache,
+                        provider_lookup_timeout(config, nar_size, false),
                     )
                     .await
                     .map(|download| DownloadedNar {
@@ -699,6 +712,7 @@ async fn try_swarm_substitute(
                 ));
                 return;
             }
+            emit_transfer_phase(event_tx, &nar_hash_hex, "verify", substitute_start);
 
             if reply.is_socket() {
                 let Some(writer) = socket_writer else {
@@ -761,6 +775,7 @@ async fn try_swarm_substitute(
                 }
                 let _ = tokio::fs::remove_file(&temp_path).await;
             }
+            emit_transfer_phase(event_tx, &nar_hash_hex, "import", substitute_start);
 
             if should_auto_seed {
                 let mut store = nar_store.lock().unwrap();
@@ -808,9 +823,10 @@ async fn try_swarm_substitute(
                 nar_hash: nar_hash_hex.clone(),
                 store_path: store_path.clone(),
                 size,
-                elapsed_ms: 0,
+                elapsed_ms: substitute_start.elapsed().as_millis() as u64,
                 source: download.detail_source.to_string(),
             });
+            emit_transfer_phase(event_tx, &nar_hash_hex, "total", substitute_start);
 
             let _ =
                 reply.write_trace(&format_trace_succeeded(&store_path, &download.trace_url, size));
@@ -850,8 +866,10 @@ async fn try_p2p_download(
     event_tx: &dashboard::EventBus,
     _client: &reqwest::Client,
     _narinfo_cache: &Arc<Mutex<NarinfoCache>>,
+    provider_timeout: tokio::time::Duration,
 ) -> Result<P2pDownloadedNar, String> {
     tracing::info!(hash = %nar_hash, size = nar_size, "Attempting P2P download");
+    let p2p_start = std::time::Instant::now();
 
     let _ = event_tx.send(DashboardEvent::DownloadStarted {
         nar_hash: nar_hash.to_string(),
@@ -862,7 +880,8 @@ async fn try_p2p_download(
     let dht_key = hex::encode(nar_hash_bytes);
     let _ = cmd_tx.send(SwarmCommand::GetProviders { hash: dht_key.clone() });
 
-    let providers = wait_for_providers(cache, notify_rx, &dht_key, config).await;
+    let providers = wait_for_providers(cache, notify_rx, &dht_key, config, provider_timeout).await;
+    emit_transfer_phase(event_tx, nar_hash, "provider_lookup", p2p_start);
     if providers.len() < config.min_providers {
         let _ = event_tx.send(DashboardEvent::ProviderLookupFinished {
             nar_hash: dht_key.clone(),
@@ -879,18 +898,17 @@ async fn try_p2p_download(
         config.max_peers_per_download,
     );
 
-    if selected_providers.len() < config.min_providers {
+    if selected_providers.len() < config.min_providers
+        && provider_timeout >= tokio::time::Duration::from_secs(config.request_timeout_secs)
+    {
         tracing::debug!(
             "Only {} usable cached P2P providers for {}; waiting for fresh DHT results",
             selected_providers.len(),
             nar_hash
         );
-        let refreshed = wait_for_providers_for_duration(
-            notify_rx,
-            &dht_key,
-            tokio::time::Duration::from_secs(config.request_timeout_secs),
-        )
-        .await;
+        let refreshed =
+            wait_for_providers_for_duration(notify_rx, &dht_key, provider_timeout).await;
+        emit_transfer_phase(event_tx, nar_hash, "provider_refresh", p2p_start);
         let merged = merge_provider_lists(&discovered_providers, &refreshed);
         selected_providers = select_provider_candidates(
             &merged,
@@ -914,6 +932,7 @@ async fn try_p2p_download(
             conn_mgr,
         )
         .await;
+        emit_transfer_phase(event_tx, nar_hash, "handshake", p2p_start);
     }
 
     if handshakes.len() < config.min_providers {
@@ -946,6 +965,7 @@ async fn try_p2p_download(
                 conn_mgr,
             )
             .await;
+            emit_transfer_phase(event_tx, nar_hash, "fallback_handshake", p2p_start);
             if !fallback_handshakes.is_empty() {
                 source = "p2p-connected-fallback";
                 handshakes.extend(fallback_handshakes);
@@ -1010,11 +1030,38 @@ async fn try_p2p_download(
                 bytes,
                 "P2P nar download succeeded"
             );
+            emit_transfer_phase(event_tx, nar_hash, "p2p_download", p2p_start);
 
             Ok(P2pDownloadedNar { data: nar_data, source })
         },
         Err(e) => Err(format!("P2P swarm download failed: {}", e)),
     }
+}
+
+fn provider_lookup_timeout(
+    config: &Config,
+    nar_size: u64,
+    fast_small_nar_fallback: bool,
+) -> tokio::time::Duration {
+    let secs = if fast_small_nar_fallback && nar_size <= SMALL_NAR_FAST_FALLBACK_BYTES {
+        config.request_timeout_secs.min(SMALL_NAR_PROVIDER_LOOKUP_SECS)
+    } else {
+        config.request_timeout_secs
+    };
+    tokio::time::Duration::from_secs(secs)
+}
+
+fn emit_transfer_phase(
+    event_tx: &dashboard::EventBus,
+    nar_hash: &str,
+    phase: &str,
+    started: std::time::Instant,
+) {
+    let _ = event_tx.send(DashboardEvent::TransferPhase {
+        nar_hash: nar_hash.to_string(),
+        phase: phase.to_string(),
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    });
 }
 
 /// Attempt HTTP nar download from substitute servers.
@@ -1076,6 +1123,7 @@ async fn wait_for_providers(
     notify_rx: &mut NotifyRx,
     dht_key: &str,
     config: &Config,
+    timeout: tokio::time::Duration,
 ) -> Vec<PeerId> {
     let cached = crate::dht::get_providers(cache, dht_key).await;
     if cached.len() >= config.min_providers {
@@ -1083,12 +1131,7 @@ async fn wait_for_providers(
         return cached;
     }
 
-    wait_for_providers_for_duration(
-        notify_rx,
-        dht_key,
-        tokio::time::Duration::from_secs(config.request_timeout_secs),
-    )
-    .await
+    wait_for_providers_for_duration(notify_rx, dht_key, timeout).await
 }
 
 async fn wait_for_providers_for_duration(
@@ -2378,6 +2421,36 @@ mod tests {
         let timeout = block_download_overall_timeout_secs(30, 30, 488_197_280);
 
         assert_eq!(timeout, 496);
+    }
+
+    #[test]
+    fn provider_lookup_timeout_shortens_small_p2p_first_nars() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut config =
+            Config::load(None, None, None, Some(tmp.path().display().to_string()), None, None);
+        config.request_timeout_secs = 30;
+
+        assert_eq!(
+            provider_lookup_timeout(&config, SMALL_NAR_FAST_FALLBACK_BYTES, true),
+            tokio::time::Duration::from_secs(SMALL_NAR_PROVIDER_LOOKUP_SECS)
+        );
+    }
+
+    #[test]
+    fn provider_lookup_timeout_keeps_large_or_required_p2p_waits() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut config =
+            Config::load(None, None, None, Some(tmp.path().display().to_string()), None, None);
+        config.request_timeout_secs = 30;
+
+        assert_eq!(
+            provider_lookup_timeout(&config, SMALL_NAR_FAST_FALLBACK_BYTES + 1, true),
+            tokio::time::Duration::from_secs(30)
+        );
+        assert_eq!(
+            provider_lookup_timeout(&config, SMALL_NAR_FAST_FALLBACK_BYTES, false),
+            tokio::time::Duration::from_secs(30)
+        );
     }
 
     #[test]

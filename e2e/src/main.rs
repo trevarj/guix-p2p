@@ -3950,11 +3950,17 @@ fn run_guix_build_logged(
     }
     command.arg(target);
     tracing::debug!("running build command: {:?}", command);
-    let status = command
+    let mut child = command
         .stdout(std::process::Stdio::from(log))
         .stderr(std::process::Stdio::from(stderr))
-        .status()
+        .spawn()
         .with_context(|| format!("failed to run guix build {target}"))?;
+    let status = wait_child_with_timeout(
+        &mut child,
+        &format!("guix build {target}"),
+        std::time::Duration::from_secs(180),
+        log_path,
+    )?;
     let elapsed_ms = started.elapsed().as_millis();
     if !status.success() {
         anyhow::bail!(
@@ -4019,7 +4025,12 @@ fn run_direct_substitute_logged(
         writeln!(stdin, "substitute {store_path} {}", dest.display())
             .context("failed to write direct substitute command")?;
     }
-    let status = child.wait().context("failed to wait for direct substitute")?;
+    let status = wait_child_with_timeout(
+        &mut child,
+        &format!("direct substitute {store_path}"),
+        std::time::Duration::from_secs(60),
+        log_path,
+    )?;
     if !status.success() {
         anyhow::bail!(
             "direct substitute {} failed with {}; log tail:\n{}",
@@ -4040,6 +4051,32 @@ fn run_direct_substitute_logged(
         anyhow::bail!("direct substitute output is not a NAR archive: {}", dest.display());
     }
     Ok(())
+}
+
+fn wait_child_with_timeout(
+    child: &mut std::process::Child,
+    description: &str,
+    timeout: std::time::Duration,
+    log_path: &std::path::Path,
+) -> anyhow::Result<std::process::ExitStatus> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Some(status) =
+            child.try_wait().with_context(|| format!("failed to poll {description}"))?
+        {
+            return Ok(status);
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!(
+                "{description} timed out after {}s; log tail:\n{}",
+                timeout.as_secs(),
+                read_tail(log_path, 80)
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
 }
 
 fn wait_dashboard(

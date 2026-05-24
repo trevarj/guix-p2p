@@ -75,7 +75,7 @@ seed_paths = ["/gnu/store/...-hello"]
 | `substitute_urls` | `https://bordeaux.guix.gnu.org,https://ci.guix.gnu.org` | `--substitute-urls` | HTTP substitute servers used for narinfo metadata and allowed HTTP nar fallback. |
 | `substitute_policy` | `http-first` | `--policy` | `p2p-only`, `p2p-first`, or `http-first`. |
 | `block_size` | `262144` | none | Nar block size in bytes for swarm requests. |
-| `request_timeout_secs` | `30` | none | Provider lookup timeout and floor for the size-scaled P2P block download deadline. |
+| `request_timeout_secs` | `30` | none | Provider lookup timeout and floor for the size-scaled P2P block download deadline. In `p2p-first`, NARs up to 1 MiB use a short provider lookup budget before HTTP fallback. |
 | `stall_timeout_secs` | `30` | none | Abort a P2P download after this many seconds without block progress. |
 | `max_peers_per_download` | `8` | none | Upper bound on peers used for one active download. |
 | `max_in_flight_blocks_per_peer` | `4` | none | Maximum outstanding block requests kept active per peer during a P2P download. |
@@ -143,3 +143,8 @@ The dashboard `/api/status` response includes a `connectivity` object and
 
 `substitute_urls` are still used for narinfo metadata in `p2p-only` mode. The
 policy disables HTTP nar download fallback, not narinfo lookup.
+
+`p2p-first` keeps P2P visible but is optimized for sparse early networks:
+packages with NARs up to 1 MiB stop provider discovery after a short lookup
+budget and fall back to HTTP, while larger NARs keep the full
+`request_timeout_secs` window.

@@ -143,12 +143,18 @@ prints `DASHBOARD_EVIDENCE_SKIPPED`.
 The VM proof runs in an environment where Guix tools are usually reachable on
 `PATH`, unlike the persistent Shepherd service on a real Guix System. Unit and
 integration tests therefore also enforce that dashboard package discovery and
-NAR seeding resolve `guix` and `guile` from `/run/current-system/profile/bin`
-before falling back to `PATH`.
+NAR seeding resolve `guix` and `guile` from the active `GUIX_ENVIRONMENT` when
+running inside `guix shell`, then from `/run/current-system/profile/bin`, then
+from `PATH`.
 
 The default in-process E2E suite also covers the early bootstrap fallback path:
 a requester with an empty DHT provider result can still handshake a connected
 bootstrap/seeder peer and prove NAR availability before block transfer.
+
+The container smoke harness bounds the Guix build step and the direct
+substitute probe. If either child process stops making progress, the harness
+kills it and prints the relevant log tail instead of leaving a silent run
+hanging.
 
 Verify the imported output by SSHing into the fetcher and running the store
 path directly. The proof imports the output; it does not install `hello` into

@@ -319,6 +319,12 @@ Default: `http-first`. Sparse early-test networks should use HTTP first for
 normal Guix work, then opt into `p2p-first` when deliberately validating peer
 transfer behavior.
 
+For `p2p-first`, small NARs up to 1 MiB use a short provider-discovery budget
+before HTTP fallback. This avoids spending the full P2P request timeout on tiny
+packages where HTTP can usually finish faster than peer discovery on a sparse
+network. Larger NARs and `p2p-only` retain the normal `request_timeout_secs`
+budget.
+
 The policy also affects the `have` query:
 - `http-first` and `p2p-first`: Always respond with the path (we can serve via HTTP fallback).
 - `p2p-only`: Only respond if DHT providers exist for the nar hash.
@@ -717,6 +723,10 @@ locally-seeded nars in real time:
   count. Cache-only rows show that metadata is pending instead of pretending
   the hash is a package name. Clicking a row opens a detail overlay with the
   reason the NAR is being seeded.
+- **Seed serialization**: explicit store-path seeds are serialized with Guix's
+  NAR writer. When running inside `guix shell`, the seeder prefers
+  `GUIX_ENVIRONMENT` commands and Guile module paths; system services fall back
+  to `/run/current-system/profile`.
 - **Real-time events**: `BlockServed` events stream via WebSocket showing
   which blocks are being uploaded to which peers. Served rows flash green
   momentarily.
@@ -729,7 +739,9 @@ locally-seeded nars in real time:
 - **Transfer evidence**: accepted `BlockReceived` events and non-empty
   `BlockServed` events are aggregated by peer, so the transfer path shows
   which peers contributed downloaded blocks and which requesters received
-  served blocks.
+  served blocks. The transfer detail overlay also shows phase timings for
+  narinfo, provider lookup, handshakes, HTTP/P2P download, verification,
+  import, and total substitute time when those events were observed.
 - **DHT evidence**: provider lookup and provider announce events are retained
   in the event stream. Successful downloads include a source label:
   `p2p-dht`, `p2p-connected-fallback`, or `http-fallback`.
@@ -820,8 +832,8 @@ locally-seeded nars in real time:
 - The dashboard server indexes catalog events internally, so `/api/catalog`
   works for automation even when no browser WebSocket is connected.
 - The dashboard server indexes transfer events internally, so `/api/transfers`
-  returns aggregate download and upload evidence, plus the last successful
-  download source, even when no browser WebSocket is connected.
+  returns aggregate download and upload evidence, phase timings, plus the last
+  successful download source, even when no browser WebSocket is connected.
 - The dashboard server indexes the latest 500 events internally, so
   `/api/events` restores recent history after browser reloads. The live
   WebSocket remains the source for newly-arriving events. The browser view
@@ -876,7 +888,8 @@ Dashboard API endpoints:
 - `/api/build/{hash}` accepts either the registry lookup key or the nar hash.
 - `/api/transfers` returns aggregate transfer evidence by nar hash, including
   downloaded block counts, downloaded bytes, served block counts, last
-  successful download source, and peer-level contribution summaries.
+  successful download source, phase timings in milliseconds, and peer-level
+  contribution summaries.
 - `/api/events` returns the latest 500 dashboard events with a monotonic
   in-memory id, timestamp, and serialized event payload. Connection events
   include outbound dial attempts, dial failures, inbound attempts, inbound

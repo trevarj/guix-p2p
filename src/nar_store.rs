@@ -493,7 +493,7 @@ pub type SharedNarStore = Mutex<NarStore>;
 
 /// Compute the nar hash of a store path using `guix hash -S nar -f hex`.
 fn compute_nar_hash(store_path: &str) -> anyhow::Result<String> {
-    let output = Command::new(system_profile_command("guix"))
+    let output = Command::new(preferred_profile_command("guix"))
         .args(["hash", "-S", "nar", "-f", "hex", store_path])
         .output()
         .context("failed to run `guix hash`")?;
@@ -515,8 +515,8 @@ fn compute_nar_hash(store_path: &str) -> anyhow::Result<String> {
 /// metadata and a signature. Substitute servers serve the raw single-item nar,
 /// so use Guix's serializer directly.
 fn export_nar(store_path: &str) -> anyhow::Result<Vec<u8>> {
-    let mut command = Command::new(system_profile_command("guile"));
-    add_system_profile_guile_env(&mut command);
+    let mut command = Command::new(preferred_profile_command("guile"));
+    add_profile_guile_env(&mut command);
     let output = command
         .args([
             "-c",
@@ -546,24 +546,34 @@ fn export_nar(store_path: &str) -> anyhow::Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn system_profile_command(name: &str) -> OsString {
-    system_profile_command_from(std::path::Path::new("/run/current-system/profile/bin"), name)
+fn preferred_profile_command(name: &str) -> OsString {
+    if let Some(profile) = preferred_guix_profile() {
+        let command = profile.join("bin").join(name);
+        if command.exists() {
+            return command.into_os_string();
+        }
+    }
+    profile_command_from(std::path::Path::new("/run/current-system/profile/bin"), name)
 }
 
-fn system_profile_command_from(bin_dir: &std::path::Path, name: &str) -> OsString {
+fn profile_command_from(bin_dir: &std::path::Path, name: &str) -> OsString {
     let command = bin_dir.join(name);
     if command.exists() { command.into_os_string() } else { OsString::from(name) }
 }
 
-fn add_system_profile_guile_env(command: &mut Command) {
-    for (key, value) in
-        system_profile_guile_env(std::path::Path::new("/run/current-system/profile"))
-    {
+fn add_profile_guile_env(command: &mut Command) {
+    let profile =
+        preferred_guix_profile().unwrap_or_else(|| PathBuf::from("/run/current-system/profile"));
+    for (key, value) in guile_profile_env(&profile) {
         command.env(key, value);
     }
 }
 
-fn system_profile_guile_env(profile: &Path) -> Vec<(&'static str, OsString)> {
+fn preferred_guix_profile() -> Option<PathBuf> {
+    std::env::var_os("GUIX_ENVIRONMENT").map(PathBuf::from).filter(|path| path.exists())
+}
+
+fn guile_profile_env(profile: &Path) -> Vec<(&'static str, OsString)> {
     vec![
         ("GUILE_LOAD_PATH", profile.join("share/guile/site/3.0").into_os_string()),
         (
@@ -595,7 +605,7 @@ mod tests {
 
     #[test]
     fn nar_store_resolves_system_profile_commands() {
-        let command = system_profile_command("guix");
+        let command = preferred_profile_command("guix");
 
         assert!(!command.is_empty());
     }
@@ -606,7 +616,7 @@ mod tests {
         let command_path = tmp.path().join("guile");
         std::fs::write(&command_path, b"").unwrap();
 
-        let command = system_profile_command_from(tmp.path(), "guile");
+        let command = profile_command_from(tmp.path(), "guile");
 
         assert_eq!(command, command_path.into_os_string());
     }
@@ -614,14 +624,14 @@ mod tests {
     #[test]
     fn nar_store_falls_back_to_path_command_names() {
         let tmp = tempfile::tempdir().unwrap();
-        let command = system_profile_command_from(tmp.path(), "guix");
+        let command = profile_command_from(tmp.path(), "guix");
 
         assert_eq!(command, std::ffi::OsString::from("guix"));
     }
 
     #[test]
     fn nar_store_sets_system_profile_guile_module_paths() {
-        let env = system_profile_guile_env(Path::new("/system/profile"));
+        let env = guile_profile_env(Path::new("/system/profile"));
 
         assert!(env.iter().any(|(key, value)| {
             *key == "GUILE_LOAD_PATH"

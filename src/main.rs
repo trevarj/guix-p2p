@@ -342,7 +342,7 @@ async fn main() -> anyhow::Result<()> {
         for path in &config.seed_paths {
             match store.seed_store_path(path) {
                 Ok(hash) => tracing::info!("seeded {} -> {}..", path, &hash[..16]),
-                Err(e) => tracing::warn!("failed to seed {}: {}", path, e),
+                Err(e) => tracing::warn!("failed to seed {}: {:#}", path, e),
             }
         }
         let narinfos = narinfo_cache.lock().unwrap().active_entries();

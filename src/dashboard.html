@@ -293,10 +293,15 @@ main{
 .transfer-peer-id{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
 .transfer-peer-count{text-align:right;color:var(--acc)}
 .transfer-peer-indices{grid-column:1 / 3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+.transfer-phases{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.transfer-phase{display:flex;justify-content:space-between;gap:8px;border:1px solid var(--line);background:var(--bg2);padding:6px 7px;border-radius:4px;font-size:11px}
+.transfer-phase span{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.transfer-phase strong{color:var(--acc);font-weight:400}
 .detail .transfer-stages{grid-template-columns:1fr}
 .detail .transfer-stage{display:grid;grid-template-columns:150px minmax(0,1fr);gap:8px;align-items:center}
 .detail .transfer-stage .value{margin-top:0;white-space:normal;word-break:break-word}
 .detail .transfer-peers{grid-template-columns:1fr}
+.detail .transfer-phases{grid-template-columns:1fr}
 .detail .tester-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:8px}
 .detail .readiness-action{width:100%;margin-top:4px}
 
@@ -1202,7 +1207,8 @@ function ensureTransfer(narHash,storePath,narSize){
       total_bytes_received:0,
       total_blocks_served:0,
       download_peers:{},
-      serving_peers:{}
+      serving_peers:{},
+      phases_ms:{}
     }
   }
   if(storePath)TRANSFER.store_path=storePath;
@@ -1223,7 +1229,8 @@ function mergeTransfer(t){
     total_bytes_received:0,
     total_blocks_served:0,
     download_peers:{},
-    serving_peers:{}
+    serving_peers:{},
+    phases_ms:{}
   };
   if(t.store_path)cur.store_path=t.store_path;
   if(t.nar_size!=null)cur.nar_size=t.nar_size;
@@ -1233,12 +1240,23 @@ function mergeTransfer(t){
   if(t.total_blocks_served!=null)cur.total_blocks_served=t.total_blocks_served;
   cur.download_peers=normalizeTransferPeers(t.download_peers,cur.download_peers);
   cur.serving_peers=normalizeTransferPeers(t.serving_peers,cur.serving_peers);
+  cur.phases_ms=normalizeTransferPhases(t.phases_ms,cur.phases_ms);
   TRANSFERS[t.nar_hash]=cur;
   if(TRANSFER&&TRANSFER.nar_hash===t.nar_hash){
     Object.assign(TRANSFER,cur)
   }
   renderOverview();
   renderTesterChecklist();
+}
+
+function normalizeTransferPhases(phases,current){
+  var out=current||{};
+  if(phases){
+    Object.keys(phases).forEach(function(k){
+      if(phases[k]!=null)out[k]=phases[k]
+    })
+  }
+  return out
 }
 
 function normalizeTransferPeers(peers,current){
@@ -1319,6 +1337,25 @@ function transferStageLabels(){
   ]
 }
 
+function phaseLabel(name){
+  return String(name||'').replace(/_/g,' ')
+}
+
+function fmtMs(ms){
+  if(ms==null)return'?';
+  if(ms<1000)return ms+'ms';
+  return (ms/1000).toFixed(ms<10000?1:0)+'s'
+}
+
+function renderTransferPhases(phases){
+  var keys=['narinfo','provider_lookup','provider_refresh','handshake','fallback_handshake','http_download','p2p_download','verify','import','total']
+    .filter(function(k){return phases&&phases[k]!=null});
+  if(!keys.length)return'<div class="empty">no phase timings observed</div>';
+  return '<div class="transfer-phases">'+keys.map(function(k){
+    return '<div class="transfer-phase"><span>'+esc(phaseLabel(k))+'</span><strong>'+esc(fmtMs(phases[k]))+'</strong></div>'
+  }).join('')+'</div>'
+}
+
 function transferStageClass(t,key,state){
   var done=t.stages[key];
   var cls=done?'done':(!state.activeSeen?'active':'');
@@ -1384,6 +1421,8 @@ function openTransferDetail(){
     +'<div class="field"><label>served</label><span class="val">'+esc((TRANSFER.total_blocks_served||0)+' blocks')+'</span></div>'
     +'<h3>proof stages</h3>'
     +'<div class="transfer-stages">'+renderTransferStageDetails(TRANSFER)+'</div>'
+    +'<h3>phase timings</h3>'
+    +renderTransferPhases(TRANSFER.phases_ms)
     +'<h3>peer contributions</h3>'
     +'<div class="transfer-peers">'
     +renderTransferPeers('downloaded from',TRANSFER.download_peers)
@@ -1670,6 +1709,13 @@ function handleEvent(e,meta){
       recordTransferPeer(e.nar_hash,'download',e.peer_id,rxIdxs,e.bytes||0);
       markTransfer(e.nar_hash,null,null,'blocks',String(rxIdxs.length||1)+' blocks');
       addEvent('dl-start','=','Received '+(rxIdxs.length||1)+' block'+(rxIdxs.length===1?'':'s')+' from '+peerIdShort(e.peer_id),meta);
+      break;
+
+    case 'TransferPhase':
+      var phaseTransfer=ensureTransfer(e.nar_hash,null,null);
+      phaseTransfer.phases_ms[e.phase]=e.elapsed_ms;
+      TRANSFERS[e.nar_hash]=phaseTransfer;
+      renderTransferPath();
       break;
 
     case 'DownloadSucceeded':
