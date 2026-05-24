@@ -520,7 +520,7 @@ main{
   <div class="header-actions">
     <div class="status-pill offline" id="api-status" data-tip="Dashboard API and WebSocket connection state.">connecting</div>
     <button type="button" class="ops-toggle" id="ops-toggle" aria-expanded="false" aria-controls="ops-menu" data-tip="Open copy, theme, and bootstrap utilities.">ops</button>
-    <div class="ops-menu hidden" id="ops-menu" role="menu" aria-label="dashboard operations">
+    <div class="ops-menu hidden" id="ops-menu" role="dialog" aria-label="dashboard operations" aria-modal="false">
       <div class="ops-section">
         <div class="ops-label">share address</div>
         <div class="share-peer" data-tip="Full multiaddr to share with other peers. Configure external_addresses when empty.">
@@ -575,13 +575,13 @@ main{
   <section class="panel events" data-help="events">
     <div class="events-header">
       <h2 data-tip="Daemon event history. Reloading the page keeps the latest 500 events from daemon memory.">events</h2>
-      <div class="event-tools">
-        <button class="event-filter active" type="button" data-filter="all" data-tip="Show every persisted and live dashboard event.">all</button>
-        <button class="event-filter" type="button" data-filter="transfer" data-tip="Downloads, block movement, transfer success, and transfer failures.">transfers</button>
-        <button class="event-filter" type="button" data-filter="seed" data-tip="Seed creation/removal and local seed actions.">seeds</button>
-        <button class="event-filter" type="button" data-filter="peer" data-tip="Peer connection and disconnection activity.">peers</button>
-        <button class="event-filter" type="button" data-filter="discovery" data-tip="Narinfo, catalog, and provider discovery events.">discovery</button>
-        <button class="event-filter" type="button" data-filter="failure" data-tip="Only failed downloads and local dashboard action failures.">failures</button>
+      <div class="event-tools" role="toolbar" aria-label="event filters">
+        <button class="event-filter active" type="button" data-filter="all" aria-pressed="true" data-tip="Show every persisted and live dashboard event.">all</button>
+        <button class="event-filter" type="button" data-filter="transfer" aria-pressed="false" data-tip="Downloads, block movement, transfer success, and transfer failures.">transfers</button>
+        <button class="event-filter" type="button" data-filter="seed" aria-pressed="false" data-tip="Seed creation/removal and local seed actions.">seeds</button>
+        <button class="event-filter" type="button" data-filter="peer" aria-pressed="false" data-tip="Peer connection and disconnection activity.">peers</button>
+        <button class="event-filter" type="button" data-filter="discovery" aria-pressed="false" data-tip="Narinfo, catalog, and provider discovery events.">discovery</button>
+        <button class="event-filter" type="button" data-filter="failure" aria-pressed="false" data-tip="Only failed downloads and local dashboard action failures.">failures</button>
       </div>
     </div>
     <div id="events-list" role="log" aria-live="polite" aria-relevant="additions text"></div>
@@ -739,15 +739,22 @@ function toggleOpsMenu(){
   var toggle=document.getElementById('ops-toggle');
   var open=menu.classList.contains('hidden');
   menu.classList.toggle('hidden',!open);
-  toggle.setAttribute('aria-expanded',open?'true':'false')
+  toggle.setAttribute('aria-expanded',open?'true':'false');
+  if(open){
+    var first=menu.querySelector('button,select,input,[tabindex]:not([tabindex="-1"])');
+    if(first)first.focus()
+  }
 }
 
-function closeOpsMenu(){
+function closeOpsMenu(restoreFocus){
   var menu=document.getElementById('ops-menu');
   var toggle=document.getElementById('ops-toggle');
   if(!menu||menu.classList.contains('hidden'))return;
   menu.classList.add('hidden');
-  if(toggle)toggle.setAttribute('aria-expanded','false')
+  if(toggle){
+    toggle.setAttribute('aria-expanded','false');
+    if(restoreFocus)toggle.focus()
+  }
 }
 
 function emptyState(title,detail,compact){
@@ -1108,7 +1115,9 @@ function eventCompactKey(cls,msg){
 function setEventFilter(filter){
   EVENT_FILTER=filter;
   document.querySelectorAll('.event-filter').forEach(function(btn){
-    btn.classList.toggle('active',btn.dataset.filter===filter)
+    var active=btn.dataset.filter===filter;
+    btn.classList.toggle('active',active);
+    btn.setAttribute('aria-pressed',active?'true':'false')
   });
   renderEvents()
 }
@@ -2183,7 +2192,7 @@ document.addEventListener('click',function(ev){
 document.addEventListener('keydown',function(ev){
   if(ev.key==='Escape'){
     closeHelp();
-    closeOpsMenu();
+    closeOpsMenu(true);
     closeDetail();
     return
   }

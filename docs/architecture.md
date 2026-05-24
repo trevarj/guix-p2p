@@ -823,7 +823,9 @@ locally-seeded nars in real time:
   showing only a blank or terse placeholder.
 - Transfer source and event categories are rendered as compact badges. P2P,
   HTTP fallback, discovery, peer, seed, and failure events can be scanned by
-  color and label without reading every log line.
+  color and label without reading every log line. Event filters are exposed as a
+  toolbar of pressed buttons so active filter state is available without relying
+  on color alone.
 - Dashboard colors are selected from a named theme dropdown. Terminal yellow,
   green, and amber preserve the console look; Tokyo Night provides a more
   conventional high-contrast dark palette. Scrollbars follow the active theme,
@@ -833,7 +835,10 @@ locally-seeded nars in real time:
   latest transfer source. Lower-frequency utilities live behind the compact
   `ops` menu: copy share address, copy bootstrap bundle, copy diagnostics, and
   theme selection. This keeps raw peer IDs and multiaddrs available without
-  letting them dominate the primary transfer/seeding workspace.
+  letting them dominate the primary transfer/seeding workspace. The utility
+  popover uses dialog semantics because it contains regular controls rather
+  than menuitems, focuses the first control when opened, and returns focus to
+  the `ops` button on Escape.
 - Keyboard focus is visible on interactive row cards, detail affordances, and
   controls. Motion-heavy row flash and drawer animations respect
   `prefers-reduced-motion`. Transfer, seed, package, and discovery rows expose
