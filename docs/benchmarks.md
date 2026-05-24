@@ -68,7 +68,11 @@ clippy, and the workspace test suite. The CI smoke uses `sl` because it is small
 enough for fast hosted-runner feedback while still exercising a real Guix store
 path, nar hash, query reply, P2P block transfer, and substitute restore. The
 container smoke seeds only the requested output path, not its full closure, to
-keep hosted-runner startup small. CI sets
+keep hosted-runner startup small. Before probing substitution, the harness waits
+for Node B to see the seed as a connected peer and retries the direct `have`
+query long enough for Kad provider discovery to converge. If that readiness
+step fails, the harness prints Node B status/catalog, seed status/seeds, and the
+query, substitute, seed, and fetcher log tails. CI sets
 `GUIX_P2P_E2E_DASHBOARD_TIMEOUT_SECS=600` so cold Guix profile downloads do not
 fail the smoke before the seed dashboard starts. CI also sets
 `GUIX_P2P_E2E_NO_GUIX_SHELL=1` because GitHub-hosted runners reject the nested

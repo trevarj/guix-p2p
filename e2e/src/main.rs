@@ -3702,6 +3702,14 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
     processes.spawn_logged("node-b", &mut node_b_cmd, &node_b_log)?;
     wait_dashboard(spec.node_b_dashboard_port, "node B", Some(&node_b_log))?;
     wait_unix_socket(&node_b_socket, "node B relay socket")?;
+    wait_for_connected_peers(
+        spec.node_b_dashboard_port,
+        spec.seed_ports.len(),
+        std::time::Duration::from_secs(30),
+    )
+    .with_context(|| {
+        smoke_diagnostics(&logs_dir, spec.node_b_dashboard_port, spec.seed_dashboard_ports)
+    })?;
 
     if spec.run_guix_build {
         let daemon_exposes =
@@ -3743,15 +3751,19 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         wait_unix_socket(&daemon_socket, "isolated guix-daemon socket")?;
     }
 
-    run_direct_query_logged(
-        spec.tools,
-        spec.base,
-        spec.store_path,
-        &node_b_socket,
-        extension_path.parent().unwrap(),
-        &logs_dir.join("direct-query.log"),
-        spec.vm_direct,
-    )?;
+    wait_for_direct_query(DirectQuerySpec {
+        tools: spec.tools,
+        base: spec.base,
+        store_path: spec.store_path,
+        relay_socket: &node_b_socket,
+        extension_dir: extension_path.parent().unwrap(),
+        log_path: &logs_dir.join("direct-query.log"),
+        vm_direct: spec.vm_direct,
+        timeout: std::time::Duration::from_secs(60),
+    })
+    .with_context(|| {
+        smoke_diagnostics(&logs_dir, spec.node_b_dashboard_port, spec.seed_dashboard_ports)
+    })?;
     let direct_substitute_elapsed_ms = run_direct_substitute_logged(
         spec.tools,
         spec.base,
@@ -3760,7 +3772,10 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         extension_path.parent().unwrap(),
         &logs_dir.join("direct-substitute.log"),
         spec.vm_direct,
-    )?;
+    )
+    .with_context(|| {
+        smoke_diagnostics(&logs_dir, spec.node_b_dashboard_port, spec.seed_dashboard_ports)
+    })?;
 
     let elapsed_ms = if spec.run_guix_build {
         run_guix_build_logged(
@@ -4148,6 +4163,10 @@ fn run_direct_query_logged(
     log_path: &std::path::Path,
     vm_direct: bool,
 ) -> anyhow::Result<()> {
+    {
+        let mut log = std::fs::OpenOptions::new().create(true).append(true).open(log_path)?;
+        writeln!(log, "=== direct query attempt for {store_path} ===")?;
+    }
     let log = std::fs::OpenOptions::new().create(true).append(true).open(log_path)?;
     let stderr = log.try_clone()?;
     let fd4 = log.try_clone()?;
@@ -4213,6 +4232,48 @@ fn run_direct_query_logged(
     Ok(())
 }
 
+struct DirectQuerySpec<'a> {
+    tools: &'a HarnessTools,
+    base: &'a std::path::Path,
+    store_path: &'a str,
+    relay_socket: &'a std::path::Path,
+    extension_dir: &'a std::path::Path,
+    log_path: &'a std::path::Path,
+    vm_direct: bool,
+    timeout: std::time::Duration,
+}
+
+fn wait_for_direct_query(spec: DirectQuerySpec<'_>) -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + spec.timeout;
+    let mut last_error = None;
+    while std::time::Instant::now() < deadline {
+        match run_direct_query_logged(
+            spec.tools,
+            spec.base,
+            spec.store_path,
+            spec.relay_socket,
+            spec.extension_dir,
+            spec.log_path,
+            spec.vm_direct,
+        ) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_error = Some(e);
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            },
+        }
+    }
+
+    if let Some(e) = last_error {
+        anyhow::bail!(
+            "direct query readiness did not report {} within {}s: {e:#}",
+            spec.store_path,
+            spec.timeout.as_secs()
+        );
+    }
+    anyhow::bail!("direct query readiness did not run before timeout for {}", spec.store_path)
+}
+
 fn wait_child_with_timeout(
     child: &mut std::process::Child,
     description: &str,
@@ -4236,6 +4297,29 @@ fn wait_child_with_timeout(
             );
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+fn wait_for_connected_peers(
+    dashboard_port: u16,
+    expected: usize,
+    timeout: std::time::Duration,
+) -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let status = dashboard_json(dashboard_port, "/api/status")?;
+        let connected =
+            status.get("connected_peers").and_then(serde_json::Value::as_u64).unwrap_or(0);
+        if connected as usize >= expected {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!(
+                "node B connected to {connected}/{expected} expected peers; last status: {}",
+                pretty_json(&status)
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
 }
 
@@ -4311,6 +4395,51 @@ fn http_get_body(port: u16, path: &str) -> anyhow::Result<String> {
         .split_once("\r\n\r\n")
         .ok_or_else(|| anyhow::anyhow!("dashboard response did not contain a body"))?;
     Ok(body.to_string())
+}
+
+fn smoke_diagnostics(
+    logs_dir: &std::path::Path,
+    node_b_dashboard_port: u16,
+    seed_dashboard_ports: &[u16],
+) -> String {
+    let mut out = String::new();
+    out.push_str("\nsmoke diagnostics\n");
+    out.push_str(&format!(
+        "node-b /api/status:\n{}\n",
+        dashboard_debug_json(node_b_dashboard_port, "/api/status")
+    ));
+    out.push_str(&format!(
+        "node-b /api/catalog:\n{}\n",
+        dashboard_debug_json(node_b_dashboard_port, "/api/catalog")
+    ));
+    for (idx, port) in seed_dashboard_ports.iter().enumerate() {
+        out.push_str(&format!(
+            "seed-{} /api/status:\n{}\n",
+            idx + 1,
+            dashboard_debug_json(*port, "/api/status")
+        ));
+        out.push_str(&format!(
+            "seed-{} /api/seeds:\n{}\n",
+            idx + 1,
+            dashboard_debug_json(*port, "/api/seeds")
+        ));
+    }
+    for log_name in ["direct-query.log", "direct-substitute.log", "node-b.log", "seed-1.log"] {
+        let path = logs_dir.join(log_name);
+        out.push_str(&format!("{log_name} tail:\n{}\n", read_tail(&path, 120)));
+    }
+    out
+}
+
+fn dashboard_debug_json(port: u16, path: &str) -> String {
+    match dashboard_json(port, path) {
+        Ok(value) => pretty_json(&value),
+        Err(e) => format!("error reading {path} on port {port}: {e:#}"),
+    }
+}
+
+fn pretty_json(value: &serde_json::Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
 fn wait_for_catalog_entry(

@@ -156,6 +156,11 @@ substitute probe. If either child process stops making progress, the harness
 kills it and prints the relevant log tail instead of leaving a silent run
 hanging.
 
+The container smoke also treats direct `have` query success as a readiness
+condition. It waits for the fetcher to connect to the seed and retries the query
+while Kad provider discovery converges. On failure, it prints dashboard
+status/catalog/seeds snapshots and the relevant process log tails.
+
 Verify the imported output by SSHing into the fetcher and running the store
 path directly. The proof imports the output; it does not install `hello` into
 the shell profile.
