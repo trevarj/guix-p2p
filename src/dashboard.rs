@@ -984,6 +984,7 @@ mod tests {
             "aria-label=\"'+attr('Open transfer evidence for ",
             "aria-label=\"'+attr('Open seed detail for ",
             "aria-label=\"'+attr('Open discovery detail for ",
+            "metadata-row '+(openable?'openable':'readonly')",
             "openDetailPanel",
             "trapDetailFocus",
             "DETAIL_RETURN_FOCUS",

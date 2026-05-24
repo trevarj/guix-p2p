@@ -200,8 +200,10 @@ main{
 .peer-row .status{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:4px}
 .peer-row.offline .status{background:var(--dim)}
 .peer-row.offline{opacity:.55}
-.catalog-row,.metadata-row,.build-row,.seed-row,.package-row{cursor:pointer;border-radius:4px;padding-left:3px;padding-right:3px}
-.catalog-row:hover,.metadata-row:hover,.build-row:hover,.seed-row:hover,.package-row:hover{background:var(--panel2)}
+.catalog-row,.metadata-row,.build-row,.seed-row,.package-row{border-radius:4px;padding-left:3px;padding-right:3px}
+.catalog-row,.build-row,.seed-row,.metadata-row.openable{cursor:pointer}
+.catalog-row:hover,.build-row:hover,.seed-row:hover,.metadata-row.openable:hover{background:var(--panel2)}
+.package-row:hover{background:rgba(255,255,255,.018)}
 .catalog-row .path,.metadata-row .path,.build-row .path,.seed-row .path,.package-row .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.7}
 .catalog-row .size,.metadata-row .size{min-width:70px;text-align:right;font-size:11px;opacity:.6}
 .catalog-row .p2p,.metadata-row .p2p{min-width:40px;text-align:center;font-size:10px}
@@ -1212,9 +1214,10 @@ function renderMetadata(){
     var name=row.store_path?storePathName(row.store_path):String(row.id||'unknown').slice(0,16)+'...';
     var sz=row.nar_size!=null?fmtSize(row.nar_size):'?';
     var p2p=row.p2p_available?'yes':'no';
-    var lookup=row.lookup?' data-lookup="'+attr(row.lookup)+'" role="button" tabindex="0"':'';
+    var openable=Boolean(row.lookup);
+    var lookup=openable?' data-lookup="'+attr(row.lookup)+'" role="button" tabindex="0"':'';
     var aria=row.lookup?' aria-label="'+attr('Open discovery detail for '+name)+'"':'';
-    return '<div class="metadata-row"'+lookup+aria+'>'
+    return '<div class="metadata-row '+(openable?'openable':'readonly')+'"'+lookup+aria+'>'
       +'<span class="path" data-tip="'+attr(row.tip||name)+'">'+esc(name)+'</span>'
       +'<span class="size">'+esc(sz)+'</span>'
       +'<span class="p2p '+p2p+'">'+(row.p2p_available?'p2p':'http')+'</span>'

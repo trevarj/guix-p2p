@@ -813,6 +813,10 @@ locally-seeded nars in real time:
   labels seed/cache/action, Packages labels package/state/action, Peers labels
   geo/peer/score/state, Discovery labels store item/size/path/providers, and
   Events labels time/type/message.
+- Row affordances match behavior: seed rows and discovery rows with build detail
+  metadata get pointer/focus treatment, while package rows reserve the explicit
+  seed button as the action target. Discovery rows without detail metadata are
+  rendered as read-only so testers do not chase dead drill-downs.
 - Dashboard colors are selected from a named theme dropdown. Terminal yellow,
   green, and amber preserve the console look; Tokyo Night provides a more
   conventional high-contrast dark palette. Scrollbars follow the active theme,
