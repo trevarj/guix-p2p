@@ -6,6 +6,19 @@ and uses `http-first` by default while the public P2P network is sparse.
 Switch to `p2p-first` only when deliberately validating that a seeded package
 can be fetched from a peer.
 
+## Tester Roles
+
+Use the same install path for every tester, then choose a role:
+
+| Role | Goal | Extra Setup |
+|------|------|-------------|
+| Client tester | Use normal Guix commands and observe whether P2P helps. | None beyond the service default. |
+| Seeder tester | Publish one or more local store paths to known peers. | Seed from the dashboard or add explicit `seed_paths`. |
+| Public bootstrap/seeder | Stay reachable for other testers. | Configure a public `external-addresses` value and firewall/NAT rules. |
+
+Laptops and VPN users are usually client testers. Leave
+`external-addresses` empty unless other peers can actually dial that address.
+
 ## Fast Path
 
 Use this checklist when you already know where the relevant Guix system config
@@ -94,6 +107,19 @@ You do not need to put this bootstrap peer in a user
 daemon from the service configuration, so service fields are the source of
 truth for daemon networking.
 
+Use service fields for known-tester policy changes:
+
+```scheme
+(service guix-p2p-service-type
+         (guix-p2p-configuration
+          (dashboard? #t)
+          (policy "http-first")))
+```
+
+Use `http-first` for everyday testing. Use `p2p-first` only on the fetching
+node when the test goal is to prove that a seeded package can transfer from a
+peer before HTTP fallback.
+
 ## 3. Reconfigure And Restart
 
 Reconfigure the system and restart both long-running services:
@@ -154,7 +180,8 @@ curl -s http://127.0.0.1:3030/api/diagnostics
 ## 5. Seed A Package From One Node
 
 On the seeding node, either use the dashboard package list and press `seed`, or
-add a store path to the service configuration:
+add a store path to the service configuration. Pick a small package that the
+fetching node does not already have; `sl` is a useful example when absent.
 
 ```scheme
 (service guix-p2p-service-type
@@ -176,7 +203,8 @@ observes trusted narinfo/catalog metadata that identifies the store path.
 On the fetching node, choose a package that is seeded by the other node and not
 already in the local store. Temporarily set `(policy "p2p-first")` in the
 fetching node service config when you want to force a P2P attempt before HTTP.
-For a small test package:
+Restart `guix-p2p` and `guix-daemon` after changing the policy. For a small
+test package:
 
 ```sh
 guix build sl
@@ -248,6 +276,9 @@ unless one of these is true:
 For now, the project bootstrap node helps peers find each other. It is not a
 privacy relay and does not make a NATed laptop dialable from the public
 Internet.
+
+Use [`connectivity.md`](connectivity.md) when a tester needs to prove that a
+specific peer address is dialable.
 
 ## 9. Useful Failure Report
 

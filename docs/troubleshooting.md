@@ -20,6 +20,7 @@ tester issues.
 | Dashboard says `local-only` | Add bootstrap peers for remote tests, or accept LAN-only mDNS. |
 | No peers connect | Check bootstrap multiaddrs, firewall, and whether peers include `/p2p/<peer-id>`. |
 | P2P falls back to HTTP | Check transfer detail for provider lookup, handshake, and block movement. |
+| `http-first` never tries P2P | This is normal unless HTTP fails; switch the fetcher to `p2p-first` for proof runs. |
 | Seed action fails | Confirm dashboard bind is `127.0.0.1` and the path starts with `/gnu/store/`. |
 | Package is already present | Pick another package or inspect live roots with `guix gc --referrers`. |
 
@@ -58,6 +59,10 @@ Check:
 
 `p2p-first` falls back to HTTP when P2P lookup or transfer fails. This is
 expected for availability, but not proof that P2P worked.
+
+`http-first` intentionally prefers HTTP NAR download. It can still use P2P as a
+fallback, but it is not the right mode for proving that one known tester can
+serve a package to another tester.
 
 Use the dashboard transfer view:
 
