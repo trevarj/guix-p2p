@@ -3462,7 +3462,11 @@ fn ensure_container_guix_store_writable(
     base: &std::path::Path,
     vm_direct: bool,
 ) -> anyhow::Result<()> {
-    if vm_direct || std::env::var_os("GUIX_P2P_E2E_NO_GUIX_SHELL").is_some() {
+    if std::env::var_os("GUIX_P2P_E2E_NO_GUIX_SHELL").is_some() && !vm_direct {
+        return Ok(());
+    }
+
+    if vm_direct {
         let probe = std::path::Path::new("/gnu/store/.guix-p2p-e2e-write-test");
         std::fs::write(probe, b"probe").map_err(|e| {
             anyhow::anyhow!(

@@ -168,11 +168,12 @@ jobs:
             libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
             export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             export GUIX_P2P_E2E_DASHBOARD_TIMEOUT_SECS=600
+            export GUIX_P2P_E2E_NO_GUIX_SHELL=1
             cargo build --bin guix-p2p
             exec cargo run -p guix-p2p-e2e -- container-smoke \
               --package sl \
               --transport tcp \
-              --base /tmp/guix-p2p-ci-smoke \
+              --base "${RUNNER_TEMP:-/tmp}/guix-p2p-ci-smoke" \
               --node-a-port 46081 \
               --node-b-port 46082 \
               --node-a-dashboard-port 4071 \

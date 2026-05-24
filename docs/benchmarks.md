@@ -70,7 +70,10 @@ path, nar hash, query reply, P2P block transfer, and substitute restore. The
 container smoke seeds only the requested output path, not its full closure, to
 keep hosted-runner startup small. CI sets
 `GUIX_P2P_E2E_DASHBOARD_TIMEOUT_SECS=600` so cold Guix profile downloads do not
-fail the smoke before the seed dashboard starts.
+fail the smoke before the seed dashboard starts. CI also sets
+`GUIX_P2P_E2E_NO_GUIX_SHELL=1` because GitHub-hosted runners reject the nested
+mount namespaces used by `guix shell -C`; the outer manifest still supplies the
+Guix and native runtime dependencies.
 
 ## E2E VM Proof
 
