@@ -253,6 +253,7 @@ and [docs/benchmarks.md](docs/benchmarks.md) for benchmark runs and artifacts.
 | [docs/e2e.md](docs/e2e.md) | Two-node disposable VM proof |
 | [docs/benchmarks.md](docs/benchmarks.md) | Smoke and benchmark harness usage |
 | [docs/mirror.md](docs/mirror.md) | Codeberg-to-GitHub mirror and GitHub CI setup |
+| [docs/release.md](docs/release.md) | Versioning, tagging, source snapshot, and binary release policy |
 | [docs/dht-protocol.md](docs/dht-protocol.md) | Kademlia DHT design |
 | [docs/swarm-protocol.md](docs/swarm-protocol.md) | Block exchange wire protocol |
 | [docs/contributing.md](docs/contributing.md) | Contribution and AI-assisted work policy |

@@ -68,12 +68,14 @@ Before a broader release:
   for older setups.
 - Continue migrating developer-only shell helpers listed in
   [scripts.md](scripts.md) when they become part of normal setup.
-- Decide whether release packages should build from tagged source snapshots
-  instead of the current channel checkout.
-- Decide whether release binaries are supported or source builds remain the
-  only documented path.
-- Tag `v0.1.7` only after packaging, bootstrap, and benchmark claims are
-  documented with matching evidence.
+- Keep source builds through the authenticated Guix channel as the only
+  supported user-facing release path for now.
+- Treat signed Git tags as release boundaries once packaging, bootstrap, and
+  benchmark claims have matching evidence.
+- Do not publish prebuilt binaries until the runtime, extension-install, commit
+  reporting, and binary provenance story is documented.
+- Follow [release.md](release.md) for version bumps, tag checks, and mirror
+  verification.
 
 ## Bootstrap Network
 

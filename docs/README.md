@@ -29,6 +29,7 @@ Start with:
 | [e2e.md](e2e.md) | Strict two-node VM proof |
 | [benchmarks.md](benchmarks.md) | Smoke tests, benchmark harness, future benchmark method |
 | [mirror.md](mirror.md) | Codeberg-to-GitHub mirror and GitHub CI setup |
+| [release.md](release.md) | Versioning, tagging, source snapshot, and binary release policy |
 | [dht-protocol.md](dht-protocol.md) | Kademlia DHT design |
 | [swarm-protocol.md](swarm-protocol.md) | Block exchange wire protocol |
 | [contributing.md](contributing.md) | Contribution and AI-assisted work policy |
