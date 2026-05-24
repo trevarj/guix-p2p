@@ -41,6 +41,10 @@ Before editing:
    you intend to change.
 4. Prefer existing patterns over new abstractions.
 
+Use `docs/README.md` to classify docs before relying on them. Files listed
+under "Plans, Records, And Deferred Work" are context, not proof that the code
+still needs that exact plan.
+
 When changing behavior:
 
 - Update `docs/architecture.md` if data flow, dashboard behavior, or config

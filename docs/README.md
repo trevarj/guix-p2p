@@ -10,6 +10,9 @@ Start with:
 - Coding agent: [agent-brief.md](agent-brief.md)
 - Operator/deployer: [deployment.md](deployment.md)
 - Configuration lookup: [configuration.md](configuration.md)
+- Connectivity/NAT issue: [connectivity.md](connectivity.md)
+
+## Active References
 
 | File | Purpose |
 |------|---------|
@@ -30,6 +33,19 @@ Start with:
 | [swarm-protocol.md](swarm-protocol.md) | Block exchange wire protocol |
 | [contributing.md](contributing.md) | Contribution and AI-assisted work policy |
 | [roadmap.md](roadmap.md) | Current remaining work |
+
+## Plans, Records, And Deferred Work
+
+These files are useful context, but do not override active code or the active
+references above. Check implementation status before using them as task
+requirements.
+
+| File | Purpose |
+|------|---------|
+| [substitute-extension-plan.md](substitute-extension-plan.md) | Implemented integration record for the Guix substitute extension |
+| [multi-peer-block-fetch-plan.md](multi-peer-block-fetch-plan.md) | Implemented downloader plan with benchmark evidence still pending |
+| [vm-benchmark-phase-timing-plan.md](vm-benchmark-phase-timing-plan.md) | Benchmark phase timing plan and acceptance notes |
+| [full-p2p-attestations.md](full-p2p-attestations.md) | Future plan for decentralized substitute metadata attestations |
 | [future-ideas.md](future-ideas.md) | Deferred implementation ideas |
 
 Historical plans and implementation prompts live in [archive/](archive/).

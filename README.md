@@ -246,6 +246,7 @@ and [docs/benchmarks.md](docs/benchmarks.md) for benchmark runs and artifacts.
 | [docs/configuration.md](docs/configuration.md) | TOML keys, defaults, CLI overrides |
 | [docs/tester-quickstart.md](docs/tester-quickstart.md) | Known-tester onboarding and real seed/fetch validation |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Symptom-first tester fixes |
+| [docs/connectivity.md](docs/connectivity.md) | Bootstrap, NAT, firewall, and dashboard connectivity signals |
 | [docs/deployment.md](docs/deployment.md) | Daemon, relay, extension, and isolated Guix flow |
 | [docs/scripts.md](docs/scripts.md) | Script inventory and Rust migration status |
 | [docs/bootstrap-node.md](docs/bootstrap-node.md) | Shepherd-first bootstrap node operation |
