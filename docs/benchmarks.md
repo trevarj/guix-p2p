@@ -63,6 +63,15 @@ Acceptance checks:
 - Node B logs show p2p-only handling and a successful substitute download.
 - Node B logs do not show HTTP nar fallback in p2p-only mode.
 
+CI runs this TCP container smoke on every push and pull request after formatting,
+clippy, and the workspace test suite. The CI smoke uses `sl` because it is small
+enough for fast hosted-runner feedback while still exercising a real Guix store
+path, nar hash, query reply, P2P block transfer, and substitute restore. The
+container smoke seeds only the requested output path, not its full closure, to
+keep hosted-runner startup small. CI sets
+`GUIX_P2P_E2E_DASHBOARD_TIMEOUT_SECS=600` so cold Guix profile downloads do not
+fail the smoke before the seed dashboard starts.
+
 ## E2E VM Proof
 
 The strict proof requires separate writable stores so a fetcher can prove it

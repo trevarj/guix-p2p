@@ -688,6 +688,7 @@ struct HarnessTools {
     guix_p2p: PathBuf,
     guix_p2p_extension: PathBuf,
     guix_p2p_library_path: String,
+    guix_p2p_runtime_roots: Vec<String>,
 }
 
 struct P2pBuildSpec<'a> {
@@ -696,6 +697,7 @@ struct P2pBuildSpec<'a> {
     build_target: &'a str,
     nar_hash: &'a str,
     closure_paths: &'a [String],
+    seed_closure: bool,
     transport: HarnessTransport,
     seed_ports: &'a [u16],
     node_b_port: u16,
@@ -2284,6 +2286,7 @@ async fn run_container_smoke(opts: ContainerSmokeOptions) -> anyhow::Result<()> 
         build_target,
         nar_hash: &nar_hash,
         closure_paths: &closure_paths,
+        seed_closure: false,
         transport: opts.transport,
         seed_ports: &[opts.node_a_port],
         node_b_port: opts.node_b_port,
@@ -2477,6 +2480,7 @@ async fn run_benchmark(opts: BenchmarkOptions) -> anyhow::Result<()> {
                                     build_target: &package.store_path,
                                     nar_hash: &package.nar_hash,
                                     closure_paths: &package.closure_paths,
+                                    seed_closure: true,
                                     transport: opts.transport,
                                     seed_ports: &seed_ports,
                                     node_b_port,
@@ -3301,7 +3305,7 @@ fn prepare_harness_tools(guix_p2p_bin: Option<&std::path::Path>) -> anyhow::Resu
         anyhow::bail!("guix-p2p binary not found at {}", guix_p2p.display());
     }
     let guix_p2p_extension = ensure_guix_p2p_extension()?;
-    let guix_p2p_library_path = runtime_library_path(&guix_p2p)?;
+    let (guix_p2p_library_path, guix_p2p_runtime_roots) = runtime_libraries(&guix_p2p)?;
     Ok(HarnessTools {
         guix,
         guix_daemon,
@@ -3311,29 +3315,58 @@ fn prepare_harness_tools(guix_p2p_bin: Option<&std::path::Path>) -> anyhow::Resu
         guix_p2p,
         guix_p2p_extension,
         guix_p2p_library_path,
+        guix_p2p_runtime_roots,
     })
 }
 
-fn runtime_library_path(binary: &std::path::Path) -> anyhow::Result<String> {
+fn runtime_libraries(binary: &std::path::Path) -> anyhow::Result<(String, Vec<String>)> {
     let output = checked_output(std::process::Command::new("ldd").arg(binary), "ldd guix-p2p")?;
     let stdout = String::from_utf8(output.stdout)?;
-    let dirs: BTreeSet<String> = stdout
+    let paths: Vec<String> = stdout
         .lines()
         .filter_map(|line| {
-            let path = line
+            if let Some(path) = line
                 .split("=>")
                 .nth(1)
                 .and_then(|right| right.split_whitespace().next())
-                .filter(|part| part.starts_with('/'))?;
+                .filter(|part| part.starts_with('/'))
+            {
+                return Some(path.to_owned());
+            }
+            line.split_whitespace()
+                .next()
+                .filter(|part| part.starts_with("/gnu/store/"))
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    let dirs: BTreeSet<String> = paths
+        .iter()
+        .filter_map(|path| {
             std::path::Path::new(path).parent().map(|parent| parent.display().to_string())
         })
         .collect();
+    let roots: BTreeSet<String> = paths.iter().filter_map(|path| guix_store_item(path)).collect();
 
     if dirs.is_empty() {
         anyhow::bail!("ldd did not report runtime library directories for {}", binary.display());
     }
 
-    Ok(dirs.into_iter().collect::<Vec<_>>().join(":"))
+    Ok((dirs.into_iter().collect::<Vec<_>>().join(":"), roots.into_iter().collect()))
+}
+
+fn guix_store_item(path: &str) -> Option<String> {
+    let path = std::path::Path::new(path);
+    let mut components = path.components();
+    match (components.next(), components.next(), components.next()) {
+        (
+            Some(std::path::Component::RootDir),
+            Some(std::path::Component::Normal(gnu)),
+            Some(std::path::Component::Normal(store)),
+        ) if gnu == "gnu" && store == "store" => {},
+        _ => return None,
+    }
+    let item = components.next()?.as_os_str().to_str()?;
+    Some(format!("/gnu/store/{item}"))
 }
 
 fn resolve_raw_guix_daemon(path: &std::path::Path) -> anyhow::Result<PathBuf> {
@@ -3477,19 +3510,25 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
     let node_b_addr = spec.transport.listen_addr(spec.node_b_port);
     let daemon_runtime_paths: BTreeSet<&str> =
         spec.tools.guix_daemon_closure.iter().map(String::as_str).collect();
-    let p2p_closure_paths: Vec<String> = spec
-        .closure_paths
-        .iter()
-        .filter(|path| !daemon_runtime_paths.contains(path.as_str()))
-        .cloned()
-        .collect();
-    let skipped_runtime_paths = spec.closure_paths.len() - p2p_closure_paths.len();
-    if skipped_runtime_paths > 0 {
-        tracing::info!(
-            skipped_runtime_paths,
-            "not claiming daemon runtime paths as p2p benchmark substitutes"
-        );
-    }
+    let p2p_closure_paths: Vec<String> = if spec.seed_closure {
+        let paths = spec
+            .closure_paths
+            .iter()
+            .filter(|path| !daemon_runtime_paths.contains(path.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        let skipped_runtime_paths = spec.closure_paths.len() - paths.len();
+        if skipped_runtime_paths > 0 {
+            tracing::info!(
+                skipped_runtime_paths,
+                "not claiming daemon runtime paths as p2p benchmark substitutes"
+            );
+        }
+        paths
+    } else {
+        tracing::info!("container smoke will seed only the requested store path");
+        vec![spec.store_path.to_string()]
+    };
     let seed_paths: Vec<&str> = p2p_closure_paths.iter().map(String::as_str).collect();
     let seed_arg = seed_paths.join(",");
     write_local_narinfo_metadata(&local_narinfo_path, spec.tools, &p2p_closure_paths)?;
@@ -3517,6 +3556,8 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
     let mut processes = ProcessSet::default();
     let mut bootstrap_peers = Vec::new();
     let mut seed_logs = Vec::new();
+    let p2p_runtime_exposes =
+        combined_exposes(&p2p_closure_paths, &spec.tools.guix_p2p_runtime_roots);
 
     for (idx, (&seed_port, &dashboard_port)) in
         spec.seed_ports.iter().zip(spec.seed_dashboard_ports.iter()).enumerate()
@@ -3550,8 +3591,8 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
             spec.tools,
             spec.base,
             spec.vm_direct,
-            &["guix", "guile", "libgcrypt", "gcc-toolchain"],
-            &p2p_closure_paths,
+            &["guix", "guile", "libgcrypt"],
+            &p2p_runtime_exposes,
         );
         seed_cmd
             .arg("/bin/sh")
@@ -3614,11 +3655,12 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         substitute_urls: spec.substitute_urls,
     })?;
 
-    let mut node_b_cmd = guix_container_command_with_packages(
+    let mut node_b_cmd = guix_container_command_with_packages_and_exposes(
         spec.tools,
         spec.base,
         spec.vm_direct,
-        &["libgcrypt", "gcc-toolchain"],
+        &["libgcrypt"],
+        &spec.tools.guix_p2p_runtime_roots,
     );
     node_b_cmd
         .arg("/bin/sh")
@@ -4034,8 +4076,8 @@ fn run_direct_substitute_logged(
         tools,
         base,
         vm_direct,
-        &["guix", "libgcrypt", "gcc-toolchain"],
-        &tools.real_guix_closure,
+        &["guix", "libgcrypt"],
+        &combined_exposes(&tools.real_guix_closure, &tools.guix_p2p_runtime_roots),
     );
     command
         .arg("/bin/sh")
@@ -4109,8 +4151,8 @@ fn run_direct_query_logged(
         tools,
         base,
         vm_direct,
-        &["libgcrypt", "gcc-toolchain"],
-        &tools.real_guix_closure,
+        &["libgcrypt"],
+        &combined_exposes(&tools.real_guix_closure, &tools.guix_p2p_runtime_roots),
     );
     command
         .arg("/bin/sh")
@@ -4198,7 +4240,8 @@ fn wait_dashboard(
     label: &str,
     log_path: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
+    let timeout = env_duration_secs("GUIX_P2P_E2E_DASHBOARD_TIMEOUT_SECS", 180);
+    let deadline = std::time::Instant::now() + timeout;
     loop {
         match dashboard_json(port, "/api/status") {
             Ok(_) => return Ok(()),
@@ -4216,6 +4259,14 @@ fn wait_dashboard(
             },
         }
     }
+}
+
+fn env_duration_secs(name: &str, default_secs: u64) -> std::time::Duration {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(std::time::Duration::from_secs)
+        .unwrap_or_else(|| std::time::Duration::from_secs(default_secs))
 }
 
 fn wait_unix_socket(path: &std::path::Path, label: &str) -> anyhow::Result<()> {
