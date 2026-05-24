@@ -49,8 +49,11 @@ header .brand-logo text{font-family:Inter,ui-sans-serif,system-ui,-apple-system,
 header .brand-logo .brand-main{fill:var(--fg)}
 header .brand-logo .brand-accent{fill:var(--acc)}
 header .brand-logo .brand-link{stroke:var(--acc)}
-header .id{font-size:11px;opacity:.6}
-.share-peer{margin-top:4px;display:flex;gap:4px;align-items:center;max-width:420px}
+.node-chip{
+  display:inline-flex;max-width:340px;margin-top:4px;padding:2px 6px;border:1px solid var(--line);
+  color:var(--muted);font-size:10px;border-radius:999px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.share-peer{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
 .share-peer .share-value{
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--muted);font-size:10px
@@ -79,7 +82,7 @@ button:focus-visible,input:focus-visible,.theme-select:focus-visible,[role="butt
 .header-readiness .health-detail{font-size:10px}
 .header-readiness .info-card .v,.header-readiness .network-card .v{font-size:12px}
 .header-readiness .info-card .sub,.header-readiness .network-card .sub{font-size:10px}
-.header-actions{display:grid;gap:4px;justify-items:end}
+.header-actions{position:relative;display:flex;gap:8px;align-items:center;justify-content:flex-end}
 .theme-label{color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:1px}
 .theme-select{min-width:136px}
 .status-pill{
@@ -90,6 +93,18 @@ button:focus-visible,input:focus-visible,.theme-select:focus-visible,[role="butt
 .status-pill.live::before{background:var(--ok);box-shadow:0 0 8px rgba(86,194,113,.45)}
 .status-pill.offline::before{background:var(--err);box-shadow:0 0 8px rgba(210,75,75,.45)}
 .status-pill.demo{color:var(--warn)}
+.ops-toggle{min-width:54px}
+.ops-menu{
+  position:absolute;right:0;top:calc(100% + 8px);z-index:40;width:360px;max-width:calc(100vw - 24px);
+  border:1px solid var(--acc);background:#0b0c0a;box-shadow:0 12px 36px rgba(0,0,0,.55);
+  border-radius:6px;padding:10px;display:grid;gap:10px;text-align:left
+}
+.ops-menu.hidden{display:none}
+.ops-section{display:grid;gap:6px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.ops-section:last-child{padding-bottom:0;border-bottom:0}
+.ops-label{color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:.8px}
+.ops-row{display:flex;gap:6px;align-items:center;justify-content:space-between}
+.ops-row button{white-space:nowrap}
 main{
   display:grid;grid-template-columns:repeat(12,minmax(0,1fr));
   grid-template-rows:minmax(220px,.55fr) minmax(360px,1fr) minmax(340px,.95fr);
@@ -435,6 +450,7 @@ main{
   .events{min-height:320px}
   .package-tools{display:block}
   .package-hint{text-align:left;margin-top:4px}
+  .header-actions{margin-left:auto}
   .transfer-compact-stages{grid-template-columns:repeat(2,minmax(0,1fr))}
   .transfer-stages{grid-template-columns:1fr 1fr}
   .transfer-peers{grid-template-columns:1fr}
@@ -459,11 +475,7 @@ main{
       </g>
       <path class="brand-link" d="M92.3 44H118M122 44H147.7" fill="none" stroke-width="1.7" stroke-linecap="round"/>
     </svg>
-    <br><span class="id" id="peer-id" data-tip="Full libp2p peer id for this node.">--</span>
-    <div class="share-peer" data-tip="Full multiaddr to share with other peers. Configure external_addresses when empty.">
-      <span class="share-value" id="share-address">set external_addresses to share</span>
-      <button type="button" id="copy-share" data-tip="Copy shareable peer multiaddr.">copy</button>
-    </div>
+    <span class="node-chip" id="peer-id" data-tip="Full libp2p peer id for this node.">peer --</span>
   </div>
   <button type="button" class="header-readiness" id="open-node-details" aria-label="Open node details" data-tip="Open version, uptime, swarm summary, setup gates, and network diagnostics.">
     <span class="health-card" id="health-card">
@@ -488,16 +500,33 @@ main{
     </span>
   </button>
   <div class="header-actions">
-    <label class="theme-label" for="theme-select">theme</label>
-    <select class="theme-select" id="theme-select" data-tip="Select dashboard color theme.">
-      <option value="theme-yellow">Terminal Yellow</option>
-      <option value="theme-green">Terminal Green</option>
-      <option value="theme-amber">Terminal Amber</option>
-      <option value="theme-tokyo">Tokyo Night</option>
-    </select>
-    <button type="button" id="copy-share-info" data-tip="Copy local PeerId, shareable multiaddrs, and paste-ready bootstrap_peers config.">copy peer</button>
-    <button type="button" id="copy-diagnostics" data-tip="Copy dashboard diagnostics for tester failure reports.">copy diag</button>
     <div class="status-pill offline" id="api-status" data-tip="Dashboard API and WebSocket connection state.">connecting</div>
+    <button type="button" class="ops-toggle" id="ops-toggle" aria-expanded="false" aria-controls="ops-menu" data-tip="Open copy, theme, and bootstrap utilities.">ops</button>
+    <div class="ops-menu hidden" id="ops-menu" role="menu" aria-label="dashboard operations">
+      <div class="ops-section">
+        <div class="ops-label">share address</div>
+        <div class="share-peer" data-tip="Full multiaddr to share with other peers. Configure external_addresses when empty.">
+          <span class="share-value" id="share-address">set external_addresses to share</span>
+          <button type="button" id="copy-share" data-tip="Copy shareable peer multiaddr.">copy</button>
+        </div>
+      </div>
+      <div class="ops-section">
+        <div class="ops-label">export</div>
+        <div class="ops-row">
+          <button type="button" id="copy-share-info" data-tip="Copy local PeerId, shareable multiaddrs, and paste-ready bootstrap_peers config.">copy peer</button>
+          <button type="button" id="copy-diagnostics" data-tip="Copy dashboard diagnostics for tester failure reports.">copy diag</button>
+        </div>
+      </div>
+      <div class="ops-section">
+        <label class="theme-label" for="theme-select">theme</label>
+        <select class="theme-select" id="theme-select" data-tip="Select dashboard color theme.">
+          <option value="theme-yellow">Terminal Yellow</option>
+          <option value="theme-green">Terminal Green</option>
+          <option value="theme-amber">Terminal Amber</option>
+          <option value="theme-tokyo">Tokyo Night</option>
+        </select>
+      </div>
+    </div>
   </div>
 </header>
 <main aria-label="guix-p2p operational dashboard">
@@ -685,6 +714,22 @@ function openHelp(ev,id){
 
 function closeHelp(){
   document.getElementById('help-popover').classList.add('hidden')
+}
+
+function toggleOpsMenu(){
+  var menu=document.getElementById('ops-menu');
+  var toggle=document.getElementById('ops-toggle');
+  var open=menu.classList.contains('hidden');
+  menu.classList.toggle('hidden',!open);
+  toggle.setAttribute('aria-expanded',open?'true':'false')
+}
+
+function closeOpsMenu(){
+  var menu=document.getElementById('ops-menu');
+  var toggle=document.getElementById('ops-toggle');
+  if(!menu||menu.classList.contains('hidden'))return;
+  menu.classList.add('hidden');
+  if(toggle)toggle.setAttribute('aria-expanded','false')
 }
 
 function setText(id,value){
@@ -2014,6 +2059,14 @@ document.addEventListener('click',function(ev){
   if(pop&&!pop.classList.contains('hidden')&&!pop.contains(ev.target)&&!ev.target.closest('.help-btn')){
     closeHelp()
   }
+  var ops=document.getElementById('ops-menu');
+  if(ops&&!ops.classList.contains('hidden')&&!ops.contains(ev.target)&&!ev.target.closest('#ops-toggle')){
+    closeOpsMenu()
+  }
+  if(ev.target.closest('#ops-toggle')){
+    toggleOpsMenu();
+    return
+  }
   var help=ev.target.closest('.help-btn');
   if(help&&help.dataset.helpKey){
     openHelp(ev,help.dataset.helpKey);
@@ -2095,6 +2148,7 @@ document.addEventListener('click',function(ev){
 document.addEventListener('keydown',function(ev){
   if(ev.key==='Escape'){
     closeHelp();
+    closeOpsMenu();
     closeDetail();
     return
   }
@@ -2140,7 +2194,7 @@ document.addEventListener('keydown',function(ev){
     fetch('/api/status').then(function(r){return r.json()}).then(function(s){
       DEMO_MODE=Boolean(s.demo);
       var peerEl=document.getElementById('peer-id');
-      peerEl.textContent=s.peer_id+(DEMO_MODE?' [demo]':'');
+      peerEl.textContent='peer '+peerIdShort(s.peer_id)+(DEMO_MODE?' [demo]':'');
       peerEl.dataset.tip=s.peer_id;
       var share=(s.shareable_addresses&&s.shareable_addresses[0])||'';
       var shareEl=document.getElementById('share-address');

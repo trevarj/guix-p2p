@@ -818,6 +818,11 @@ locally-seeded nars in real time:
   conventional high-contrast dark palette. Scrollbars follow the active theme,
   and active seed rows reserve separate columns for package path, size/block
   metadata, and stop controls to avoid overlap.
+- The header reserves the first glance for daemon readiness, network role, and
+  latest transfer source. Lower-frequency utilities live behind the compact
+  `ops` menu: copy share address, copy bootstrap bundle, copy diagnostics, and
+  theme selection. This keeps raw peer IDs and multiaddrs available without
+  letting them dominate the primary transfer/seeding workspace.
 - Keyboard focus is visible on interactive row cards, detail affordances, and
   controls. Motion-heavy row flash and drawer animations respect
   `prefers-reduced-motion`. Transfer, seed, package, and discovery rows expose

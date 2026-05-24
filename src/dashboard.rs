@@ -977,6 +977,8 @@ mod tests {
         for expected in [
             "aria-label=\"guix-p2p operational dashboard\"",
             "aria-label=\"Open node details\"",
+            "aria-controls=\"ops-menu\"",
+            "role=\"menu\" aria-label=\"dashboard operations\"",
             "role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"detail-title\"",
             "<h2 id=\"detail-title\">",
             "aria-label=\"'+attr('Open transfer evidence for ",
@@ -985,6 +987,7 @@ mod tests {
             "openDetailPanel",
             "trapDetailFocus",
             "DETAIL_RETURN_FOCUS",
+            "toggleOpsMenu",
             "open evidence &gt;",
             "stop seeding this nar",
             "metadata pending",
