@@ -36,6 +36,22 @@ Before publishing a bootstrap node:
 - Publish only the generated `/p2p/<peer-id>` multiaddr or `bootstrap_peers`
   snippet.
 
+## Support Boundary
+
+A bootstrap node helps peers find each other. It is not a privacy relay, a
+trust anchor, or a guarantee that home/VPN clients are publicly dialable.
+
+Recommended public commitment for the current rollout:
+
+- best-effort availability for known testers
+- stable DNS name, port, PeerId, and cache directory
+- dashboard bound to loopback only
+- no promise that all public peers can seed back through NAT
+- no user account or shell access for testers
+
+If the node also seeds packages, treat that as a separate seeder role. Keep the
+bootstrap address stable even when changing which packages are seeded.
+
 ## Shepherd Service
 
 ```scheme
@@ -131,6 +147,53 @@ bootstrap_peers = "/dns4/bootstrap.example.org/udp/6881/quic-v1/p2p/12D3KooW..."
 
 Multiple bootstrap peers are comma-separated.
 
+## Upgrade And Restart
+
+The PeerId must survive upgrades. Do not delete or move `/var/cache/guix-p2p`
+unless you intentionally want a new bootstrap identity and a new public
+multiaddr.
+
+Before an upgrade:
+
+```sh
+guix-p2p --version
+guix-p2p --share-info --cache-dir /var/cache/guix-p2p
+curl -s http://127.0.0.1:3030/api/status
+```
+
+Save the reported PeerId and published multiaddr. After installing the new
+binary or reconfiguring the host service, restart only `guix-p2p`:
+
+```sh
+sudo herd restart guix-p2p-bootstrap
+```
+
+If the node uses the packaged `guix-p2p-service-type` instead of the custom
+service above, restart that service name instead:
+
+```sh
+sudo herd restart guix-p2p
+```
+
+After restart:
+
+```sh
+guix-p2p --version
+guix-p2p --share-info --cache-dir /var/cache/guix-p2p
+curl -s http://127.0.0.1:3030/api/status
+```
+
+Confirm:
+
+- PeerId did not change.
+- `listen_addr` and `shareable_addresses` still use the published transport.
+- dashboard `NET` is still `share` or `share/no-bs`.
+- remote `guix-p2p --test-connectivity <published-multiaddr>` succeeds.
+
+If the PeerId changed by accident, restore the old `/var/cache/guix-p2p`
+identity from backup or publish the new full `/p2p/<peer-id>` multiaddr and
+update tester configuration.
+
 ## Operational Checks
 
 - `guix-p2p --doctor --cache-dir /var/cache/guix-p2p`: local readiness.
@@ -143,6 +206,29 @@ Multiple bootstrap peers are comma-separated.
 - logs: look for `Swarm listening`, `Bootstrapping from`, and connection events.
 - `/api/seeds`: may be empty on a pure bootstrap node.
 - `/api/catalog`: grows only when the node is used in substitute query flow.
+
+## Incident Checks
+
+If testers cannot connect:
+
+1. Confirm the daemon is listening on the intended transport and port.
+2. Confirm host firewall rules still allow that transport.
+3. Confirm DNS still resolves to the host.
+4. Confirm `external_addresses` still matches the address testers dial.
+5. Confirm the published address ends in the current PeerId.
+6. Ask one outside machine to run `guix-p2p --test-connectivity`.
+
+For TCP:
+
+```sh
+ss -ltnp | grep guix-p2p
+```
+
+For QUIC/UDP:
+
+```sh
+ss -lunp | grep guix-p2p
+```
 
 Systemd unit examples are not primary for this project; Guix System deployment
 should use Shepherd.

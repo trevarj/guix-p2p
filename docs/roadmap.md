@@ -82,7 +82,8 @@ needs:
 
 - Stable bootstrap node infrastructure.
 - Operational ownership and support expectations.
-- Documented node upgrade and restart procedure.
+- Routine execution of the documented node upgrade, restart, and incident
+  checks in [bootstrap-node.md](bootstrap-node.md).
 - Clear guidance for trusted testers versus public peers.
 
 ## Full-P2P Metadata
