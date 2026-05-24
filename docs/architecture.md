@@ -821,6 +821,9 @@ locally-seeded nars in real time:
   next-step hint. Panels explain whether the user should run a Guix build,
   configure bootstrap peers, seed a package, or inspect daemon logs instead of
   showing only a blank or terse placeholder.
+- Transfer source and event categories are rendered as compact badges. P2P,
+  HTTP fallback, discovery, peer, seed, and failure events can be scanned by
+  color and label without reading every log line.
 - Dashboard colors are selected from a named theme dropdown. Terminal yellow,
   green, and amber preserve the console look; Tokyo Night provides a more
   conventional high-contrast dark palette. Scrollbars follow the active theme,

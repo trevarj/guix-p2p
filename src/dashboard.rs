@@ -991,6 +991,8 @@ mod tests {
             "toggleOpsMenu",
             "emptyState",
             "empty-title",
+            "sourceClass",
+            "kind '+attr(e.category)+'",
             "open evidence &gt;",
             "stop seeding this nar",
             "metadata pending",

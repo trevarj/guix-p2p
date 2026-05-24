@@ -167,7 +167,15 @@ main{
 }
 .events .entry.added{animation:slidein .3s ease}
 .events .entry .ts{color:var(--dim);margin-right:8px}
-.events .entry .kind{color:var(--muted);text-transform:uppercase;font-size:10px}
+.events .entry .kind{
+  justify-self:start;border:1px solid var(--line);background:var(--bg3);color:var(--muted);
+  text-transform:uppercase;font-size:9px;letter-spacing:.5px;border-radius:3px;padding:1px 5px
+}
+.events .entry .kind.transfer{color:var(--ok);border-color:rgba(103,200,121,.45)}
+.events .entry .kind.seed{color:var(--acc);border-color:rgba(216,179,58,.45)}
+.events .entry .kind.peer{color:var(--muted);border-color:rgba(168,148,66,.45)}
+.events .entry .kind.discovery{color:var(--soft);border-color:rgba(216,200,117,.45)}
+.events .entry .kind.failure{color:var(--err);border-color:rgba(227,106,106,.5)}
 .events .entry .msg{min-width:0;white-space:normal;overflow-wrap:anywhere}
 .events .entry .repeat{color:var(--acc);font-size:10px;margin-left:6px}
 .events .entry.peer-conn .sym{color:var(--ok)}
@@ -292,6 +300,7 @@ main{
 .source-badge.p2p,.source-badge.ready{color:var(--ok);border-color:rgba(103,200,121,.5)}
 .source-badge.http,.source-badge.warn{color:var(--warn);border-color:rgba(216,166,66,.5)}
 .source-badge.error{color:var(--err);border-color:rgba(227,106,106,.5)}
+.source-badge.none{color:var(--dim)}
 .transfer-card{
   display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:12px;align-items:center;
   border:1px solid var(--line);background:var(--bg2);padding:8px;border-radius:4px;
@@ -822,6 +831,13 @@ function sourceDisplay(source){
   return source
 }
 
+function sourceClass(source){
+  if(!source)return'none';
+  if(source.indexOf('http')>=0)return'http';
+  if(source.indexOf('p2p')>=0)return'p2p';
+  return'none'
+}
+
 function latestTransfer(){
   if(TRANSFER)return TRANSFER;
   var keys=Object.keys(TRANSFERS);
@@ -1112,7 +1128,7 @@ function renderEvents(){
     return '<div class="entry '+esc(e.cls)+(e.added?' added':'')+'">'
       +'<span class="ts">'+esc(ts)+'</span>'
       +'<span class="sym">'+esc(e.sym)+'</span>'
-      +'<span class="kind">'+esc(e.category)+'</span>'
+      +'<span class="kind '+attr(e.category)+'">'+esc(e.category)+'</span>'
       +'<span class="msg" data-tip="'+attr(e.msg)+'">'+esc(e.msg)+(e.repeat_count>1?'<span class="repeat">x'+esc(e.repeat_count)+'</span>':'')+'</span>'
       +'</div>'
   }).join('');
@@ -1496,6 +1512,7 @@ function renderTransferPath(){
   var downloadPeers=Object.keys(TRANSFER.download_peers||{}).length;
   var servingPeers=Object.keys(TRANSFER.serving_peers||{}).length;
   var progress=transferProgressSummary(TRANSFER);
+  var srcClass=sourceClass(TRANSFER.source);
   el.innerHTML='<div class="transfer-card" data-action="transfer-detail" role="button" tabindex="0" aria-label="'+attr('Open transfer evidence for '+transferSubjectName(TRANSFER)+', '+progress.label)+'">'
     +'<div class="transfer-summary">'
     +'<div class="transfer-subject">'
@@ -1503,7 +1520,7 @@ function renderTransferPath(){
     +'<div class="transfer-hash">'+esc(TRANSFER.nar_hash||'?')+'</div>'
     +'<div class="transfer-progress"><strong>'+esc(progress.label)+'</strong> · '+esc(progress.detail)+'</div>'
     +'<div class="transfer-meta">'+esc(TRANSFER.nar_size!=null?fmtSize(TRANSFER.nar_size):'size unknown')+'</div>'
-    +'<div class="transfer-meta"><span class="source-badge '+attr((TRANSFER.source||'').indexOf('http')>=0?'http':'p2p')+'">'+esc(sourceDisplay(TRANSFER.source))+'</span></div>'
+    +'<div class="transfer-meta"><span class="source-badge '+attr(srcClass)+'">'+esc(sourceDisplay(TRANSFER.source))+'</span></div>'
     +'<div class="transfer-meta">'+esc((TRANSFER.total_blocks_received||0)+' blocks down / '+(TRANSFER.total_blocks_served||0)+' blocks up')+'</div>'
     +'</div>'
     +'<div class="transfer-compact-stages">'+renderTransferStageDots(TRANSFER)+'</div>'
@@ -1521,12 +1538,13 @@ function renderTransferPath(){
 function openTransferDetail(){
   if(!TRANSFER)return;
   var c=document.getElementById('detail-content');
+  var srcClass=sourceClass(TRANSFER.source);
   c.innerHTML='<h2 id="detail-title">transfer evidence</h2>'
     +'<div class="field"><label>package</label><span class="val">'+esc(transferSubjectName(TRANSFER))+'</span></div>'
     +'<div class="field"><label>store</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(TRANSFER.store_path||'?')+'</span></div>'
     +'<div class="field"><label>hash</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(TRANSFER.nar_hash||'?')+'</span></div>'
     +'<div class="field"><label>size</label><span class="val">'+esc(TRANSFER.nar_size!=null?fmtSize(TRANSFER.nar_size):'unknown')+'</span></div>'
-    +'<div class="field"><label>source</label><span class="val">'+esc(sourceDisplay(TRANSFER.source))+'</span></div>'
+    +'<div class="field"><label>source</label><span class="val"><span class="source-badge '+attr(srcClass)+'">'+esc(sourceDisplay(TRANSFER.source))+'</span></span></div>'
     +'<div class="field"><label>downloaded</label><span class="val">'+esc((TRANSFER.total_blocks_received||0)+' blocks, '+fmtBytes(TRANSFER.total_bytes_received||0))+'</span></div>'
     +'<div class="field"><label>served</label><span class="val">'+esc((TRANSFER.total_blocks_served||0)+' blocks')+'</span></div>'
     +'<h3>proof stages</h3>'
