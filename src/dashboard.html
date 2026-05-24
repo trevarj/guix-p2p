@@ -541,7 +541,7 @@ main{
   </section>
 </main>
 <div class="overlay hidden" id="overlay">
-  <div class="detail">
+  <div class="detail" role="dialog" aria-modal="true" aria-labelledby="detail-title" tabindex="-1">
     <button class="close" id="close-detail" type="button" aria-label="close detail">x</button>
     <div id="detail-content"></div>
   </div>
@@ -579,6 +579,7 @@ var WS=null;
 var WS_RETRY=1000;
 var SERVER_STARTED=null;
 var DEMO_MODE=false;
+var DETAIL_RETURN_FOCUS=null;
 var HELP_TEXT={
   dashboard:['Dashboard','This page is the local operational view for a guix-p2p daemon. It combines seed inventory, transfer proof evidence, peer health, discovered substitute metadata, and recent daemon events.'],
   overview:['Readiness','A compact first-screen summary for the local daemon: health, network role, and latest transfer source.\n\nVersion, uptime, swarm summary, tester setup gates, and full network diagnostics are available from the header node details button so the primary seeding workspace stays unobstructed. Detailed counts live in their owner panels below.'],
@@ -916,7 +917,7 @@ function openNodeDetails(){
   var connectivity=CONNECTIVITY||{};
   var share=(connectivity.shareable_addresses||[]).join('\n')||'none';
   var bootstrap=(LAST_STATUS&&LAST_STATUS.bootstrap_peers||[]).join('\n')||'none';
-  c.innerHTML='<h2>node details</h2>'
+  c.innerHTML='<h2 id="detail-title">node details</h2>'
     +'<div class="detail-grid">'
     +'<div class="info-card" data-tip="guix-p2p version and embedded commit.">'
     +'<span class="k">version</span><span class="v" id="node-version">'+esc(version)+'</span><span class="sub" id="uptime">'+esc(currentUptimeText())+'</span>'
@@ -937,7 +938,7 @@ function openNodeDetails(){
     +'<div class="tester-grid" id="tester-checks">'+testerChecklistHtml()+'</div>'
     +'<h3>actions</h3>'
     +'<button type="button" class="readiness-action" id="network-diagnostics" data-tip="Open full doctor-style network diagnostics.">network diagnostics</button>';
-  document.getElementById('overlay').classList.remove('hidden');
+  openDetailPanel();
   decorateHelpButtons(c);
   renderOverview();
   renderTesterChecklist()
@@ -959,7 +960,7 @@ function openDiagnosticsDetail(){
     }).join('');
     var conn=report.connectivity||{};
     var share=(conn.shareable_addresses||[]).join('\n')||'none';
-    c.innerHTML='<h2>network diagnostics</h2>'
+    c.innerHTML='<h2 id="detail-title">network diagnostics</h2>'
       +'<div class="field"><label>state</label><span class="val">'+esc(conn.state||'unknown')+'</span></div>'
       +'<div class="field"><label>detail</label><span class="val">'+esc(conn.detail||'?')+'</span></div>'
       +'<div class="field"><label>shareable</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(share)+'</span></div>'
@@ -967,7 +968,7 @@ function openDiagnosticsDetail(){
       +'<div class="field"><label>warnings</label><span class="val">'+esc(report.has_warnings?'yes':'no')+'</span></div>'
       +'<h3>checks</h3>'
       +(checks||'<div class="empty">no checks reported</div>');
-    document.getElementById('overlay').classList.remove('hidden')
+    openDetailPanel()
   }).catch(function(){
     addEvent('dl-fail','x','Failed to load diagnostics')
   })
@@ -1458,7 +1459,7 @@ function renderTransferPath(){
 function openTransferDetail(){
   if(!TRANSFER)return;
   var c=document.getElementById('detail-content');
-  c.innerHTML='<h2>transfer evidence</h2>'
+  c.innerHTML='<h2 id="detail-title">transfer evidence</h2>'
     +'<div class="field"><label>package</label><span class="val">'+esc(transferSubjectName(TRANSFER))+'</span></div>'
     +'<div class="field"><label>store</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(TRANSFER.store_path||'?')+'</span></div>'
     +'<div class="field"><label>hash</label><span class="val" style="font-size:11px;word-break:break-all">'+esc(TRANSFER.nar_hash||'?')+'</span></div>'
@@ -1475,7 +1476,7 @@ function openTransferDetail(){
     +renderTransferPeers('downloaded from',TRANSFER.download_peers)
     +renderTransferPeers('served to',TRANSFER.serving_peers)
     +'</div>';
-  document.getElementById('overlay').classList.remove('hidden');
+  openDetailPanel();
   decorateHelpButtons(c)
 }
 
@@ -1637,7 +1638,7 @@ function openSeedDetail(hash){
   var bs=s.block_size?fmtSize(s.block_size):'256KB';
   var source=seedSource(s);
   var created=s.created_at?new Date(s.created_at*1000).toISOString().slice(0,16):'?';
-  c.innerHTML='<h2>seeded nar</h2>'
+  c.innerHTML='<h2 id="detail-title">seeded nar</h2>'
     +'<div class="detail-section">'
     +'<h3>identity</h3>'
     +'<div class="field"><label>name</label><span class="val">'+esc(seedDisplayTitle(s,hash))+'</span></div>'
@@ -1656,8 +1657,7 @@ function openSeedDetail(hash){
     +'<div class="detail-actions">'
     +'<button type="button" class="readiness-action stop-seed" data-stop-seed="'+attr(hash)+'" data-store-path="'+attr(s.store_path||'')+'">stop seeding this nar</button>'
     +'</div>';
-  var ov=document.getElementById('overlay');
-  ov.classList.remove('hidden');
+  openDetailPanel();
 }
 
 function openDetail(hash){
@@ -1678,7 +1678,7 @@ function openDetail(hash){
     var rawBlock=rawNarinfo?'<div class="narinfo-toggle" role="button" tabindex="0">\u25b6 narinfo (raw signed text)</div>'
       +'<div class="narinfo-raw">'+esc(rawNarinfo)+'</div>':'';
 
-    c.innerHTML='<h2>'+esc(b.nar_hash.slice(0,24)+'...')+'</h2>'
+    c.innerHTML='<h2 id="detail-title">'+esc(b.nar_hash.slice(0,24)+'...')+'</h2>'
       +'<div class="field"><label>store</label><span class="val">'+esc(b.store_path||'?')+'</span></div>'
       +'<div class="field"><label>size</label><span class="val">'+esc(sz)+'</span></div>'
       +'<div class="field"><label>deriver</label><span class="val">'+esc(b.deriver||'?')+'</span></div>'
@@ -1688,15 +1688,53 @@ function openDetail(hash){
       +'<h3>providers ('+(b.providers||[]).length+')</h3>'
       +'<div style="margin-left:8px">'+(provs||'<span style="color:var(--dim)">none known</span>')+'</div>'
       +rawBlock;
-    var ov=document.getElementById('overlay');
-    ov.classList.remove('hidden');
+    openDetailPanel();
   }).catch(function(){
     addEvent('dl-fail','x','Failed to load build detail')
   });
 }
 
 function closeDetail(){
-  document.getElementById('overlay').classList.add('hidden')
+  var overlay=document.getElementById('overlay');
+  if(overlay.classList.contains('hidden'))return;
+  overlay.classList.add('hidden');
+  if(DETAIL_RETURN_FOCUS&&document.contains(DETAIL_RETURN_FOCUS)){
+    DETAIL_RETURN_FOCUS.focus()
+  }
+  DETAIL_RETURN_FOCUS=null
+}
+
+function openDetailPanel(){
+  var overlay=document.getElementById('overlay');
+  var active=document.activeElement;
+  if(active&&!overlay.contains(active)){
+    DETAIL_RETURN_FOCUS=active
+  }
+  overlay.classList.remove('hidden');
+  var detail=overlay.querySelector('.detail');
+  var close=document.getElementById('close-detail');
+  if(close)close.focus();
+  else if(detail)detail.focus()
+}
+
+function trapDetailFocus(ev){
+  if(ev.key!=='Tab')return;
+  var overlay=document.getElementById('overlay');
+  if(overlay.classList.contains('hidden'))return;
+  var nodes=overlay.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])');
+  var focusable=Array.prototype.filter.call(nodes,function(el){
+    return !el.disabled&&el.offsetParent!==null
+  });
+  if(!focusable.length)return;
+  var first=focusable[0];
+  var last=focusable[focusable.length-1];
+  if(ev.shiftKey&&document.activeElement===first){
+    ev.preventDefault();
+    last.focus()
+  }else if(!ev.shiftKey&&document.activeElement===last){
+    ev.preventDefault();
+    first.focus()
+  }
 }
 
 document.getElementById('overlay').addEventListener('click',function(ev){
@@ -2057,8 +2095,10 @@ document.addEventListener('click',function(ev){
 document.addEventListener('keydown',function(ev){
   if(ev.key==='Escape'){
     closeHelp();
-    closeDetail()
+    closeDetail();
+    return
   }
+  trapDetailFocus(ev);
   if((ev.key==='Enter'||ev.key===' ')&&ev.target&&ev.target.closest('#network-diagnostics')){
     ev.preventDefault();
     openDiagnosticsDetail()

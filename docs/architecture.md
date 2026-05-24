@@ -825,6 +825,11 @@ locally-seeded nars in real time:
   same operational context as pointer users.
   A dashboard unit test pins these embedded-HTML affordances so the refined
   layout, labels, and copy cannot silently regress.
+- The side drawer uses dialog semantics (`role="dialog"`, `aria-modal`, and a
+  stable `detail-title`) and a shared open helper so node details, diagnostics,
+  transfer evidence, seed details, and discovery details behave consistently.
+  It keeps keyboard focus inside the drawer while open, supports Escape to
+  close, and returns focus to the row or header control that opened it.
 - Active seed rows display the package/store item name when store-path metadata
   is available, with the full store path and NAR hash available in details.
   Hash-only rows include provenance text such as startup cache, manual cache
