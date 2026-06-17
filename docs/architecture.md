@@ -106,7 +106,7 @@ guix-p2p (Rust, libp2p)
 | NAT traversal | Built into libp2p (autonat/relay/dcutr), deferred post-MVP | Significant complexity; initial users need open ports or IPv6 |
 | Daemon integration | Unix socket relay + Guix substitute extension | Zero daemon C++ changes; relay gives <1ms startup |
 | Narinfos | HTTP fetch from official substitute URLs, optional local metadata file for offline harnesses | Tiny (<500 bytes); existing trust chain unchanged for HTTP, while local metadata is reserved for explicit offline tests |
-| Nars | DHT + swarm; not-found replies let guix-daemon chain to HTTP substituters | Heavy payload; distributed across peers for P2P |
+| Nars | Built-in Guix HTTP substitutes first by default; P2P fallback only for misses | Preserves normal Guix behavior while still allowing peer delivery when HTTP has no substitute |
 | Distribution | External project, crates.io for development, Guix channel for packaging | Not targeting upstream Guix inclusion (would need pure Guile) |
 
 ## Why Not BitTorrent v2
@@ -154,16 +154,18 @@ The daemon protocol follows guix-daemon's substituter pipe protocol exactly.
 
 The Unix socket between daemon and relay uses channel prefix framing:
 - `fd4:<line>\n` — structured reply data (have paths, info metadata, success/not-found)
+- `fd4-empty:\n` — an empty structured reply line, used for blank `info`
+  fields such as an absent deriver
 - `out:<line>\n` — trace output (`@ download-started`, `@ download-succeeded`)
 - `nar:<base64-chunk>\n` / `nar-end\n` — verified NAR bytes for the current
   substitute request. The daemon streams these chunks directly to the socket
   instead of buffering a full base64-encoded NAR reply.
 
-The extension socket client demuxes these: `fd4:` lines are written to fd 4,
-`out:` lines to stdout (fd 1), and `nar:` chunks are decoded to the destination
-from the `substitute <store-path> <dest>` command. Guix's substituter protocol
-expects that destination to be a NAR file; `guix-daemon` restores it into the
-store after the substituter reports `success` on fd 4.
+The extension socket client demuxes these: `fd4:` and `fd4-empty:` lines are
+written to fd 4, `out:` lines to stdout (fd 1), and `nar:` chunks are decoded to
+the destination from the `substitute <store-path> <dest>` command. Guix's
+substituter protocol expects that destination to be a NAR file; `guix-daemon`
+restores it into the store after the substituter reports `success` on fd 4.
 Destination writes happen inside the substitute process spawned by
 `guix-daemon`, not in the long-lived user daemon. This keeps the warm swarm
 architecture while matching guix-daemon's permission model.
@@ -222,24 +224,22 @@ the narinfo's expected `NarHash`. If they don't match:
 ```
 1. "have /gnu/store/abc...-foo /gnu/store/def...-bar"
 2. For each path, extract 32-char hash part
-3. If policy is http-first or p2p-first:
-     → include all paths in reply (we can serve via HTTP)
-   If policy is p2p-only:
+3. In the default extension routing:
+     → ask built-in Guix first
+     → relay only missing paths to guix-p2p with a p2p-only socket mode
+   If the extension is explicitly routed p2p-first:
+     → relay directly to guix-p2p using the daemon policy
+   If the extension is explicitly routed p2p-only:
      → kad.get_providers(nar_hash) → collect/deduplicate matching PeerIds
      → include path only if peers found
    "info" returns verified narinfo metadata without DHT-gating; availability is
    enforced by "have" and the final "substitute" request.
 
 4. "substitute /gnu/store/abc...-foo /tmp/dest"
-5. Fetch narinfo from substitute servers, verify signature
-6. If policy is http-first:
-     → try HTTP nar download first
-     → on failure, fall back to P2P swarm
-   If policy is p2p-first:
-     → try P2P swarm first
-     → on failure, fall back to HTTP nar download
-   If policy is p2p-only:
-     → P2P swarm only, fail on no providers
+5. In default extension routing, call built-in Guix first.
+6. If built-in Guix reports `not-found`, relay to guix-p2p with p2p-only socket mode.
+   Explicit p2p-first routing relays directly to guix-p2p using the daemon policy.
+   Explicit p2p-only routing relays directly to guix-p2p with HTTP NAR fallback disabled.
 7. On success: write nar to dest, save to NarStore for re-seeding, announce in DHT
 8. Reply "success sha256:... <size>" or "not-found <path>"
 ```
@@ -306,8 +306,8 @@ Nar downloads use the substitute policy to choose between P2P and HTTP.
 
 ### Substitute Policy
 
-Three modes control how nars are sourced, configured via `--policy` CLI flag
-or `substitute_policy` in the TOML config file:
+Three daemon modes control how guix-p2p itself sources nars, configured via the
+`--policy` CLI flag or `substitute_policy` in the TOML config file:
 
 | Mode | Behavior |
 |------|----------|
@@ -315,8 +315,10 @@ or `substitute_policy` in the TOML config file:
 | `p2p-first` | Try P2P first. Fall back to HTTP nar download if swarm fails (not enough providers, handshake failure, download error). |
 | `http-first` | Try HTTP nar download first. Fall back to P2P if HTTP fails or returns 404. |
 
-Default: `http-first`. Sparse early-test networks should use HTTP first for
-normal Guix work, then opt into `p2p-first` when deliberately validating peer
+Daemon default: `http-first`. Normal Guix integration also defaults to
+`builtin-first` extension routing, so Guix's built-in substituter owns HTTP
+NAR downloads and guix-p2p is only asked for P2P fallback after a built-in miss.
+Use `p2p-first` extension routing only when deliberately validating peer
 transfer behavior.
 
 For `p2p-first`, small NARs up to 1 MiB use a short provider-discovery budget
@@ -325,9 +327,10 @@ packages where HTTP can usually finish faster than peer discovery on a sparse
 network. Larger NARs and `p2p-only` retain the normal `request_timeout_secs`
 budget.
 
-The policy also affects the `have` query:
-- `http-first` and `p2p-first`: Always respond with the path (we can serve via HTTP fallback).
-- `p2p-only`: Only respond if DHT providers exist for the nar hash.
+The extension routing affects the `have` query:
+- `builtin-first`: built-in Guix replies first; missing paths are checked with guix-p2p p2p-only lookup.
+- `p2p-first`: guix-p2p handles the query using the daemon policy.
+- `p2p-only`: guix-p2p handles the query with HTTP NAR fallback disabled.
 
 ### HTTP Nar Download
 
@@ -504,13 +507,15 @@ does not scan that directory unless it is in `GUIX_EXTENSIONS_PATH`. The
 ```
 guix-daemon invokes "guix substitute --query"
   → extension intercepts "--query"
-  → if socket exists: connect to $GUIX_P2P_SOCKET and relay each query line/reply
-  → else: delegate to built-in guix substitute --query
+  → default: ask built-in guix substitute first
+  → if built-in misses and socket exists: ask guix-p2p with p2p-only query mode
+  → p2p-first/p2p-only routing: relay directly to $GUIX_P2P_SOCKET
 
 guix-daemon invokes "guix substitute --substitute"
   → extension intercepts "--substitute"
-  → if socket exists: connect to $GUIX_P2P_SOCKET, receive daemon nar output, and restore it into Guix's destination path
-  → else: delegate to built-in guix substitute --substitute
+  → default: ask built-in guix substitute first
+  → if built-in replies not-found and socket exists: ask guix-p2p with p2p-only substitute mode
+  → p2p-first/p2p-only routing: relay directly to $GUIX_P2P_SOCKET
 
 other substitute invocations
   → delegate to built-in guix substitute
@@ -521,6 +526,8 @@ Integration contract:
 - `GUIX_EXTENSIONS_PATH` lets Guix find `(guix extensions substitute)`.
 - `GUIX_P2P_SOCKET` tells the extension where the warm relay daemon is
   listening.
+- `GUIX_P2P_SUBSTITUTE_ROUTING` selects extension routing:
+  `builtin-first` (default), `p2p-first`, or `p2p-only`.
 - Query mode is interactive: the extension must write the reply for each
   `have`/`info` command before waiting for stdin EOF, because `guix-daemon`
   keeps the query process open.
@@ -570,9 +577,11 @@ user's TOML file:
           (policy "http-first")))
 ```
 
-The service defaults to the project bootstrap node and `http-first` policy. Set
-`(bootstrap-peers '())` to run without default bootstrap peers, or set
-`(policy "p2p-first")` for transfer-validation sessions.
+The service defaults to the project bootstrap node and `http-first` daemon
+policy. Set `(bootstrap-peers '())` to run without default bootstrap peers.
+Transfer-validation sessions should opt into
+`#:substitute-routing "p2p-first"` on
+`guix-p2p-enable-guix-daemon-extension`.
 
 For standalone bootstrap-node operations, use the Shepherd-first guide in
 [`bootstrap-node.md`](bootstrap-node.md). The equivalent low-level service shape

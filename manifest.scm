@@ -1,4 +1,5 @@
 (use-modules (guix packages)
+             (guix profiles)
              (gnu)
              (gnu packages base)
              (gnu packages commencement)

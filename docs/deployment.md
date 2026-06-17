@@ -123,9 +123,13 @@ Put this in the `services` field of your `operating-system` configuration:
 system profile, and creates the default cache directory. System daemon
 bootstrap peers default to the project bootstrap node and can be overridden in
 `guix-p2p-configuration`; set `(bootstrap-peers '())` to disable the default.
-The service uses `http-first` by default while the public P2P network is
-sparse. Set `(policy "p2p-first")` when deliberately validating peer-transfer
-behavior.
+The extension uses built-in Guix substitutes first by default, so normal
+`guix pull` and `guix build` behavior stays unchanged. guix-p2p is queried
+only after the built-in substituter reports a miss, and that fallback uses
+P2P-only socket mode so Guix continues to own HTTP NAR downloads.
+Set `#:substitute-routing "p2p-first"` on
+`guix-p2p-enable-guix-daemon-extension` only when deliberately validating
+peer-transfer behavior.
 System daemon bootstrap peers should live in `guix-p2p-configuration`, not in a user's
 `~/.config/guix-p2p/config.toml`, because Shepherd starts the daemon from the
 system service definition with explicit command-line options. Installing the
@@ -156,6 +160,8 @@ Optional environment overrides:
   helper prepends `/run/current-system/profile/share/guix/extensions` to the
   daemon's existing value.
 - `GUIX_P2P_SOCKET`: relay socket path.
+- `GUIX_P2P_SUBSTITUTE_ROUTING`: extension routing mode. Defaults to
+  `builtin-first`; `p2p-first` and `p2p-only` are explicit test/proof modes.
 - `GUIX_P2P_BIN`: legacy relay/wrapper binary path. The Scheme extension no
   longer execs this binary for normal substitute traffic.
 

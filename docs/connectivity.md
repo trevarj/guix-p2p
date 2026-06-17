@@ -138,7 +138,8 @@ For a two-person known-tester proof:
 1. Both nodes should use the same bootstrap peer list.
 2. The seeder should either be publicly reachable or share a LAN with the
    fetcher.
-3. The fetcher should use `p2p-first` only for the proof run.
+3. The fetcher should use `#:substitute-routing "p2p-first"` only for the
+   proof run.
 4. A successful proof needs transfer evidence in the dashboard, not just a
    successful `guix build` that may have used HTTP.
 

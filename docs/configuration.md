@@ -10,9 +10,11 @@ All other tuning belongs in TOML.
 
 For the Guix System service, put normal daemon network settings in
 `guix-p2p-configuration` fields such as `bootstrap-peers`,
-`external-addresses`, and `policy`. The Shepherd service starts the daemon with
-explicit command-line options and does not read a user's
-`~/.config/guix-p2p/config.toml`.
+`external-addresses`, and `policy`. Extension routing is configured on
+`guix-p2p-enable-guix-daemon-extension`; it defaults to `builtin-first`, where
+Guix's built-in substituter owns HTTP downloads and guix-p2p is only a P2P
+fallback for misses. The Shepherd service starts the daemon with explicit
+command-line options and does not read a user's `~/.config/guix-p2p/config.toml`.
 
 Run local readiness checks with:
 
@@ -112,8 +114,25 @@ command line:
 
 The service default includes the project bootstrap node and `http-first`
 policy. Override `bootstrap-peers` with a custom list, or set
-`(bootstrap-peers '())` for an isolated node. Use `(policy "p2p-first")` when
-deliberately validating peer transfer behavior.
+`(bootstrap-peers '())` for an isolated node.
+
+The daemon policy does not by itself make normal Guix commands prefer
+guix-p2p. The extension helper defaults to built-in Guix first:
+
+```scheme
+(guix-p2p-enable-guix-daemon-extension config)
+```
+
+For transfer proof runs, opt into direct guix-p2p routing:
+
+```scheme
+(guix-p2p-enable-guix-daemon-extension
+ config
+ #:substitute-routing "p2p-first")
+```
+
+Use `#:substitute-routing "p2p-only"` for pure P2P fallback tests with HTTP
+NAR fallback disabled at the socket boundary.
 
 Use `extra-options` only for flags that do not yet have service fields.
 
@@ -140,6 +159,11 @@ The dashboard `/api/status` response includes a `connectivity` object and
 - `p2p-only`: fetch narinfo metadata, require enough P2P providers, and never use HTTP nar fallback.
 - `p2p-first`: try P2P first, then HTTP nar fallback.
 - `http-first`: try HTTP nar download first, then P2P fallback.
+
+In default Guix System integration, these policies apply only when guix-p2p is
+actually asked to serve a NAR. `builtin-first` extension routing asks Guix's
+built-in substituter first and calls guix-p2p with p2p-only socket mode only
+after a miss.
 
 `substitute_urls` are still used for narinfo metadata in `p2p-only` mode. The
 policy disables HTTP nar download fallback, not narinfo lookup.

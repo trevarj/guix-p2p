@@ -594,11 +594,14 @@ where
             split_env_paths(extensions_path).iter().any(|path| path_contains_guix_p2p(path));
         let has_socket = value("GUIX_P2P_SOCKET").is_some();
         if has_guix_p2p_path || has_socket {
-            let detail = if has_guix_p2p_path {
+            let mut detail = if has_guix_p2p_path {
                 format!("GUIX_EXTENSIONS_PATH includes {extensions_path}")
             } else {
                 "GUIX_EXTENSIONS_PATH plus GUIX_P2P_SOCKET are set".to_string()
             };
+            if let Some(routing) = value("GUIX_P2P_SUBSTITUTE_ROUTING") {
+                detail.push_str(&format!("; substitute routing is {routing}"));
+            }
             evidence.push(GuixIntegrationEvidence { kind: GuixIntegrationKind::Extension, detail });
         }
     }
@@ -622,11 +625,13 @@ fn guix_integration_evidence_from_service_source(
 
     let has_extensions = source.contains("GUIX_EXTENSIONS_PATH=");
     let has_socket = source.contains("GUIX_P2P_SOCKET=");
+    let has_routing = source.contains("GUIX_P2P_SUBSTITUTE_ROUTING=");
     if has_extensions && has_socket {
         return Some(GuixIntegrationEvidence {
             kind: GuixIntegrationKind::Extension,
             detail: format!(
-                "generated guix-daemon service includes GUIX_EXTENSIONS_PATH and GUIX_P2P_SOCKET at {}",
+                "generated guix-daemon service includes GUIX_EXTENSIONS_PATH, GUIX_P2P_SOCKET{} at {}",
+                if has_routing { ", and GUIX_P2P_SUBSTITUTE_ROUTING" } else { "" },
                 path.display()
             ),
         });
@@ -987,10 +992,12 @@ mod tests {
                 "/gnu/store/hash-guix-p2p/share/guix/extensions".into(),
             ),
             ("GUIX_P2P_SOCKET".into(), "/var/cache/guix-p2p/guix-p2p.sock".into()),
+            ("GUIX_P2P_SUBSTITUTE_ROUTING".into(), "builtin-first".into()),
         ]);
 
         assert_eq!(evidence.len(), 1);
         assert_eq!(evidence[0].kind, GuixIntegrationKind::Extension);
+        assert!(evidence[0].detail.contains("builtin-first"));
     }
 
     #[test]
@@ -1025,7 +1032,8 @@ mod tests {
              (list "/gnu/store/hash-guix/bin/guix-daemon")
              #:environment-variables
              (quote ("GUIX_EXTENSIONS_PATH=/run/current-system/profile/share/guix/extensions"
-                     "GUIX_P2P_SOCKET=/var/cache/guix-p2p/guix-p2p.sock")))
+                     "GUIX_P2P_SOCKET=/var/cache/guix-p2p/guix-p2p.sock"
+                     "GUIX_P2P_SUBSTITUTE_ROUTING=builtin-first")))
             "#,
             Path::new("/gnu/store/hash-shepherd-guix-daemon.scm"),
         )
@@ -1033,6 +1041,7 @@ mod tests {
 
         assert_eq!(evidence.kind, GuixIntegrationKind::Extension);
         assert!(evidence.detail.contains("shepherd-guix-daemon.scm"));
+        assert!(evidence.detail.contains("GUIX_P2P_SUBSTITUTE_ROUTING"));
     }
 
     #[test]

@@ -9,12 +9,13 @@ It is intentionally short and points to deeper docs only when needed.
 
 - The daemon keeps a warm libp2p swarm, a NAR cache, peer reputation, provider
   discovery, and the dashboard.
-- Guix substitute calls reach the daemon through the Guix substitute extension
-  and Unix socket relay path.
+- Guix substitute calls reach the extension first. Default routing asks the
+  built-in Guix substituter first, then uses the daemon socket as P2P-only
+  fallback for misses.
 - NAR bytes from peers are verified against trusted Guix narinfo hashes before
   import. Peers are never trusted for integrity.
-- HTTP substitutes remain available according to policy. The known-tester
-  default is `http-first` while the public P2P network is sparse.
+- Guix owns HTTP NAR downloads in normal integration. Explicit p2p-first
+  routing is for proof runs while the public P2P network is sparse.
 
 ## Most Useful Files
 

@@ -132,6 +132,7 @@
        '("GUIX="
          "GUIX_EXTENSIONS_PATH="
          "GUIX_P2P_SOCKET="
+         "GUIX_P2P_SUBSTITUTE_ROUTING="
          "REAL_GUIX=")))
 
 (define (guix-p2p-environment-value name environment)
@@ -146,7 +147,8 @@
                  #:key
                  (extensions "/run/current-system/profile/share/guix/extensions")
                  (guix-p2p-bin "/run/current-system/profile/bin/guix-p2p")
-                 (socket %guix-p2p-default-socket))
+                 (socket %guix-p2p-default-socket)
+                 (substitute-routing "builtin-first"))
   "Return CONFIG with guix-daemon resolving the guix-p2p substitute extension."
   ;; Accepted for backward-compatible system configs; the Scheme extension no
   ;; longer execs a helper binary.
@@ -163,6 +165,8 @@
      (environment
       (cons* (string-append "GUIX_EXTENSIONS_PATH=" extensions-path)
              (string-append "GUIX_P2P_SOCKET=" socket)
+             (string-append "GUIX_P2P_SUBSTITUTE_ROUTING="
+                            substitute-routing)
              (remove guix-p2p-integration-environment?
                      environment))))))
 

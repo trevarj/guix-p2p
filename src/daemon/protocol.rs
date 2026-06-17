@@ -38,7 +38,8 @@ pub enum ReplyWriter {
     /// Collect all output into a buffer (no channel prefix, for direct use).
     Buffer(Vec<u8>),
     /// Collect output with channel prefix framing for socket relay.
-    /// fd4: lines -> fd 4, out: lines -> stdout, nar: lines -> destination NAR file.
+    /// fd4: lines -> fd 4, fd4-empty: -> empty fd 4 line, out: lines -> stdout,
+    /// nar: lines -> destination NAR file.
     Socket { buf: Vec<u8> },
 }
 
@@ -61,6 +62,9 @@ impl ReplyWriter {
         match self {
             ReplyWriter::Fd4 => write_fd(4, line),
             ReplyWriter::Buffer(buf) => write_buffered_line(buf, line.as_bytes(), None),
+            ReplyWriter::Socket { buf } if line.is_empty() => {
+                write_buffered_line(buf, b"", Some(b"fd4-empty:"))
+            },
             ReplyWriter::Socket { buf } => write_buffered_line(buf, line.as_bytes(), Some(b"fd4:")),
         }
     }
@@ -114,7 +118,10 @@ impl ReplyWriter {
     }
 
     pub fn write_end(&mut self) -> io::Result<()> {
-        self.write_line("")
+        match self {
+            ReplyWriter::Socket { buf } => write_buffered_line(buf, b"", Some(b"fd4:")),
+            _ => self.write_line(""),
+        }
     }
 
     pub async fn flush_socket(
@@ -230,6 +237,24 @@ mod tests {
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             "fd4:have-response\nout:@ download-progress /gnu/store/abc 10 5\nfd4:\n"
+        );
+    }
+
+    #[test]
+    fn socket_writer_distinguishes_empty_fd4_lines_from_query_end() {
+        let mut reply = ReplyWriter::socket();
+
+        reply.write_line("/gnu/store/abc-foo").unwrap();
+        reply.write_line("").unwrap();
+        reply.write_line("0").unwrap();
+        reply.write_end().unwrap();
+
+        let ReplyWriter::Socket { buf } = reply else {
+            panic!("expected socket reply writer");
+        };
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "fd4:/gnu/store/abc-foo\nfd4-empty:\nfd4:0\nfd4:\n"
         );
     }
 

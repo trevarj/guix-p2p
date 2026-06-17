@@ -19,18 +19,21 @@ the extension path for normal Guix System usage.
 - The package installs a Guile extension module `(guix extensions substitute)` exporting
   `guix-substitute`.
 - The extension handles only `--query` and `--substitute`:
-  - if the `guix-p2p` relay socket exists, connect to it directly from Scheme,
-    forward stdin protocol lines, write reply lines to fd 4, and restore
-    daemon `nar:` chunks to the substitute destination;
-  - otherwise, delegate to built-in `(guix scripts substitute)`.
+  - default `builtin-first` routing asks built-in `(guix scripts substitute)`
+    first, then asks guix-p2p only for query/substitute misses;
+  - fallback socket calls use `mode: query-p2p-only` or
+    `mode: substitute-p2p-only`, so Guix owns HTTP NAR downloads by default;
+  - `p2p-first` and `p2p-only` routing can be selected with
+    `GUIX_P2P_SUBSTITUTE_ROUTING` for proof runs and debugging.
 - The package installs the extension under
   `share/guix/extensions/substitute.scm` and exposes `$GUIX_EXTENSIONS_PATH` as
   a native search path.
 - `(guix-p2p services)` exports `guix-p2p-enable-guix-daemon-extension`, which
   prepends the package extension directory to any existing
-  `GUIX_EXTENSIONS_PATH` and sets `GUIX_P2P_SOCKET`. It still accepts the
-  legacy `#:guix-p2p-bin` keyword so existing system configs keep evaluating,
-  but the extension no longer uses `GUIX_P2P_BIN`.
+  `GUIX_EXTENSIONS_PATH`, sets `GUIX_P2P_SOCKET`, and sets
+  `GUIX_P2P_SUBSTITUTE_ROUTING` to `builtin-first` unless overridden. It still
+  accepts the legacy `#:guix-p2p-bin` keyword so existing system configs keep
+  evaluating, but the extension no longer uses `GUIX_P2P_BIN`.
 - `(guix-p2p services)` still exports `guix-p2p-enable-guix-daemon-wrapper` for
   compatibility with older setups.
 
@@ -81,8 +84,9 @@ patch would add a daemon-owned hook:
 ## Assumptions
 
 - Recommended flow uses the extension, not the `GUIX` wrapper.
-- `guix-p2p` remains responsible for p2p-vs-http policy; no HTTP/P2P racing is
-  introduced.
+- Default routing preserves built-in Guix HTTP substitute behavior. guix-p2p
+  remains responsible for p2p-vs-http policy only in explicit p2p-first or
+  standalone relay modes.
 - Default socket stays `/var/cache/guix-p2p/guix-p2p.sock` for system service
   use.
 - Rust relay mode, wrapper binary, and wrapper script stay temporarily for

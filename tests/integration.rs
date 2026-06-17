@@ -212,9 +212,19 @@ mod substitute_extension_contract {
         assert!(EXTENSION.contains("(define (open-relay-socket"));
         assert!(EXTENSION.contains("mode: query"));
         assert!(EXTENSION.contains("mode: substitute"));
+        assert!(EXTENSION.contains("mode: query-p2p-only"));
+        assert!(EXTENSION.contains("mode: substitute-p2p-only"));
         assert!(EXTENSION.contains("fdopen 4"));
         assert!(EXTENSION.contains("base64-decode"));
         assert!(EXTENSION.contains("put-bytevector"));
+    }
+
+    #[test]
+    fn extension_defaults_to_builtin_first_routing() {
+        assert!(EXTENSION.contains("(define %default-routing"));
+        assert!(EXTENSION.contains("\"builtin-first\""));
+        assert!(EXTENSION.contains("GUIX_P2P_SUBSTITUTE_ROUTING"));
+        assert!(EXTENSION.contains("call-builtin-substitute"));
     }
 
     #[test]
@@ -321,6 +331,7 @@ mod scheme_extension {
                 "(use-modules (guix extensions substitute)) (guix-substitute \"--substitute\")",
             ])
             .env("GUIX_P2P_SOCKET", &socket_path)
+            .env("GUIX_P2P_SUBSTITUTE_ROUTING", "p2p-first")
             .env("GUIX_P2P_BIN", "/definitely/missing/guix-p2p")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -428,6 +439,7 @@ mod scheme_extension {
                 "(use-modules (guix extensions substitute)) (guix-substitute \"--substitute\")",
             ])
             .env("GUIX_P2P_SOCKET", &socket_path)
+            .env("GUIX_P2P_SUBSTITUTE_ROUTING", "p2p-first")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -534,6 +546,7 @@ mod scheme_extension {
                 "(use-modules (guix extensions substitute)) (guix-substitute \"--query\")",
             ])
             .env("GUIX_P2P_SOCKET", &socket_path)
+            .env("GUIX_P2P_SUBSTITUTE_ROUTING", "p2p-first")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -583,6 +596,96 @@ mod scheme_extension {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+
+    #[test]
+    fn substitute_extension_query_preserves_empty_info_fields() {
+        if !extension_loads() {
+            eprintln!("skipping Scheme extension test because guile/guix modules are unavailable");
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let socket_path = temp.path().join("guix-p2p.sock");
+        let fd4_path = temp.path().join("fd4");
+        let store_path = "/gnu/store/abc-test";
+
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let daemon = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            assert_eq!(line.trim_end(), "mode: query");
+
+            line.clear();
+            reader.read_line(&mut line).unwrap();
+            assert_eq!(line.trim_end(), format!("info {store_path}"));
+
+            writeln!(stream, "fd4:{store_path}").unwrap();
+            writeln!(stream, "fd4-empty:").unwrap();
+            writeln!(stream, "fd4:0").unwrap();
+            writeln!(stream, "fd4:123").unwrap();
+            writeln!(stream, "fd4:456").unwrap();
+            writeln!(stream, "fd4:").unwrap();
+
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).unwrap() == 0 {
+                    break;
+                }
+            }
+        });
+
+        let fd4_file = File::create(&fd4_path).unwrap();
+        let fd4 = std::os::fd::AsRawFd::as_raw_fd(&fd4_file);
+        let mut command = Command::new("guile");
+        command
+            .args([
+                "-L",
+                ".",
+                "-c",
+                "(use-modules (guix extensions substitute)) (guix-substitute \"--query\")",
+            ])
+            .env("GUIX_P2P_SOCKET", &socket_path)
+            .env("GUIX_P2P_SUBSTITUTE_ROUTING", "p2p-first")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        // SAFETY: the child process only duplicates an already-open temp file
+        // descriptor onto fd 4 before exec; no shared Rust state is touched in
+        // the pre-exec closure.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::dup2(fd4, 4) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::fcntl(4, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().unwrap();
+
+        writeln!(child.stdin.as_mut().unwrap(), "info {store_path}").unwrap();
+        drop(child.stdin.take());
+
+        let output = child.wait_with_output().unwrap();
+        daemon.join().unwrap();
+
+        assert!(
+            output.status.success(),
+            "guile failed\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let mut fd4_output = String::new();
+        drop(fd4_file);
+        File::open(&fd4_path).unwrap().read_to_string(&mut fd4_output).unwrap();
+        assert_eq!(fd4_output, format!("{store_path}\n\n0\n123\n456\n\n"));
+    }
 }
 
 mod service_environment_contract {
@@ -598,6 +701,15 @@ mod service_environment_contract {
                 "{path} must resolve Guix tools from /run/current-system/profile/bin before falling back to PATH"
             );
         }
+    }
+
+    #[test]
+    fn guix_service_helper_exports_substitute_routing() {
+        let source = std::fs::read_to_string("channel/guix-p2p/services.scm").unwrap();
+
+        assert!(source.contains("GUIX_P2P_SUBSTITUTE_ROUTING="));
+        assert!(source.contains("(substitute-routing \"builtin-first\")"));
+        assert!(source.contains("\"GUIX_P2P_SUBSTITUTE_ROUTING=\""));
     }
 }
 

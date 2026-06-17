@@ -9,6 +9,7 @@ use crate::nar_restore::write_nar_to_destination;
 ///
 /// The socket protocol uses channel prefix framing:
 ///   `fd4:<line>` → write to fd 4 (structured replies)
+///   `fd4-empty:` → write an empty structured line to fd 4
 ///   `out:<line>` → write to fd 1 (trace messages like @ download-started)
 ///
 /// The relay sends a mode header first so the daemon knows which
@@ -76,7 +77,17 @@ pub async fn forward(socket_path: &str, mode: RelayMode) -> anyhow::Result<()> {
             break;
         }
 
-        if let Some(data) = line.strip_prefix("fd4:") {
+        if line == "fd4-empty:\n" || line == "fd4-empty:\r\n" {
+            unsafe {
+                let written = libc::write(4, b"\n".as_ptr() as *const libc::c_void, 1);
+                if written < 0 {
+                    return Err(anyhow::anyhow!(
+                        "fd 4 write failed: {}",
+                        std::io::Error::last_os_error()
+                    ));
+                }
+            }
+        } else if let Some(data) = line.strip_prefix("fd4:") {
             if matches!(mode, RelayMode::Substitute) && is_substitute_terminal_reply(data) {
                 saw_substitute_terminal_reply = true;
             }

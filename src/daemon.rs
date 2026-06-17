@@ -2042,7 +2042,8 @@ async fn handle_socket_connection(
     let mut reader = tokio::io::BufReader::new(socket_read);
     let mut notify_rx = notify_rx;
 
-    // Read mode header: "mode: query" or "mode: substitute"
+    // Read mode header. The extension uses the p2p-only variants after the
+    // built-in Guix substituter has already reported a miss.
     let mut mode_line = String::new();
     let n = reader.read_line(&mut mode_line).await?;
     if n == 0 {
@@ -2052,8 +2053,18 @@ async fn handle_socket_connection(
 
     tracing::info!("Relay mode: {}", mode);
 
+    let force_p2p_only = matches!(mode, "mode: query-p2p-only" | "mode: substitute-p2p-only");
+    let mut fallback_config;
+    let request_config = if force_p2p_only {
+        fallback_config = config.clone();
+        fallback_config.substitute_policy = SubstitutePolicy::P2pOnly;
+        &fallback_config
+    } else {
+        config
+    };
+
     match mode {
-        "mode: query" => {
+        "mode: query" | "mode: query-p2p-only" => {
             let mut line = String::new();
             loop {
                 line.clear();
@@ -2072,7 +2083,7 @@ async fn handle_socket_connection(
                             query_tx,
                             &mut reply,
                             &paths,
-                            config,
+                            request_config,
                             &mut notify_rx,
                             narinfo_cache,
                             client,
@@ -2082,7 +2093,7 @@ async fn handle_socket_connection(
                     },
                     DaemonCommand::Info(paths) => {
                         handle_info(
-                            config,
+                            request_config,
                             query_tx,
                             &mut notify_rx,
                             narinfo_cache,
@@ -2104,7 +2115,7 @@ async fn handle_socket_connection(
             }
             Ok(())
         },
-        "mode: substitute" => {
+        "mode: substitute" | "mode: substitute-p2p-only" => {
             let mut line = String::new();
             loop {
                 line.clear();
@@ -2119,7 +2130,7 @@ async fn handle_socket_connection(
                     let mut reply = ReplyWriter::socket();
 
                     try_swarm_substitute(
-                        config,
+                        request_config,
                         cache,
                         cmd_tx,
                         &mut reply,

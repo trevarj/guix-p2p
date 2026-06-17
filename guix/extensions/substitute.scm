@@ -6,6 +6,7 @@
   #:use-module (ice-9 match)
   #:use-module (ice-9 rdelim)
   #:use-module (rnrs io ports)
+  #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-11)
   #:use-module (srfi srfi-13)
   #:export (guix-substitute))
@@ -13,8 +14,14 @@
 (define %default-socket
   "/var/cache/guix-p2p/guix-p2p.sock")
 
+(define %default-routing
+  "builtin-first")
+
 (define (getenv/default name default)
   (or (getenv name) default))
+
+(define (substitute-routing)
+  (getenv/default "GUIX_P2P_SUBSTITUTE_ROUTING" %default-routing))
 
 (define (socket? path)
   (false-if-exception
@@ -123,9 +130,17 @@
          (error "daemon socket closed before finishing nar" nar-destination))
        (when (< terminal-replies expected-terminal-replies)
          (error "daemon socket closed before substitute returned a terminal reply"))
-       #t)
-      (line
-       (cond
+      #t)
+     (line
+      (cond
+        ((string=? line "fd4-empty:")
+         (write-reply-line reply-port "")
+         (loop destinations
+               expected-terminal-replies
+               nar-destination
+               nar-port
+               nar-temp-path
+               terminal-replies))
         ((string-prefix? "fd4:" line)
          (let ((data (string-drop line 4)))
            (write-reply-line reply-port data)
@@ -182,6 +197,9 @@
        (error "daemon socket closed before query reply completed"))
       (line
        (cond
+        ((string=? line "fd4-empty:")
+         (write-reply-line reply-port "")
+         (loop))
         ((string-prefix? "fd4:" line)
          (let ((data (string-drop line 4)))
            (write-reply-line reply-port data)
@@ -196,8 +214,8 @@
          (unless (string-null? line)
            (loop))))))))
 
-(define (relay-query-through-socket socket-port reply-port)
-  (write-line socket-port "mode: query")
+(define (relay-query-through-socket socket-port reply-port mode-line)
+  (write-line socket-port mode-line)
   (force-output socket-port)
   (let loop ()
     (match (read-line)
@@ -212,8 +230,8 @@
        (handle-query-reply socket-port reply-port)
        (loop)))))
 
-(define (relay-substitute-through-socket socket-port reply-port)
-  (write-line socket-port "mode: substitute")
+(define (relay-substitute-through-socket socket-port reply-port mode-line)
+  (write-line socket-port mode-line)
   (force-output socket-port)
   (let loop ()
     (match (read-line)
@@ -232,30 +250,209 @@
          (handle-relay-output socket-port reply-port (list destination)))
        (loop)))))
 
-(define (relay-through-socket args socket-path)
+(define (relay-through-socket args socket-path force-p2p-only?)
   (match args
     (("--query" _ ...)
      (call-with-relay-socket
       socket-path
       (lambda (socket-port)
         (let ((reply-port (reply-port)))
-          (relay-query-through-socket socket-port reply-port)
+          (relay-query-through-socket
+           socket-port
+           reply-port
+           (if force-p2p-only? "mode: query-p2p-only" "mode: query"))
           #t))))
     (("--substitute" _ ...)
      (call-with-relay-socket
       socket-path
       (lambda (socket-port)
         (let ((reply-port (reply-port)))
-          (relay-substitute-through-socket socket-port reply-port)
+          (relay-substitute-through-socket
+           socket-port
+           reply-port
+           (if force-p2p-only? "mode: substitute-p2p-only" "mode: substitute"))
           #t))))
+    (_ #f)))
+
+(define (string-lines text)
+  (let ((port (open-input-string text)))
+    (let loop ((lines '()))
+      (match (read-line port)
+        ((? eof-object?) (reverse lines))
+        (line (loop (cons line lines)))))))
+
+(define (non-empty-lines text)
+  (filter (lambda (line) (not (string-null? line)))
+          (string-lines text)))
+
+(define (drop-final-empty-line lines)
+  (if (and (pair? lines) (string-null? (last lines)))
+      (drop-right lines 1)
+      lines))
+
+(define (query-data-lines text)
+  ;; Query replies end with a blank line, but "info" records may contain an
+  ;; empty deriver field. Drop only the final terminator.
+  (drop-final-empty-line (string-lines text)))
+
+(define (call-builtin-substitute args input)
+  (let ((output (open-output-string)))
+    ;; Capture the built-in substituter reply instead of writing it to fd 4.
+    (parameterize ((builtin:%reply-file-descriptor #f)
+                   (current-input-port (open-input-string input))
+                   (current-output-port output))
+      (apply builtin:guix-substitute args))
+    (get-output-string output)))
+
+(define (query-command line)
+  (match (string-tokenize line)
+    ((command _ ...) command)
+    (_ #f)))
+
+(define (query-paths line)
+  (match (string-tokenize line)
+    ((_ paths ...) paths)
+    (_ '())))
+
+(define (missing-paths requested present)
+  (filter (lambda (path) (not (member path present))) requested))
+
+(define (info-present-paths lines)
+  (let loop ((remaining lines)
+             (paths '()))
+    (match remaining
+      (() (reverse paths))
+      ((path deriver ref-count rest ...)
+       (let* ((count (or (string->number ref-count) 0))
+              (after-refs (drop rest count)))
+         (match after-refs
+           ((_download-size _nar-size tail ...)
+            (loop tail (cons path paths)))
+           (_
+            (reverse (cons path paths)))))))))
+
+(define (socket-query-lines socket-path mode-line line)
+  (call-with-relay-socket
+   socket-path
+   (lambda (socket-port)
+     (write-line socket-port mode-line)
+     (write-line socket-port line)
+     (force-output socket-port)
+     (shutdown socket-port 1)
+     (let loop ((lines '()))
+       (match (read-line socket-port)
+         ((? eof-object?) (reverse lines))
+         (socket-line
+          (cond
+           ((string=? socket-line "fd4-empty:")
+            (loop (cons "" lines)))
+           ((string-prefix? "fd4:" socket-line)
+            (let ((data (string-drop socket-line 4)))
+              (if (string-null? data)
+                  (reverse lines)
+                  (loop (cons data lines)))))
+           ((string-prefix? "out:" socket-line)
+            (write-trace-line (string-drop socket-line 4))
+            (loop lines))
+           (else
+            (if (string-null? socket-line)
+                (reverse lines)
+                (loop (cons socket-line lines)))))))))))
+
+(define (write-query-lines reply-port lines)
+  (for-each (lambda (line) (write-reply-line reply-port line)) lines))
+
+(define (write-query-end reply-port)
+  (write-reply-line reply-port ""))
+
+(define (handle-builtin-first-query-line socket-path reply-port line)
+  (let* ((command (query-command line))
+         (requested (query-paths line))
+         (builtin-lines
+          (query-data-lines
+           (call-builtin-substitute '("--query") (string-append line "\n"))))
+         (present
+          (match command
+            ("have" builtin-lines)
+            ("info" (info-present-paths builtin-lines))
+            (_ requested)))
+         (missing (missing-paths requested present))
+         (p2p-lines
+          (if (and socket-path
+                   (not (null? missing))
+                   (member command '("have" "info")))
+              (socket-query-lines
+               socket-path
+               "mode: query-p2p-only"
+               (string-append command " " (string-join missing " ")))
+              '())))
+    (write-query-lines reply-port builtin-lines)
+    (write-query-lines reply-port p2p-lines)
+    (write-query-end reply-port)))
+
+(define (substitute-terminal-line lines)
+  (find terminal-substitute-reply? lines))
+
+(define (not-found-reply? line)
+  (and line (string=? (string-trim-both line) "not-found")))
+
+(define (relay-single-substitute-through-socket socket-path reply-port line)
+  (call-with-relay-socket
+   socket-path
+   (lambda (socket-port)
+     (write-line socket-port "mode: substitute-p2p-only")
+     (write-line socket-port line)
+     (force-output socket-port)
+     (shutdown socket-port 1)
+     (let ((destination (substitute-destination line)))
+       (unless destination
+         (error "invalid substitute command" line))
+       (handle-relay-output socket-port reply-port (list destination))))))
+
+(define (handle-builtin-first-substitute-line socket-path reply-port line)
+  (let* ((builtin-lines
+          (non-empty-lines
+           (call-builtin-substitute '("--substitute") (string-append line "\n"))))
+         (terminal (substitute-terminal-line builtin-lines)))
+    (if (and socket-path (not-found-reply? terminal))
+        (relay-single-substitute-through-socket socket-path reply-port line)
+        (for-each (lambda (reply) (write-reply-line reply-port reply))
+                  builtin-lines))))
+
+(define (builtin-first-through-socket args socket-path)
+  (match args
+    (("--query" _ ...)
+     (let ((reply-port (reply-port)))
+       (let loop ()
+         (match (read-line)
+           ((? eof-object?) #t)
+           (line
+            (handle-builtin-first-query-line socket-path reply-port line)
+            (loop))))))
+    (("--substitute" _ ...)
+     (let ((reply-port (reply-port)))
+       (let loop ()
+         (match (read-line)
+           ((? eof-object?) #t)
+           (line
+            (handle-builtin-first-substitute-line socket-path reply-port line)
+            (loop))))))
     (_ #f)))
 
 (define (maybe-relay-through-socket args)
   (match args
     (((or "--query" "--substitute") _ ...)
-     (let ((socket (getenv/default "GUIX_P2P_SOCKET" %default-socket)))
-       (and (socket? socket)
-            (relay-through-socket args socket))))
+     (let* ((socket (getenv/default "GUIX_P2P_SOCKET" %default-socket))
+            (socket-path (and (socket? socket) socket)))
+       (match (substitute-routing)
+         ("p2p-first"
+          (and socket-path (relay-through-socket args socket-path #f)))
+         ("p2p-only"
+          (and socket-path (relay-through-socket args socket-path #t)))
+         ("builtin-first"
+          (builtin-first-through-socket args socket-path))
+         (_
+          (builtin-first-through-socket args socket-path)))))
     (_ #f)))
 
 (define (guix-substitute . args)

@@ -107,7 +107,7 @@ You do not need to put this bootstrap peer in a user
 daemon from the service configuration, so service fields are the source of
 truth for daemon networking.
 
-Use service fields for known-tester policy changes:
+Use service fields for known-tester daemon settings:
 
 ```scheme
 (service guix-p2p-service-type
@@ -116,9 +116,17 @@ Use service fields for known-tester policy changes:
           (policy "http-first")))
 ```
 
-Use `http-first` for everyday testing. Use `p2p-first` only on the fetching
-node when the test goal is to prove that a seeded package can transfer from a
-peer before HTTP fallback.
+Default Guix integration uses built-in substitutes first and asks guix-p2p only
+after built-in Guix reports a miss. For a proof run where the fetching node
+should try guix-p2p first, set the extension routing override in the
+`guix-service-type` modification:
+
+```scheme
+(guix-service-type config =>
+  (guix-p2p-enable-guix-daemon-extension
+   config
+   #:substitute-routing "p2p-first"))
+```
 
 ## 3. Reconfigure And Restart
 
@@ -201,18 +209,20 @@ observes trusted narinfo/catalog metadata that identifies the store path.
 ## 6. Fetch From Another Node
 
 On the fetching node, choose a package that is seeded by the other node and not
-already in the local store. Temporarily set `(policy "p2p-first")` in the
-fetching node service config when you want to force a P2P attempt before HTTP.
-Restart `guix-p2p` and `guix-daemon` after changing the policy. For a small
-test package:
+already in the local store. Temporarily set
+`#:substitute-routing "p2p-first"` on
+`guix-p2p-enable-guix-daemon-extension` when you want to force a P2P attempt
+before built-in Guix HTTP substitutes. Restart `guix-p2p` and `guix-daemon`
+after changing the routing. For a small test package:
 
 ```sh
 guix build sl
 ```
 
-A normal `http-first` fetch can complete from HTTP without touching P2P. A
-successful P2P-preferred fetch prints a P2P attempt before any fallback. When
-connected-provider fallback is used, the Guix output includes:
+A normal `builtin-first` fetch can complete from built-in Guix substitutes
+without touching P2P. A successful P2P-preferred fetch prints a P2P attempt
+before any fallback. When connected-provider fallback is used, the Guix output
+includes:
 
 ```text
 downloading from p2p+connected-fallback://...
