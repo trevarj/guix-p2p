@@ -5901,6 +5901,7 @@ PEER_ID=''
 i=0
 while [ "$i" -lt 120 ]; do
   PEER_ID="$(sed -n 's/.*Peer ID: //p' "$LOG" 2>/dev/null | tail -n 1)"
+  [ -n "$PEER_ID" ] || PEER_ID="$(grep -Eo '12D3Koo[1-9A-HJ-NP-Za-km-z]+' "$LOG" 2>/dev/null | tail -n 1 || true)"
   [ -n "$PEER_ID" ] && break
   if ! kill -0 "$PID" 2>/dev/null; then
     echo "guix-p2p seed daemon exited before reporting a peer id" >&2
@@ -6019,6 +6020,7 @@ PEER_ID=''
 i=0
 while [ "$i" -lt 120 ]; do
   PEER_ID="$(sed -n 's/.*Peer ID: //p' "$LOG" 2>/dev/null | tail -n 1)"
+  [ -n "$PEER_ID" ] || PEER_ID="$(grep -Eo '12D3Koo[1-9A-HJ-NP-Za-km-z]+' "$LOG" 2>/dev/null | tail -n 1 || true)"
   [ -n "$PEER_ID" ] && break
   if ! kill -0 "$PID" 2>/dev/null; then
     echo "guix-p2p seed daemon exited before reporting a peer id" >&2
@@ -6272,6 +6274,7 @@ PEER_ID=''
 i=0
 while [ "$i" -lt 120 ]; do
   PEER_ID="$(sed -n 's/.*Peer ID: //p' "$LOG" 2>/dev/null | tail -n 1)"
+  [ -n "$PEER_ID" ] || PEER_ID="$(grep -Eo '12D3Koo[1-9A-HJ-NP-Za-km-z]+' "$LOG" 2>/dev/null | tail -n 1 || true)"
   [ -n "$PEER_ID" ] && break
   if ! kill -0 "$PID" 2>/dev/null; then
     echo "guix-p2p bootstrap daemon exited before reporting a peer id" >&2

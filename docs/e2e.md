@@ -119,7 +119,8 @@ modules into the fetch VM and verifies that `(guix-p2p services)` produces the
 daemon environment. The command still installs `guix-p2p-wrapper` as a
 compatibility fallback. The VM launcher for copied Rust binaries uses the VM
 profile's dynamic loader so host-built Guix interpreter paths do not have to
-exist inside the guest.
+exist inside the guest. Peer id discovery accepts both the legacy `Peer ID:`
+line and the structured tracing `peer_id` field emitted by current binaries.
 Daemon readiness checks wait long enough for slow software-emulated runners and
 print daemon log tails when a VM daemon exits or never reports its peer ID.
 
