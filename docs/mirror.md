@@ -171,6 +171,23 @@ runners.
 The workflow includes `nss-certs` so `guix shell` exposes a CA bundle for Cargo
 to verify crates.io TLS certificates.
 
+## GitHub Channel Proof
+
+The manual channel-proof workflow is `.github/workflows/channel-proof.yml`.
+
+To run it:
+
+- Open the GitHub mirror.
+- Go to `Actions > Channel Proof`.
+- Click `Run workflow`.
+- Choose `package`, `policy`, and `seed-nodes`.
+- Download the `guix-p2p-channel-proof-*` artifact from the completed run.
+
+The workflow builds the release binary and base Guix System qcow2 image, then
+runs `vm channel-proof` in the hosted runner. It uploads VM logs, node metadata,
+and node environment files as artifacts. This is the preferred way to run the
+strict private-store proof when local CPU or memory pressure is a concern.
+
 The separate GitHub Pages workflow deploys the documentation site on docs
 pushes and after successful benchmark runs. Before the first deploy, set the
 GitHub mirror's Pages source to `GitHub Actions` under `Settings > Pages`.

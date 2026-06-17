@@ -39,6 +39,10 @@ Run the channel proof:
 cargo run -p guix-p2p-e2e -- vm channel-proof
 ```
 
+To offload the same proof to GitHub Actions, manually dispatch the
+`Channel Proof` workflow. It builds the release binaries and base VM image,
+runs `vm channel-proof`, then uploads VM logs and node metadata as artifacts.
+
 `vm channel-proof` is the deployment proof. It runs the documented
 Bootstrap/Alice/Charles/Bob sequence: wait for SSH, push the release binaries,
 copy the Guix channel modules, start the bootstrap node, seed Alice and

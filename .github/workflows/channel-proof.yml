@@ -1,0 +1,143 @@
+name: Channel Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Guix package to seed and fetch
+        required: true
+        default: hello
+        type: string
+      policy:
+        description: Fetch node substitute policy
+        required: true
+        default: p2p-only
+        type: choice
+        options:
+          - p2p-only
+          - p2p-first
+          - http-first
+      seed-nodes:
+        description: Comma-separated VM seed node names
+        required: true
+        default: Alice,Charles
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: channel-proof-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  channel-proof:
+    name: VM channel proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      # Grouped by trust source: third-party preferred mirrors first for
+      # availability, official Guix servers next, then additional mirrors.
+      CHANNEL_PROOF_GUIX_SUBSTITUTE_URLS: >-
+        https://ci.guix.trop.in
+        https://cache-cdn.guix.moe
+        https://cache-fi.guix.moe
+        https://guix.bordeaux.inria.fr
+        https://nonguix-proxy.ditigal.xyz
+        https://ci.guix.gnu.org
+        https://bordeaux.guix.gnu.org
+        https://cache-sg.guix.moe
+        https://mirror.yandex.ru/mirrors/guix
+        https://substitutes.nonguix.org
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Guix
+        uses: PromyLOPh/guix-install-action@v1
+        with:
+          pullAfterInstall: false
+
+      - name: Configure Guix daemon substitutes
+        run: |
+          guix_daemon="$(command -v guix-daemon)"
+          test -x "$guix_daemon"
+          sudo mkdir -p /etc/systemd/system/guix-daemon.service.d
+          {
+            echo "[Service]"
+            echo "ExecStart="
+            printf 'ExecStart=%s --build-users-group=guixbuild "--substitute-urls=%s"\n' "$guix_daemon" "$CHANNEL_PROOF_GUIX_SUBSTITUTE_URLS"
+          } | sudo tee /etc/systemd/system/guix-daemon.service.d/override.conf
+          sudo systemctl daemon-reload
+          sudo systemctl restart guix-daemon.service
+          systemctl --no-pager --full status guix-daemon.service
+
+      - name: Free hosted runner disk space
+        run: |
+          df -h
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/julia* \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/local/share/chromium \
+            /usr/share/dotnet \
+            /usr/share/swift
+          df -h
+
+      - name: Check proof environment
+        run: |
+          guix_cmd="$(command -v guix)"
+          sudo "$guix_cmd" shell -m manifest-ci.scm -- sh -c '
+            libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
+            test -r "$libgcc_dir/libgcc_s.so.1"
+            export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            cargo --version
+            rustc --version
+            qemu-system-x86_64 --version
+            ssh -V
+            cargo fetch --locked
+          '
+
+      - name: Run VM channel proof
+        run: |
+          cleanup() {
+            guix_cmd="$(command -v guix)"
+            sudo "$guix_cmd" shell -m manifest-ci.scm -- \
+              cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e stop --all \
+              2>/dev/null || true
+            sudo chown -R "$(id -u):$(id -g)" target 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          guix_cmd="$(command -v guix)"
+          sudo "$guix_cmd" shell -m manifest-ci.scm -- sh -c '
+            set -eu
+            libgcc_dir="$(cd "$(dirname "$(gcc -print-libgcc-file-name)")/../../.." && pwd)"
+            export LD_LIBRARY_PATH="$libgcc_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            export GUIX_P2P_E2E_SUBSTITUTE_URLS="$4"
+            export GUIX_P2P_E2E_ENABLE_KVM=auto
+            export GUIX_P2P_E2E_VM_MEMORY=4096
+            export GUIX_P2P_E2E_VM_CPUS=2
+
+            df -h
+            cargo build --locked --release
+            cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e image
+            exec cargo run --locked -p guix-p2p-e2e -- vm --state-dir target/guix-p2p-e2e channel-proof \
+              --package "$1" \
+              --policy "$2" \
+              --seed-nodes "$3"
+          ' sh "${{ inputs.package }}" "${{ inputs.policy }}" "${{ inputs.seed-nodes }}" "$CHANNEL_PROOF_GUIX_SUBSTITUTE_URLS"
+
+      - name: Upload proof artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: guix-p2p-channel-proof-${{ github.run_number }}
+          if-no-files-found: ignore
+          path: |
+            target/guix-p2p-e2e/logs/*.log
+            target/guix-p2p-e2e/nodes.json
+            target/guix-p2p-e2e/*.env
