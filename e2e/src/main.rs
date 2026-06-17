@@ -777,6 +777,15 @@ struct VmProofOptions {
     skip_push_binary: bool,
 }
 
+fn extension_routing_for_policy(policy: &str) -> &'static str {
+    match policy {
+        "p2p-only" => "p2p-only",
+        "p2p-first" | "http-first" => "p2p-first",
+        "builtin-first" => "builtin-first",
+        _ => "builtin-first",
+    }
+}
+
 impl BenchmarkPhaseTimings {
     fn with_total(total_ms: u128) -> Self {
         Self { total_ms: Some(total_ms), ..Self::default() }
@@ -1586,12 +1595,15 @@ fn vm_start_daemon_with_integration(
     config: &VmConfig,
     name: &str,
     integration: VmDaemonIntegration,
+    policy: &str,
     max_jobs: u8,
 ) -> anyhow::Result<()> {
     match integration {
-        VmDaemonIntegration::RawExtension => vm_start_raw_extension_daemon(config, name, max_jobs),
+        VmDaemonIntegration::RawExtension => {
+            vm_start_raw_extension_daemon(config, name, policy, max_jobs)
+        },
         VmDaemonIntegration::ChannelService => {
-            vm_start_channel_service_daemon(config, name, max_jobs)
+            vm_start_channel_service_daemon(config, name, policy, max_jobs)
         },
     }
 }
@@ -1599,11 +1611,13 @@ fn vm_start_daemon_with_integration(
 fn vm_start_raw_extension_daemon(
     config: &VmConfig,
     name: &str,
+    policy: &str,
     max_jobs: u8,
 ) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
     push_extension_to_node(config, node)?;
+    let routing = extension_routing_for_policy(policy);
     let remote = r#"
 set -eu
 printf "e2e\n" | sudo -S sh -c '
@@ -1612,6 +1626,7 @@ kill $(cat /tmp/e2e-guix-daemon.pid 2>/dev/null) 2>/dev/null || true
 rm -f /tmp/e2e-guix-daemon.sock /tmp/e2e-guix-daemon.log /tmp/e2e-guix-daemon.pid
 GUIX_EXTENSIONS_PATH="/tmp/guix-p2p-extensions/guix/extensions${GUIX_EXTENSIONS_PATH:+:$GUIX_EXTENSIONS_PATH}" \
 GUIX_P2P_SOCKET=/tmp/guix-p2p-b/guix-p2p.sock \
+GUIX_P2P_SUBSTITUTE_ROUTING=__ROUTING__ \
 GUIX_P2P_BIN=/tmp/guix-p2p-relay-should-not-run \
 /run/current-system/profile/bin/guix-daemon \
   --disable-chroot \
@@ -1633,6 +1648,7 @@ while [ ! -S /tmp/e2e-guix-daemon.sock ]; do
 done
 echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
 "#
+    .replace("__ROUTING__", routing)
     .replace("__MAX_JOBS__", &max_jobs.to_string());
     let output = ssh_run(config, node, &remote)?;
     print!("{output}");
@@ -1642,12 +1658,14 @@ echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
 fn vm_start_channel_service_daemon(
     config: &VmConfig,
     name: &str,
+    policy: &str,
     max_jobs: u8,
 ) -> anyhow::Result<()> {
     let registry = VmRegistry::load(config)?;
     let node = registry.node(name)?;
     push_extension_to_node(config, node)?;
     push_channel_to_node(config, node)?;
+    let routing = extension_routing_for_policy(policy);
     let remote = r#"
 set -eu
 cat > /tmp/guix-p2p-channel-proof-env.scm <<'EOF'
@@ -1660,7 +1678,8 @@ cat > /tmp/guix-p2p-channel-proof-env.scm <<'EOF'
    (guix-configuration)
    #:extensions "/tmp/guix-p2p-extensions/guix/extensions"
    #:guix-p2p-bin "/tmp/guix-p2p"
-   #:socket "/tmp/guix-p2p-b/guix-p2p.sock"))
+   #:socket "/tmp/guix-p2p-b/guix-p2p.sock"
+   #:substitute-routing "__ROUTING__"))
 
 (format #t "CHANNEL_SERVICE=~a~%" (service-type-name guix-p2p-service-type))
 (for-each (lambda (entry)
@@ -1674,6 +1693,8 @@ grep -q '^ENV GUIX_EXTENSIONS_PATH=/tmp/guix-p2p-extensions/guix/extensions' \
   /tmp/guix-p2p-channel-proof-env.out
 grep -qx 'ENV GUIX_P2P_SOCKET=/tmp/guix-p2p-b/guix-p2p.sock' \
   /tmp/guix-p2p-channel-proof-env.out
+grep -qx 'ENV GUIX_P2P_SUBSTITUTE_ROUTING=__ROUTING__' \
+  /tmp/guix-p2p-channel-proof-env.out
 sed -n 's/^ENV /export /p' /tmp/guix-p2p-channel-proof-env.out \
   > /tmp/guix-p2p-channel-proof-env.sh
 echo CHANNEL_PROOF_MODULE_IMPORTED
@@ -1686,6 +1707,7 @@ rm -f /tmp/e2e-guix-daemon.sock /tmp/e2e-guix-daemon.log /tmp/e2e-guix-daemon.pi
 env \
   GUIX_EXTENSIONS_PATH="$GUIX_EXTENSIONS_PATH" \
   GUIX_P2P_SOCKET="$GUIX_P2P_SOCKET" \
+  GUIX_P2P_SUBSTITUTE_ROUTING="$GUIX_P2P_SUBSTITUTE_ROUTING" \
     /run/current-system/profile/bin/guix-daemon \
     --disable-chroot \
     --build-users-group=guixbuild \
@@ -1707,6 +1729,7 @@ done
 echo CHANNEL_PROOF_DAEMON_ENV_READY
 echo GUIX_DAEMON_SOCKET=/tmp/e2e-guix-daemon.sock
 "#
+    .replace("__ROUTING__", routing)
     .replace("__MAX_JOBS__", &max_jobs.to_string());
     let output = ssh_run(config, node, &remote)?;
     print!("{output}");
@@ -1924,7 +1947,7 @@ fn vm_fetch_timed_with_options(
 
     let phase_start = std::time::Instant::now();
     let max_jobs = if is_system_build { 1 } else { 0 };
-    vm_start_daemon_with_integration(config, name, integration, max_jobs)?;
+    vm_start_daemon_with_integration(config, name, integration, policy, max_jobs)?;
     let daemon_start_ms = phase_start.elapsed().as_millis();
 
     let phase_start = std::time::Instant::now();
@@ -2203,7 +2226,13 @@ echo HTTP_IMPORTED_OUTPUT_IN_NODE_STORE
 
     let daemon_start_ms = if is_system_build {
         let phase_start = std::time::Instant::now();
-        vm_start_daemon_with_integration(config, name, VmDaemonIntegration::RawExtension, 1)?;
+        vm_start_daemon_with_integration(
+            config,
+            name,
+            VmDaemonIntegration::RawExtension,
+            "http-first",
+            1,
+        )?;
         Some(phase_start.elapsed().as_millis())
     } else {
         None
@@ -3306,7 +3335,12 @@ fn prepare_harness_tools(guix_p2p_bin: Option<&std::path::Path>) -> anyhow::Resu
         anyhow::bail!("guix-p2p binary not found at {}", guix_p2p.display());
     }
     let guix_p2p_extension = ensure_guix_p2p_extension()?;
-    let (guix_p2p_library_path, guix_p2p_runtime_roots) = runtime_libraries(&guix_p2p)?;
+    let (guix_p2p_library_path, mut guix_p2p_runtime_roots) = runtime_libraries(&guix_p2p)?;
+    if let Some(root) = guix_store_item(&guix_p2p.display().to_string()) {
+        guix_p2p_runtime_roots.push(root);
+        guix_p2p_runtime_roots.sort();
+        guix_p2p_runtime_roots.dedup();
+    }
     let guix_script_guile = guix_script_interpreter(&real_guix);
     Ok(HarnessTools {
         guix,
@@ -3567,6 +3601,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
     })?;
 
     install_extension_file(&spec.tools.guix_p2p_extension, &extension_path)?;
+    let extension_routing = extension_routing_for_policy(spec.node_b_policy);
 
     let mut processes = ProcessSet::default();
     let mut bootstrap_peers = Vec::new();
@@ -3606,7 +3641,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
             spec.tools,
             spec.base,
             spec.vm_direct,
-            &["guix", "guile", "libgcrypt"],
+            &["guix", "guile", "libgcrypt", "gcc-toolchain"],
             &p2p_runtime_exposes,
         );
         seed_cmd
@@ -3677,7 +3712,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         spec.tools,
         spec.base,
         spec.vm_direct,
-        &["libgcrypt"],
+        &["libgcrypt", "gcc-toolchain"],
         &spec.tools.guix_p2p_runtime_roots,
     );
     node_b_cmd
@@ -3744,7 +3779,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
             .arg(format!(
                 "export HOME={}; export GUIX={}; export GUIX_STATE_DIRECTORY={}; export \
                  GUIX_CONFIGURATION_DIRECTORY={}; export GUIX_EXTENSIONS_PATH={}${{GUIX_EXTENSIONS_PATH:+:$GUIX_EXTENSIONS_PATH}}; export \
-                 GUIX_P2P_SOCKET={}; export GUIX_P2P_BIN={}; export \
+                 GUIX_P2P_SOCKET={}; export GUIX_P2P_BIN={}; export GUIX_P2P_SUBSTITUTE_ROUTING={}; export \
                  LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}; exec \"$@\"",
                 shell_quote(&node_b_dir.display().to_string()),
                 shell_quote(&spec.tools.real_guix.display().to_string()),
@@ -3753,6 +3788,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
                 shell_quote(&extension_path.parent().unwrap().display().to_string()),
                 shell_quote(&node_b_socket.display().to_string()),
                 shell_quote(&spec.tools.guix_p2p.display().to_string()),
+                shell_quote(extension_routing),
                 shell_quote(&spec.tools.guix_p2p_library_path)
             ))
             .arg("guix-daemon-wrapper")
@@ -3774,6 +3810,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         store_path: spec.store_path,
         relay_socket: &node_b_socket,
         extension_dir: extension_path.parent().unwrap(),
+        extension_routing,
         log_path: &logs_dir.join("direct-query.log"),
         vm_direct: spec.vm_direct,
         timeout: std::time::Duration::from_secs(60),
@@ -3787,6 +3824,7 @@ async fn run_p2p_build(spec: P2pBuildSpec<'_>) -> anyhow::Result<P2pBuildOutcome
         spec.store_path,
         &node_b_socket,
         extension_path.parent().unwrap(),
+        extension_routing,
         &logs_dir.join("direct-substitute.log"),
         spec.vm_direct,
     )
@@ -4095,6 +4133,7 @@ fn run_direct_substitute_logged(
     store_path: &str,
     relay_socket: &std::path::Path,
     extension_dir: &std::path::Path,
+    extension_routing: &str,
     log_path: &std::path::Path,
     vm_direct: bool,
 ) -> anyhow::Result<u128> {
@@ -4112,7 +4151,7 @@ fn run_direct_substitute_logged(
         tools,
         base,
         vm_direct,
-        &["guix", "libgcrypt"],
+        &["guix", "libgcrypt", "gcc-toolchain"],
         &combined_exposes(&tools.real_guix_closure, &tools.guix_p2p_runtime_roots),
     );
     command
@@ -4120,10 +4159,12 @@ fn run_direct_substitute_logged(
         .arg("-c")
         .arg(format!(
             "export GUIX_EXTENSIONS_PATH={}; export GUIX_P2P_SOCKET={}; export GUIX_P2P_BIN={}; \
-             export LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{}; exec \"$@\"",
+             export GUIX_P2P_SUBSTITUTE_ROUTING={}; export \
+             LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{}; exec \"$@\"",
             shell_quote(&extension_dir.display().to_string()),
             shell_quote(&relay_socket.display().to_string()),
             shell_quote(&tools.guix_p2p.display().to_string()),
+            shell_quote(extension_routing),
             shell_quote(&tools.guix_p2p_library_path)
         ))
         .arg("guix-p2p-direct-substitute")
@@ -4177,6 +4218,7 @@ fn run_direct_query_logged(
     store_path: &str,
     relay_socket: &std::path::Path,
     extension_dir: &std::path::Path,
+    extension_routing: &str,
     log_path: &std::path::Path,
     vm_direct: bool,
 ) -> anyhow::Result<()> {
@@ -4191,7 +4233,7 @@ fn run_direct_query_logged(
         tools,
         base,
         vm_direct,
-        &["libgcrypt"],
+        &["guix", "libgcrypt", "gcc-toolchain"],
         &combined_exposes(&tools.real_guix_closure, &tools.guix_p2p_runtime_roots),
     );
     command
@@ -4199,10 +4241,12 @@ fn run_direct_query_logged(
         .arg("-c")
         .arg(format!(
             "export GUIX_EXTENSIONS_PATH={}; export GUIX_P2P_SOCKET={}; export GUIX_P2P_BIN={}; \
-             export LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{}; exec \"$@\"",
+             export GUIX_P2P_SUBSTITUTE_ROUTING={}; export \
+             LD_LIBRARY_PATH=${{GUIX_ENVIRONMENT:+$GUIX_ENVIRONMENT/lib:}}{}; exec \"$@\"",
             shell_quote(&extension_dir.display().to_string()),
             shell_quote(&relay_socket.display().to_string()),
             shell_quote(&tools.guix_p2p.display().to_string()),
+            shell_quote(extension_routing),
             shell_quote(&tools.guix_p2p_library_path)
         ))
         .arg("guix-p2p-direct-query")
@@ -4255,6 +4299,7 @@ struct DirectQuerySpec<'a> {
     store_path: &'a str,
     relay_socket: &'a std::path::Path,
     extension_dir: &'a std::path::Path,
+    extension_routing: &'a str,
     log_path: &'a std::path::Path,
     vm_direct: bool,
     timeout: std::time::Duration,
@@ -4270,6 +4315,7 @@ fn wait_for_direct_query(spec: DirectQuerySpec<'_>) -> anyhow::Result<()> {
             spec.store_path,
             spec.relay_socket,
             spec.extension_dir,
+            spec.extension_routing,
             spec.log_path,
             spec.vm_direct,
         ) {
@@ -6494,6 +6540,14 @@ mod tests {
         );
 
         assert!(!command.contains("local_narinfo_path"));
+    }
+
+    #[test]
+    fn extension_routing_tracks_e2e_fetch_policy() {
+        assert_eq!(extension_routing_for_policy("p2p-only"), "p2p-only");
+        assert_eq!(extension_routing_for_policy("p2p-first"), "p2p-first");
+        assert_eq!(extension_routing_for_policy("http-first"), "p2p-first");
+        assert_eq!(extension_routing_for_policy("builtin-first"), "builtin-first");
     }
 
     #[test]

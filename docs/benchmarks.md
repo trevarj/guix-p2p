@@ -44,9 +44,15 @@ The harness:
 - starts Node A in a Guix container with the resolved store path seeded
 - starts Node B in a separate Guix container with `substitute_policy = "p2p-only"` and `min_providers = 1`
 - runs the copied substitute extension directly for `--query` and `--substitute`
+  with `GUIX_P2P_SUBSTITUTE_ROUTING=p2p-only`
 - verifies Node B claims the seeded path and restores it from P2P
 - captures logs under `$BASE/logs/`
 - with `--hold`, keeps daemons and dashboards alive after validation until Ctrl-C
+
+When `--guix-p2p-bin` points at a Guix store item, the harness exposes that
+store item plus its runtime libraries inside each disposable container. The P2P
+node containers include `gcc-toolchain` so dynamically linked Rust binaries can
+load `libgcc_s.so.1` reliably.
 
 The container smoke intentionally avoids a full isolated `guix-daemon` build.
 The isolated daemon can spawn `guix substitute --query` and then keep the
